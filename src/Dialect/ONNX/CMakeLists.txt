@@ -12,7 +12,26 @@ add_subdirectory(Transforms)
 
 add_onnx_mlir_dialect(ONNX onnx)
 add_onnx_mlir_dialect_doc(onnx ONNX.td)
+add_onnx_mlir_library(OMONNXDialectCore
+  # Minimal ONNX dialect sources
+  DialectBuilder.cpp
+  OnnxElementsAttrBuilder.cpp
+  ONNXAttributes.cpp
+  ONNXDialect.cpp
+  ONNXOps.cpp
+  ONNXTypes.cpp
 
+  DEPENDS
+  OMHasOnnxSubgraphOpInterfaceIncGen
+  OMONNXIncGen
+  OMResultTypeInferenceOpInterfaceIncGen
+  OMShapeInferenceOpInterfaceIncGen
+
+  LINK_LIBS PUBLIC
+  OMONNXElementsAttr
+  onnx
+  MLIRFuncDialect
+  )
 add_onnx_mlir_library(OMONNXOps
   # Top files for ONNX dialect
   DialectBuilder.cpp

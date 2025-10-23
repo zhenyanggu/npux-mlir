@@ -185,6 +185,6 @@ dmypy.json
 *~
 
 # Visual Studio Code Files
-.vscode
+# .vscode
 .devcontainer
 .vs

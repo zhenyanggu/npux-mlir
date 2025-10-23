@@ -1,0 +1,23 @@
+{
+  // 指定 CMake Gerenator 为 Ninja
+  "cmake.generator": "Ninja",
+
+  // 配置传递给 CMake 的参数
+  "cmake.configureArgs": [
+    "-DCMAKE_CXX_COMPILER=/usr/bin/c++",
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DLLVM_ENABLE_ASSERTIONS=ON",
+    "-DCMAKE_CXX_STANDARD=17",
+    "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF",
+    // 使用 ${env:MLIR_DIR} 来引用环境变量 MLIR_DIR
+    "-DMLIR_DIR=/opt/llvm-project/build/lib/cmake/mlir",
+    // 假设 llvm-project 与你的项目文件夹是同级目录
+    // ${workspaceFolder} 指向你 VS Code 中打开的文件夹根目录
+    // 这相当于你写的 $(pwd)/../../llvm-project/... (假设 build 目录在项目根目录下)
+    "-DLLVM_DIR=/opt/llvm-project/build/lib/cmake/llvm",
+    "-Dprotobuf_ABSL_PROVIDER=package",
+    "-Dabsl_DIR=/usr/local/lib/cmake/absl",
+    "-Dprotobuf_BUILD_TESTS=OFF",
+    "-DCMAKE_VERBOSE_MAKEFILE=ON"
+  ]
+}

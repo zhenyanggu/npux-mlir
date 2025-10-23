@@ -5,6 +5,9 @@ cmake_minimum_required(VERSION 3.20.0)
 
 project(onnx-mlir)
 
+set(MLIR_DIR /opt/llvm-project/build/lib/cmake/mlir)
+
+
 option(ONNX_MLIR_BUILD_TESTS "Build ONNX-MLIR test executables. If OFF, just generate build targets." ON)
 option(ONNX_MLIR_CCACHE_BUILD "Set to ON for a ccache enabled build." OFF)
 option(ONNX_MLIR_ENABLE_STABLEHLO "Enable StableHLO support." ON)
