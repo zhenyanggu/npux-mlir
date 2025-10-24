@@ -8,6 +8,7 @@
 #include "src/Dialect/ONNX/ONNXDialect.hpp"
 #include "src/Dialect/npux/ir/npuxDialect.h"
 #include "src/Dialect/npux/conversion/OnnxToNpux/Passes.h"
+#include "src/Dialect/npux/transforms/Passes.h"
 #define NPUX_OPT
 using namespace mlir;
 using namespace llvm;
@@ -18,5 +19,6 @@ int main(int argc, char **argv) {
   DialectRegistry registry;
   registry.insert<ONNXDialect, npux::npuxDialect, func::FuncDialect>();
   npux::registerONNXToNPUXPasses();
+  npux::registerNpuxTransformPasses();
   return asMainReturnCode(MlirOptMain(argc, argv, "npux-opt", registry));
 }

@@ -1,3 +1,3 @@
 add_subdirectory(ir)
 add_subdirectory(conversion)
-# add_subdirectory(transforms)
+add_subdirectory(transforms)

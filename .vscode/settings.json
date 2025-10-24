@@ -19,5 +19,13 @@
     "-Dabsl_DIR=/usr/local/lib/cmake/absl",
     "-Dprotobuf_BUILD_TESTS=OFF",
     "-DCMAKE_VERBOSE_MAKEFILE=ON"
+  ],
+  "clangd.arguments": [
+    "--compile-commands-dir=build",
+    "--query-driver=/usr/bin/gcc",
+    "--background-index",
+    "--header-insertion=never",
+    "--all-scopes-completion"
   ]
+
 }

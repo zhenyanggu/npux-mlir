@@ -9,14 +9,16 @@
 
 include "mlir/Pass/PassBase.td"
 
-// Minimal example pass to seed generation; extend/rename as needed.
-def NPUXExamplePass : Pass<"npux-example", "mlir::func::FuncOp"> {
-	let summary = "Example NPUX pass placeholder";
+// Outline each NPUX op into a standalone function and replace with a call.
+def OutlineNpuxOpsPass : Pass<"outline-npux-ops", "mlir::ModuleOp"> {
+	let summary = "Outline each NPUX op into a func call";
 	let description = [{
-		Placeholder pass for NPUX dialect. Replace with real passes and factories.
+		For every op from the NPUX dialect, create a private func that takes the
+		op's operands as arguments and returns its results, clone the op inside the
+		new function, and replace the original op with a call to that function.
+		No deduplication: each op instance gets its own function.
 	}];
-	// Optional: when you implement it, expose a factory function with this name.
-	// let constructor = "createNPUXExamplePass()";
+	let constructor = "createOutlineNpuxOpsPass()";
 }
 
 #endif // NPUX_PASSES_TD

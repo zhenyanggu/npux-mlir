@@ -11,7 +11,7 @@ docker run -d -it --name my-npux-dev \
 
 # 4. 使用vscode连接到容器中,并下载cmake插件
 # 5. 为了高亮，还需要安装clangd，下载插件并
-# sudo apt install clangd
+
 # 注意，默认有代理，可以设置为自己的端口或者取消代理
 # unset HTTP_PROXY
 # unset HTTPS_PROXY

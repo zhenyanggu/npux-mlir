@@ -22,5 +22,6 @@ add_onnx_mlir_executable(npux-opt
   MLIROptLib
   npux
   ONNXToNPUX
+  npuxTransforms
   )
   target_compile_definitions(npux-opt PRIVATE NPU)
