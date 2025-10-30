@@ -40,6 +40,7 @@ target_compile_definitions(OMVersion PUBLIC ${DEFINITIONS})
 add_onnx_mlir_library(OMCompilerOptions
   CompilerOptions.cpp
 
+
   EXCLUDE_FROM_OM_LIBS
 
   DEPENDS
@@ -266,4 +267,27 @@ target_link_libraries(PyCompile
 
 install(TARGETS PyCompile
   DESTINATION lib
+  )
+
+
+add_onnx_mlir_library(OMCompilerOptions_clean
+  CompilerOptions_clean.cpp
+
+  EXCLUDE_FROM_OM_LIBS
+
+  DEPENDS
+  OMAccelerator
+  ExternalUtil
+  AcceleratorsInc
+
+  INCLUDE_DIRS PRIVATE
+  ${FILE_GENERATE_DIR}
+
+  INCLUDE_DIRS PUBLIC
+  ${ONNX_MLIR_SRC_ROOT}/include
+
+  LINK_LIBS PUBLIC
+  MLIRIR
+  OMAccelerator
+  LLVMTargetParser
   )

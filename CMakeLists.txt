@@ -83,6 +83,7 @@ if(NOT ONNX_MLIR_ENABLE_PYRUNTIME_LIGHT)
 endif()
 include(MLIR.cmake)
 
+
 # MLIR.cmake calls find_package(MLIR) which sets LLVM_MINIMUM_PYTHON_VERSION
 if (WIN32)
   # On Windows, only search the environment for Python (instead of also checking the registry).

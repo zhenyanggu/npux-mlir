@@ -11,7 +11,7 @@
 // Functions for adding options.
 //
 //===----------------------------------------------------------------------===//
-#ifndef NPUX_OPT
+
 #ifndef ONNX_MLIR_COMPILER_OPTIONS_H
 #define ONNX_MLIR_COMPILER_OPTIONS_H
 
@@ -239,4 +239,4 @@ bool hasSignatureInstrumentation(InstrumentStages targetInstrumentationStage);
 
 } // namespace onnx_mlir
 #endif
-#endif
+
