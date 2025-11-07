@@ -22,6 +22,8 @@
 #include "src/Version/Version.hpp"
 #include "llvm/Support/Debug.h"
 
+#include"src/Dialect/npux/ir/npuxDialect.h"
+
 #define DEBUG_TYPE "onnx_mlir_main"
 
 using namespace onnx_mlir;
@@ -88,6 +90,12 @@ int main(int argc, char *argv[]) {
     LLVM_DEBUG(llvm::dbgs() << "multithreading is disabled\n");
   }
   loadDialects(context);
+
+  
+  context.getOrLoadDialect<npux::npuxDialect>();
+
+
+
   setupTiming.stop();
   // Add the short inputFilename to the first compile phase printout so that we
   // may better determine which compilation we are dealing with.
