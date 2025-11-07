@@ -191,4 +191,4 @@ dmypy.json
 
 test/call_func
 
-./compile_commands.json
+compile_commands.json
