@@ -11,24 +11,11 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "src/Dialect/npux/ir/npuxOps.h"
+#include "src/Dialect/NpuMiddle/NpuMiddleOps.hpp"
+#include "src/Dialect/NpuMiddle/DialectBuilder.hpp"
 
 namespace npu_middle {
-class NpuMiddleTypeConverter : public mlir::TypeConverter {
-public:
-  NpuMiddleTypeConverter();
-  bool isSignatureLegal(mlir::FunctionType funcType) {
-    return llvm::all_of(llvm::concat<const mlir::Type>(
-                            funcType.getInputs(), funcType.getResults()),
-        [this](mlir::Type type) { return isLegal(type); });
-  }
-
-
-  bool isSignatureLegal(mlir::func::CallOp call) {
-    auto f = [this](mlir::Type type) { return isLegal(type); };
-    return llvm::all_of(call.getOperandTypes(), f) &&
-           llvm::all_of(call.getResultTypes(), f);
-  }
-};
 
 void populateLoweringNpuxToNpuMiddlePatterns(
     mlir::RewritePatternSet &, mlir::TypeConverter &, mlir::MLIRContext *);

@@ -23,6 +23,7 @@
 #include "llvm/Support/Debug.h"
 
 #include"src/Dialect/npux/ir/npuxDialect.h"
+#include"src/Dialect/NpuMiddle/NpuMiddleOps.hpp"
 
 #define DEBUG_TYPE "onnx_mlir_main"
 
@@ -93,7 +94,7 @@ int main(int argc, char *argv[]) {
 
   
   context.getOrLoadDialect<npux::npuxDialect>();
-
+  context.getOrLoadDialect<npu_middle::NpuMiddleDialect>();
 
 
   setupTiming.stop();

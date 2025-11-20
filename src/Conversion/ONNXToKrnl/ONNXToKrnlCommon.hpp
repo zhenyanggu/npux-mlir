@@ -46,6 +46,10 @@
 #include "src/Pass/Passes.hpp"
 #include "src/Support/KrnlSupport.hpp"
 
+
+
+#include "src/Conversion/ONNXToKrnl/NPU/NpuxToNpuMiddleUtils.h"
+
 //===----------------------------------------------------------------------===//
 // Extends OnnxBuilder with member functions that might generate Krnl dialect
 // operations.

@@ -24,6 +24,8 @@
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 #include "src/Dialect/Mlir/VectorMachineSupport.hpp"
 
+#include "src/Dialect/npux/ir/npuxDialect.h"
+
 using namespace mlir;
 
 namespace onnx_mlir {
@@ -293,6 +295,8 @@ void populateONNXToKrnlConversionPattern(RewritePatternSet &patterns,
   populateLoweringONNXLayoutTransformOpPattern(patterns, typeConverter, ctx, enableParallel);
   populateLoweringONNXShapeTransformOpPattern(patterns, typeConverter, ctx);
   // clang-format on
+
+  npu_middle::populateLoweringNpuxToNpuMiddlePatterns(patterns, typeConverter, ctx);
 }
 
 //===----------------------------------------------------------------------===//
@@ -389,7 +393,16 @@ void FrontendToKrnlLoweringPass::runOnOperation() {
   // this purpose instead. However, since the SequenceErase needs to emit
   // memref dealloc, the previous the following statement is commented out
   // (Chentong)
+
+
+  target.addLegalDialect<npu_middle::NpuMiddleDialect>();
+
+
+
   target.addIllegalOp<mlir::memref::DeallocOp>();
+
+
+  target.addIllegalDialect<npux::npuxDialect>();
 
   // TODO: enable this once more ops are supported.
   // We also define the ONNX dialect as Illegal so that the conversion will

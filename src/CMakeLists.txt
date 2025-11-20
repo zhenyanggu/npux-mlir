@@ -43,5 +43,6 @@ add_onnx_mlir_executable(onnx-mlir
   OMCompilerUtils
   OMOptionUtils
   npux
+  NpuMiddleOps
   )
   

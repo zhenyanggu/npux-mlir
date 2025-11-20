@@ -85,6 +85,9 @@ add_onnx_mlir_library(OMONNXToKrnl
   Tensor/Unique.cpp
   Tensor/Unsqueeze.cpp
 
+
+  NPU/test.cpp
+
   LINK_LIBS PUBLIC
   OMAccelerator
   OMCompilerOptions
@@ -94,4 +97,10 @@ add_onnx_mlir_library(OMONNXToKrnl
   OMOptionUtils
   MLIRFuncDialect
   MLIRFuncTransforms
+
+
+  NpuMiddleOps
+  
+  PRIVATE
+  npux
   )
