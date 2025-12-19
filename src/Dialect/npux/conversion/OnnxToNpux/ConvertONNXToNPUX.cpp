@@ -15,12 +15,36 @@ using namespace mlir;
 namespace {
 struct ConvertONNXGeluOp : public OpRewritePattern<ONNXGeluOp> {
   using OpRewritePattern<ONNXGeluOp>::OpRewritePattern;
-  LogicalResult matchAndRewrite(ONNXGeluOp op,
-                                PatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(
+      ONNXGeluOp op, PatternRewriter &rewriter) const override {
     // npux.gelu takes the same input and produces same type
     Value in = op.getX();
     Type resultType = op.getResult().getType();
     auto newOp = rewriter.create<npux::geluOp>(op.getLoc(), resultType, in);
+    rewriter.replaceOp(op, newOp.getResult());
+    return success();
+  }
+};
+
+struct ConvertONNXConvOp : public OpRewritePattern<ONNXConvOp> {
+public:
+  using OpRewritePattern<ONNXConvOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      ONNXConvOp op, PatternRewriter &rewriter) const override {
+
+    Value input = op.getX();
+    Value weight = op.getW();
+    Value bias = op.getB();
+
+    Type resultType = op.getResult().getType();
+
+    auto newOp =
+        rewriter.create<npux::convOp>(op.getLoc(), resultType, input, weight,
+            bias, op.getAutoPadAttr(), op.getDilationsAttr(), op.getGroupAttr(),
+            op.getKernelShapeAttr(), op.getPadsAttr(), op.getStridesAttr());
+
+    // 4. 替换原算子
     rewriter.replaceOp(op, newOp.getResult());
     return success();
   }
@@ -44,8 +68,11 @@ struct ConvertONNXToNPUXPass
 
     target.addLegalDialect<npux::npuxDialect, func::FuncDialect>();
     // Mark ONNX ops illegal so they must be rewritten.
-  target.addIllegalOp<ONNXGeluOp>();
+    target.addIllegalOp<ONNXGeluOp>();
     patterns.add<ConvertONNXGeluOp>(&getContext());
+
+    target.addIllegalOp<ONNXConvOp>();
+    patterns.add<ConvertONNXConvOp>(&getContext());
 
     if (failed(applyPartialConversion(module, target, std::move(patterns))))
       signalPassFailure();
@@ -54,11 +81,9 @@ struct ConvertONNXToNPUXPass
 } // namespace
 
 namespace npux {
-std::unique_ptr<mlir::Pass> createConvertONNXToNPUXPass() {
+std::unique_ptr<Pass> createConvertONNXToNPUXPass() {
   return std::make_unique<ConvertONNXToNPUXPass>();
 }
 
-void registerONNXToNPUXPasses() {
-  PassRegistration<ConvertONNXToNPUXPass>();
-}
+void registerONNXToNPUXPasses() { PassRegistration<ConvertONNXToNPUXPass>(); }
 } // namespace npux
