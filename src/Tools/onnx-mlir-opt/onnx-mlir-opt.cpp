@@ -44,6 +44,12 @@
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "src/Version/Version.hpp"
 
+#include "mlir/Dialect/Bufferization/Transforms/Passes.h"
+#include "mlir/Conversion/BufferizationToMemRef/BufferizationToMemRef.h"
+#include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+
+#include "mlir/Pass/PassRegistry.h"
+
 using namespace mlir;
 using namespace onnx_mlir;
 
@@ -152,6 +158,11 @@ int main(int argc, char **argv) {
   registerMLIRContextCLOptions();
   registerPassManagerCLOptions();
   registerDefaultTimingManagerCLOptions();
+
+  mlir::bufferization::registerBufferizationPasses();
+
+  mlir::registerPass([] { return mlir::createConvertBufferizationToMemRefPass(); });
+  mlir::registerPass([] { return mlir::createReconcileUnrealizedCastsPass(); });
 
   PassPipelineCLParser passPipeline("", "Compiler passes to run");
 

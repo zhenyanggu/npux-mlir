@@ -19,4 +19,9 @@ add_onnx_mlir_executable(onnx-mlir-opt
   MLIROpenMPToLLVM
   MLIROptLib
   MLIRSCFToOpenMP
+
+  MLIRBufferizationTransforms
+  MLIRBufferizationToMemRef
+  MLIRReconcileUnrealizedCasts
+
   )

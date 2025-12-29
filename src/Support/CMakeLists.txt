@@ -42,3 +42,9 @@ set_target_properties(OMSmallFPConversion
   PROPERTIES
   LANGUAGE C
   )
+
+add_onnx_mlir_library(NpuSupport
+  NPUConversionRegistry.cpp
+  INCLUDE_DIRS PUBLIC
+  ${ONNX_MLIR_SRC_ROOT}/include
+  )

@@ -7,6 +7,12 @@ add_subdirectory(KrnlToAffine)
 add_subdirectory(KrnlSeqToMemref)
 add_subdirectory(ONNXToTOSA)
 
+add_subdirectory(NpuPartition)
+add_subdirectory(NpuTiling)
+add_subdirectory(NpuBufferization)
+add_subdirectory(NpuToLLVM)
+
+
 if (ONNX_MLIR_ENABLE_STABLEHLO)
   add_subdirectory(ONNXToStablehlo)
 endif()

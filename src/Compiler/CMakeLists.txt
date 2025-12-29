@@ -72,6 +72,28 @@ add_onnx_mlir_library(OMCompilerDialects
   OMONNXOps
   MLIRIR
   MLIROpenMPToLLVMIRTranslation
+
+  MLIRLinalgTransforms
+
+  MLIRArithTransforms
+  MLIRFuncTransforms    
+  MLIRBufferizationTransforms
+  MLIRLinalgTransforms
+  MLIRSCFTransforms
+  MLIRTensorTransforms
+  MLIRVectorTransforms
+
+  MLIRBufferizationDialect
+
+  MLIRTensorDialect
+  MLIRAffineDialect
+  MLIRSCFDialect
+  MLIRArithDialect
+  MLIRVectorDialect
+
+  MLIRArithValueBoundsOpInterfaceImpl
+
+
   )
 
 add_onnx_mlir_library(OMCompilerPasses

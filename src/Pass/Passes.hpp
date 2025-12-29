@@ -132,4 +132,28 @@ std::unique_ptr<mlir::Pass> createConvertKrnlToLLVMPass(bool verifyInputTensors,
 std::unique_ptr<mlir::Pass> createConvertONNXToTOSAPass();
 
 } // namespace onnx_mlir
+
+
+namespace npux {
+std::unique_ptr<mlir::Pass> createONNXToLinalgNpuPass();
+
+std::unique_ptr<mlir::Pass> createNpuOutlinePass();
+
+std::unique_ptr<mlir::Pass> createONNXOpLabelPass();
+
+std::unique_ptr<mlir::Pass> createNpuElemWiseTilingPass();
+
+std::unique_ptr<mlir::Pass> createNpuBufferizationPass();
+
+std::unique_ptr<mlir::Pass> createNpuSignatureRewritePass();
+
+std::unique_ptr<mlir::Pass> createNpuMemoryPlacementPass();
+
+std::unique_ptr<mlir::Pass> createNpuInstructionLoweringPass();
+
+std::unique_ptr<mlir::Pass> createNpuInlinePass();
+
+std::unique_ptr<mlir::Pass> createNpuMemoryAllocationPass();
+}// namespace npux
+
 #endif
