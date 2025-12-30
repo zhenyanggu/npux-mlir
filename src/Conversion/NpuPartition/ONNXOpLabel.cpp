@@ -42,7 +42,6 @@ struct ONNXOpLabelPass : public PassWrapper<ONNXOpLabelPass, OperationPass<Modul
             // 1. 【核心检查】询问 Registry：这个 Op 硬件支持吗？
             // 这一步会触发你之前写的 isHardwareSupported 逻辑
             bool supported = npux::NPUConversionRegistry::isSupported(op);
-    llvm::outs() << "Checking Op: " << op->getName() << " -> Supported? " << supported << "\n";
     
             if (!npux::NPUConversionRegistry::isSupported(op)) {
                 return; // 不支持，跳过，留给 CPU
@@ -97,4 +96,4 @@ std::unique_ptr<Pass> npux::createONNXOpLabelPass() {
 }
 
 
-static PassRegistration<ONNXOpLabelPass> pass;
+

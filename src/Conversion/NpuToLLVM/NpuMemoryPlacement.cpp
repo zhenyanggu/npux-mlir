@@ -188,4 +188,3 @@ std::unique_ptr<Pass> npux::createNpuMemoryPlacementPass() {
     return std::make_unique<NpuMemoryPlacementPass>();
 }
 
-static PassRegistration<NpuMemoryPlacementPass> pass;

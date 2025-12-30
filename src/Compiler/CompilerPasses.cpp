@@ -321,41 +321,6 @@ InputIRLevelType determineInputIRLevel(mlir::OwningOpRef<ModuleOp> &module) {
   return LLVMLevel;
 }
 
-void addNpuPartitionPasses(mlir::PassManager &pm) {
-  // 1. Labeling: 挑出能跑在 NPU 上的算子
-  pm.addPass(npux::createONNXOpLabelPass());
-
-  // 2. Outlining: 把挑出来的算子提取成独立函数 (func.call)
-  pm.addPass(npux::createNpuOutlinePass());
-
-  // 3. Conversion: 此时只处理 NPU 函数内部
-  // 使用 addNestedPass 限制范围，防止误伤全局
-  pm.addNestedPass<func::FuncOp>(npux::createONNXToLinalgNpuPass());
-
-  // 4. Cleanup: 清理 Outline 产生的死代码和无用常量
-  // 这是必要的，因为提取函数后，原位置可能会留下孤立的常量
-  pm.addPass(mlir::createCanonicalizerPass());
-  pm.addPass(mlir::createSymbolDCEPass());
-
-  pm.addNestedPass<func::FuncOp>(npux::createNpuElemWiseTilingPass());
-
-  pm.addPass(mlir::createCanonicalizerPass());
-    
-    // 【新增】CSE (公共子表达式消除，双保险)
-    // 专门负责合并长得一样的 Op
-  pm.addPass(mlir::createCSEPass());
-
-  pm.addNestedPass<func::FuncOp>(npux::createNpuBufferizationPass());
-  pm.addPass(npux::createNpuSignatureRewritePass());
-  pm.addPass(npux::createNpuMemoryPlacementPass());
-
-  pm.addPass(npux::createNpuInstructionLoweringPass());
-
-  pm.addPass(npux::createNpuInlinePass());
-
-  pm.addPass(npux::createNpuMemoryAllocationPass());
-}
-
 
 void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
     EmissionTargetType emissionTarget, std::string outputNameNoExt) {
@@ -364,10 +329,6 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
   if (inputIRLevel <= ONNXLevel && emissionTarget >= EmitONNXIR)
     addONNXToMLIRPasses(pm, /*target CPU*/ maccel.empty());
 
-  if (emissionTarget >= EmitMLIR) {
-      // 这里的条件可以加一个 global option，比如 if (enableNPU)
-      addNpuPartitionPasses(pm);
-  }
 
   if (emissionTarget >= EmitMLIR) {
     if (inputIRLevel <= ONNXLevel)

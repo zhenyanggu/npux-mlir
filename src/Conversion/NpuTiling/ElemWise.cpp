@@ -157,4 +157,3 @@ std::unique_ptr<Pass> npux::createNpuElemWiseTilingPass() {
   return std::make_unique<NpuElemWiseTilingPass>();
 }
 
-static PassRegistration<NpuElemWiseTilingPass> pass;

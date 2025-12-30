@@ -104,4 +104,3 @@ std::unique_ptr<Pass> npux::createNpuInlinePass() {
   return std::make_unique<NpuInlinePass>();
 }
 
-static PassRegistration<NpuInlinePass> pass;

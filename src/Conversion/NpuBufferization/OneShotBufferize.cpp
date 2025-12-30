@@ -38,21 +38,32 @@ struct NpuBufferizationPass : public PassWrapper<NpuBufferizationPass, Operation
 
         // 【关键】精确制导的白名单过滤器
         options.opFilter.allowOperation([&](Operation *op) {
-            // 1. 允许结构性 Op (Module, Func, Call, Return)
-            // 必须允许这些 Op，Bufferization 才能修改函数签名并处理调用关系
-            if (isa<ModuleOp, func::FuncOp, func::CallOp, func::ReturnOp>(op)) {
+            // 1. 对于 FuncOp：只允许带 "npu.target" 的函数进行 Bufferization
+            //    这意味着 main_graph (没有该属性) 将会被跳过，其签名(Tensor)保持不变。
+            if (auto funcOp = dyn_cast<func::FuncOp>(op)) {
+                return funcOp->hasAttr("npu.target");
+            }
+
+            // 2. 必须允许 CallOp
+            //    即使它在 main_graph 里面，我们也需要处理它，以便更新它调用的目标符号
+            //    并在调用点插入 cast (to_memref)。
+            if (isa<func::CallOp>(op)) {
                 return true;
             }
 
-            // 2. 允许 NPU Kernel 内部的所有 Op
-            // 只要父函数有 "npu.target" 属性，就允许处理其内部 Op
+            // 3. 允许 Module 和 Return (为了结构完整性)
+            if (isa<ModuleOp, func::ReturnOp>(op)) {
+                return true;
+            }
+
+            // 4. 允许 NPU Kernel 内部的所有 Op
             if (auto parentFunc = op->getParentOfType<func::FuncOp>()) {
                 if (parentFunc->hasAttr("npu.target")) {
                     return true;
                 }
             }
 
-            // 3. 其他 Op (如 main 函数里的 onnx.Constant) 统统禁止
+            // 5. 其他一切 (如 main_graph 里的 onnx.Conv 等) 禁止
             return false;
         });
 
@@ -72,4 +83,3 @@ std::unique_ptr<Pass> npux::createNpuBufferizationPass() {
   return std::make_unique<NpuBufferizationPass>();
 }
 
-static PassRegistration<NpuBufferizationPass> pass;

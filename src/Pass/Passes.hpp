@@ -149,11 +149,15 @@ std::unique_ptr<mlir::Pass> createNpuSignatureRewritePass();
 
 std::unique_ptr<mlir::Pass> createNpuMemoryPlacementPass();
 
+std::unique_ptr<mlir::Pass> createNpuSramPromotionPass();
+
 std::unique_ptr<mlir::Pass> createNpuInstructionLoweringPass();
 
 std::unique_ptr<mlir::Pass> createNpuInlinePass();
 
 std::unique_ptr<mlir::Pass> createNpuMemoryAllocationPass();
+
+std::unique_ptr<mlir::Pass> createNpuFinalizeLLVMPass();
 }// namespace npux
 
 #endif

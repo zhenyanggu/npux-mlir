@@ -195,4 +195,3 @@ std::unique_ptr<Pass> npux::createNpuOutlinePass() {
   return std::make_unique<NpuOutlinePass>();
 }
 
-static PassRegistration<NpuOutlinePass> pass;

@@ -65,4 +65,3 @@ std::unique_ptr<Pass> npux::createONNXToLinalgNpuPass() {
     return std::make_unique<ONNXToLinalgNpuPass>();
 }
 
-static PassRegistration<ONNXToLinalgNpuPass> pass;
