@@ -99,6 +99,61 @@ struct NpuMemRefToStructPattern : public OpRewritePattern<UnrealizedConversionCa
     }
 };
 
+struct NpuStructToMemRefToPtrPattern : public OpRewritePattern<UnrealizedConversionCastOp> {
+    
+    using OpRewritePattern<UnrealizedConversionCastOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(UnrealizedConversionCastOp op, PatternRewriter &rewriter) const override {
+        // 1. 识别 Cast C: MemRef -> Ptr (我们想要的结果)
+        Value inputMemRef = op.getInputs()[0];
+        Type outputType = op.getResultTypes()[0];
+
+        // 输出必须是指针
+        if (!llvm::isa<LLVM::LLVMPointerType>(outputType)) {
+            return failure();
+        }
+        // 输入必须是 MemRef
+        if (!llvm::dyn_cast<MemRefType>(inputMemRef.getType())) {
+            return failure();
+        }
+
+        // 2. 向上追溯 Cast B: Struct -> MemRef
+        auto prevCast = inputMemRef.getDefiningOp<UnrealizedConversionCastOp>();
+        if (!prevCast) return failure();
+
+        Value rawStruct = prevCast.getInputs()[0];
+        Type structType = rawStruct.getType();
+
+        // 确保源头是 Struct
+        if (!llvm::isa<LLVM::LLVMStructType>(structType)) {
+            return failure();
+        }
+
+        // ==============================================================
+        // 3. 直接从 Struct 提取指针
+        // ==============================================================
+        Location loc = op.getLoc();
+
+        // MemRef Descriptor 的第 1 个字段通常是 Aligned Pointer
+        // 结构: {AllocatedPtr, AlignedPtr, Offset, Sizes, Strides}
+        Value alignedPtr = rewriter.create<LLVM::ExtractValueOp>(
+            loc, rawStruct, ArrayRef<int64_t>{1});
+
+        // 4. 处理地址空间 (Address Space)
+        // Struct 里的指针可能是 ptr<2>，但我们需要的是 ptr<0> (或者反之)
+        Value finalPtr = alignedPtr;
+        if (alignedPtr.getType() != outputType) {
+            finalPtr = rewriter.create<LLVM::AddrSpaceCastOp>(
+                loc, outputType, alignedPtr);
+        }
+
+        // 5. 替换 Cast C
+        rewriter.replaceOp(op, finalPtr);
+        
+        return success();
+    }
+};
+
 struct NpuFinalizeLLVMPass : public PassWrapper<NpuFinalizeLLVMPass, OperationPass<ModuleOp>> {
     MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(NpuFinalizeLLVMPass)
     StringRef getArgument() const override { return "npu-finalize-llvm"; }
@@ -109,7 +164,12 @@ struct NpuFinalizeLLVMPass : public PassWrapper<NpuFinalizeLLVMPass, OperationPa
         
         LLVMTypeConverter converter(context);
         RewritePatternSet patterns(context);
+        
+        // 1. Ptr -> MemRef -> Struct
         patterns.add<NpuMemRefToStructPattern>(converter, context);
+        
+        // 2. 【新增】Struct -> MemRef -> Ptr
+        patterns.add<NpuStructToMemRefToPtrPattern>(context);
 
         if (failed(applyPatternsAndFoldGreedily(module, std::move(patterns)))) {
             signalPassFailure();
