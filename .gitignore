@@ -1,5 +1,7 @@
 .idea/
 cmake-*/
+docs/
+install/
 CMakePresets.json
 
 # Prerequisites
