@@ -21,6 +21,10 @@
   "cmake.environment": {
     "LD_LIBRARY_PATH": "/usr/local/lib:${env:LD_LIBRARY_PATH}"
   },
+  "remote.extensionKind": {
+  "github.copilot": ["ui"],
+  "github.copilot-chat": ["ui"]
+  },
   //"cmake.buildToolArgs": ["-j", "8"],
   "cmake.copyCompileCommands": "${workspaceFolder}/compile_commands.json",
   "cmake.loggingLevel": "info"
