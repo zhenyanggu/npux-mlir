@@ -1,0 +1,21 @@
+module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128", llvm.target_triple = "x86_64-unknown-linux-gnu", "onnx-mlir.symbol-postfix" = "fixed_model"} {
+  func.func @main_graph(%arg0: tensor<1x1x224x224xf32> {onnx.name = "input"}) -> (tensor<1x10xf32> {onnx.name = "output"}) {
+    %0 = onnx.Constant dense<[1, -1]> : tensor<2xi64>
+    %1 = "onnx.NoValue"() {onnx_node_name = "onnx.NoValue_0", value} : () -> none
+    %2 = onnx.Constant dense<[[[[0.265160382, 0.186584681, -0.300759673], [0.207953259, 0.0408411846, 0.312475801], [-0.257905543, -0.198590964, 0.218474865]]], [[[0.168974131, -0.0949404687, -0.00989051721], [-0.280921817, 0.198876262, -0.0225151386], [0.203241706, -0.294647902, 2.954360e-01]]], [[[0.24958162, -0.28605029, 0.242289111], [-0.120952092, -0.132081434, 0.17226164], [-0.309214205, 0.317158818, 0.0238304138]]], [[[0.29323253, 0.10033413, 0.108094379], [-0.0649660081, 0.091096282, 0.141089484], [0.324313104, 0.317160457, -0.110227309]]]]> : tensor<4x1x3x3xf32>
+    %3 = onnx.Constant dense_resource<__elided__> : tensor<200704x10xf32>
+    %4 = onnx.Constant dense<0.0271661952> : tensor<f32>
+    %5 = onnx.Constant dense<0> : tensor<i8>
+    %6 = onnx.Constant dense<0.0270520784> : tensor<f32>
+    %7 = "onnx.Conv"(%arg0, %2, %1) {auto_pad = "NOTSET", dilations = [1, 1], group = 1 : si64, kernel_shape = [3, 3], onnx_node_name = "/conv/Conv", pads = [1, 1, 1, 1], strides = [1, 1]} : (tensor<1x1x224x224xf32>, tensor<4x1x3x3xf32>, none) -> tensor<1x4x224x224xf32>
+    %8 = "onnx.QuantizeLinear"(%7, %4, %5) {axis = 1 : si64, onnx_node_name = "/qdq_conv_out/fake_quant/QuantizeLinear", saturate = 1 : si64} : (tensor<1x4x224x224xf32>, tensor<f32>, tensor<i8>) -> tensor<1x4x224x224xi8>
+    %9 = "onnx.DequantizeLinear"(%8, %4, %5) {axis = 1 : si64, onnx_node_name = "/qdq_conv_out/fake_quant/DequantizeLinear"} : (tensor<1x4x224x224xi8>, tensor<f32>, tensor<i8>) -> tensor<1x4x224x224xf32>
+    %10 = "onnx.Gelu"(%9) {approximate = "none", onnx_node_name = "/gelu/Mul_1_1"} : (tensor<1x4x224x224xf32>) -> tensor<1x4x224x224xf32>
+    %11 = "onnx.QuantizeLinear"(%10, %6, %5) {axis = 1 : si64, onnx_node_name = "/qdq_gelu_out/fake_quant/QuantizeLinear", saturate = 1 : si64} : (tensor<1x4x224x224xf32>, tensor<f32>, tensor<i8>) -> tensor<1x4x224x224xi8>
+    %12 = "onnx.DequantizeLinear"(%11, %6, %5) {axis = 1 : si64, onnx_node_name = "/qdq_gelu_out/fake_quant/DequantizeLinear"} : (tensor<1x4x224x224xi8>, tensor<f32>, tensor<i8>) -> tensor<1x4x224x224xf32>
+    %13 = "onnx.Reshape"(%12, %0) {allowzero = 0 : si64, onnx_node_name = "/Reshape"} : (tensor<1x4x224x224xf32>, tensor<2xi64>) -> tensor<1x200704xf32>
+    %14 = "onnx.MatMul"(%13, %3) {onnx_node_name = "/fc/MatMul"} : (tensor<1x200704xf32>, tensor<200704x10xf32>) -> tensor<1x10xf32>
+    return %14 : tensor<1x10xf32>
+  }
+  "onnx.EntryPoint"() {func = @main_graph} : () -> ()
+}
