@@ -1,112 +1,148 @@
 #!/bin/bash
-set -e # 遇到错误立即停止
 
-# 检查输入
+# ================= Configuration =================
+# 定义工具名称（如果不在环境变量中，请改为绝对路径）
+OPT_TOOL="onnx-mlir-opt"
+
+# 颜色定义，方便看日志
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# ================= Helper Functions =================
+
+# 全局变量
+STAGE_COUNT=0
+CURRENT_INPUT=""
+CURRENT_DIR=""
+
+# 报错并退出的函数
+error_exit() {
+    echo -e "${RED}>>> [ERROR] $1 Failed!${NC}"
+    exit 1
+}
+
+# 进入一个新的阶段文件夹
+enter_stage() {
+    local folder_name="$1"
+    
+    # 序号自增
+    STAGE_COUNT=$((STAGE_COUNT + 1))
+    CURRENT_DIR="$folder_name"
+    
+    echo ""
+    echo -e "${YELLOW}==========================================${NC}"
+    echo -e "${YELLOW} $STAGE_COUNT. Folder: $folder_name${NC}"
+    echo -e "${YELLOW}==========================================${NC}"
+    
+    # 创建目录 (在当前执行目录下)
+    mkdir -p "$folder_name"
+}
+
+# 运行单个 Pass 的函数
+# 参数 1: 描述 (用于日志)
+# 参数 2: flag 参数
+# 参数 3: 输出文件名
+run_pass() {
+    local desc="$1"
+    local flags="$2"
+    local output_file="$3"
+    
+    # 构建完整的输出路径
+    local output_path="${CURRENT_DIR}/${output_file}"
+    
+    echo " -> $desc"
+    
+    # 执行命令
+    # 注意：这里 $flags 没有加引号，是为了让参数正确展开
+    # 2>&1 把错误流也捕获，方便调试
+    if ! $OPT_TOOL $flags "$CURRENT_INPUT" -o "$output_path"; then
+        echo -e "${RED}xxx $desc fail! xxx${NC}"
+        echo "Command executed: $OPT_TOOL $flags $CURRENT_INPUT -o $output_path"
+        exit 1
+    fi
+    
+    # 更新 Current Input，供下一步使用
+    CURRENT_INPUT=$(realpath "$output_path")
+}
+
+# ================= Main Pipeline =================
+
+# 1. 检查输入
 if [ -z "$1" ]; then
     echo "Usage: $0 <input_model.mlir>"
-    # 例如: ./run_npu_structured.sh ../model_onnx.onnx.mlir
     exit 1
 fi
 
-# 获取输入文件的绝对路径，防止 cd 切换目录后找不到文件
-INPUT_FILE=$(realpath "$1")
+# 初始化输入文件
+CURRENT_INPUT=$(realpath "$1")
 
 echo ">>> Starting NPU Compilation Pipeline"
-echo ">>> Input: $INPUT_FILE"
+echo ">>> Initial Input: $CURRENT_INPUT"
 
-# ==========================================
-# 1. Folder: NpuPartition
-# ==========================================
-echo "--- Entering NpuPartition ---"
-mkdir -p NpuPartition
-cd NpuPartition
+# ------------------------------------------------
+# Stage 1: NpuPartition
+# ------------------------------------------------
+enter_stage "NpuPartition"
 
-echo "[1/14] Op Labeling"
-onnx-mlir-opt --onnx-npu-op-label "$INPUT_FILE" -o ONNXOpLabel.mlir
+run_pass "Convert to Linalg" \
+         "--convert-npu-onnx-to-linalg" \
+         "ConvertONNXToLinalgNpu.mlir"
 
-echo "[2/14] Outline"
-onnx-mlir-opt --onnx-npu-outline ONNXOpLabel.mlir -o NpuOutline.mlir
+run_pass "Op Merge" \
+         "--npu-merge" \
+         "NpuMerge.mlir"
 
-echo "[3/14] Convert to Linalg"
-onnx-mlir-opt --convert-npu-onnx-to-linalg NpuOutline.mlir -o ConvertONNXToLinalgNpu.mlir
-
-cd .. # 回到根目录
-
-# ==========================================
-# 2. Folder: NpuTiling
-# ==========================================
-echo "--- Entering NpuTiling ---"
-mkdir -p NpuTiling
-cd NpuTiling
-
-echo "[4/14] Tiling Elemwise"
-# 输入来自 NpuPartition 文件夹
-onnx-mlir-opt --npu-tiling-elemwise ../NpuPartition/ConvertONNXToLinalgNpu.mlir -o ElemWise.mlir
-
-cd ..
-
-# ==========================================
-# 3. Folder: NpuBufferization
-# ==========================================
-echo "--- Entering NpuBufferization ---"
-mkdir -p NpuBufferization
-cd NpuBufferization
+run_pass "Outline" \
+         "--npu-outline" \
+         "NpuOutline.mlir"
 
 
-echo "[5/14] One Shot Bufferize"
-onnx-mlir-opt --npu-bufferize ../NpuTiling/ElemWise.mlir -o OneShotBufferize.mlir
+# ------------------------------------------------
+# Stage 2: NpuTiling
+# ------------------------------------------------
+enter_stage "NpuTiling"
 
-echo "[6/14] Emit MLIR (Frontend)"
-# 这步会在当前目录下生成 OneShotBufferize.onnx.mlir
-onnx-mlir --EmitMLIR OneShotBufferize.mlir
+# 下一步会自动使用上一步 (ConvertONNXToLinalgNpu.mlir) 作为输入
+run_pass "Tiling " \
+         "--npu-tiling --gelu-tile-size=[0,0,32,32]" \
+         "NpuTiling.mlir"
 
-echo "[7/14] Signature Rewrite (Post-Bufferization)"
-onnx-mlir-opt --npu-signature-rewrite --canonicalize --reconcile-unrealized-casts ./OneShotBufferize.onnx.mlir -o SignatureRewrite.mlir
+# ------------------------------------------------
+# Stage 3: NpuBufferization
+# ------------------------------------------------
+enter_stage "NpuBufferization"
 
-cd ..
+# 这是一个很长的命令，现在写起来很清爽
+run_pass "Bufferize" \
+         "--convert-onnx-to-krnl --target=npu --canonicalize --convert-krnl-to-affine --npu-dps-convert --cse --canonicalize" \
+         "NpuBufferization.mlir"
 
-# ==========================================
-# 4. Folder: NpuToLLVM
-# ==========================================
-echo "--- Entering NpuToLLVM ---"
-mkdir -p NpuToLLVM
-cd NpuToLLVM
+# ------------------------------------------------
+# Stage 4: NpuToLLVM
+# ------------------------------------------------
+enter_stage "NpuToLLVM"
 
+run_pass "Npux Conversion" \
+         "--convert-linalg-to-npux --canonicalize" \
+         "ConvertLinalgToNpux.mlir"
 
+run_pass "Npu Memory Plan" \
+        "--npu-memory-plan " \
+        "NpuMemoryPlan.mlir"
 
-echo "[8/14] Memory Placement"
-# 输入来自 NpuBufferization 文件夹
-onnx-mlir-opt --npu-memory-placement ../NpuBufferization/SignatureRewrite.mlir -o NpuMemoryPlacement.mlir
+run_pass "Npu Inline" \
+        "--npu-inline --expand-strided-metadata" \
+        "NpuInline.mlir"
 
-echo "[9/14] SRAM Promotion"
-onnx-mlir-opt --npu-sram-promotion NpuMemoryPlacement.mlir -o NpuSramPromotion.mlir
+run_pass "LLVM Lowering" \
+        "--convert-krnl-to-llvm --target=npu" \
+        "llvm.mlir"
 
-echo "[10/14] Memory Allocation"
-onnx-mlir-opt --npu-memory-alloc NpuSramPromotion.mlir -o NpuAlloc.mlir
+# ================= Final Report =================
 
-echo "[11/14] Instruction Lowering"
-onnx-mlir-opt --npu-instruction-lowering NpuAlloc.mlir -o NpuInstructionLowering.mlir
-
-echo "[12/14] Npu Inline"
-onnx-mlir-opt --npu-inline ./NpuInstructionLowering.mlir -o NpuInline.mlir
-
-echo "[13/14] convert to LLVM"
-onnx-mlir-opt --convert-krnl-to-llvm ./NpuInline.mlir -o krnl_free.mlir
-
-echo "[14/14] Finalize LLVM"
-onnx-mlir-opt --npu-finalize-llvm ./krnl_free.mlir -o NpuFinalizeLLVM.mlir
-
-onnx-mlir --EmitLLVMIR NpuFinalizeLLVM.mlir \
-    -o model_armv7 \
-    --mtriple=armv7-linux-gnueabihf \
-    --mcpu=cortex-a9
-mlir-translate --mlir-to-llvmir model_armv7.onnx.mlir -o model.ll
-
-llc ./model.ll -mtriple=armv7-linux-gnueabihf -mcpu=cortex-a9 -mattr=+neon,+vfp3 \
- -relocation-model=pic -O=2 -filetype=obj \
- -o model.o
-cp model.o ..
-cd ..
-
-echo ">>> Compilation Complete!"
-echo ">>> Final Output: NpuToLLVM/NpuFinalizeLLVM.mlir"
+echo ""
+echo -e "${GREEN}>>> Compilation Complete!${NC}"
+# 直接使用 CURRENT_INPUT，因为它保存了最后一次 run_pass 的结果
+echo -e ">>> Final Output: ${GREEN}${CURRENT_INPUT}${NC}"
