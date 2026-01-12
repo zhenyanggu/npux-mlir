@@ -186,6 +186,9 @@ void addONNXToMLIRPasses(mlir::PassManager &pm, bool targetCPU,
 
 void addONNXToKrnlPasses(mlir::PassManager &pm, int optLevel, bool enableCSE,
     std::string ONNXOpsStatFormat) {
+
+  
+
   if (enableCSE)
     // Eliminate common sub-expressions before lowering to Krnl.
     // TODO: enable this by default when we make sure it works flawlessly.
@@ -216,6 +219,8 @@ void addONNXToKrnlPasses(mlir::PassManager &pm, int optLevel, bool enableCSE,
   // An additional pass of canonicalization is helpful because lowering
   // from ONNX dialect to Standard dialect exposes additional canonicalization
   // opportunities.
+  
+
   pm.addPass(mlir::createCanonicalizerPass());
 }
 
@@ -330,16 +335,38 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
     addONNXToMLIRPasses(pm, /*target CPU*/ maccel.empty());
 
 
+  if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+      pm.addPass(npux::createONNXToLinalgNpuPass());
+      pm.addPass(npux::createNpuMergePass());
+      pm.addPass(npux::createNpuOutlinePass());
+      pm.addNestedPass<func::FuncOp>(npux::createNpuElemWiseTilingPass());
+  }
+
   if (emissionTarget >= EmitMLIR) {
     if (inputIRLevel <= ONNXLevel)
       addONNXToKrnlPasses(
           pm, OptimizationLevel, /*enableCSE*/ true, ONNXOpStats);
     if (inputIRLevel <= MLIRLevel)
       addKrnlToAffinePasses(pm);
+    if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+      pm.addPass(npux::createNpuDPSConversionPass());
+      pm.addPass(mlir::createCSEPass());
+      pm.addPass(mlir::createCanonicalizerPass());
+  }
   }
 
-  if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR)
+  
+
+  if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR){
+    if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+      pm.addPass(npux::createConvertLinalgToNpuPass());
+      pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(npux::createNpuMemPlanPass());
+      pm.addPass(npux::createNpuInlinePass());
+      pm.addPass(mlir::memref::createExpandStridedMetadataPass());
+    }
     addKrnlToLLVMPasses(pm, outputNameNoExt, /*enableCSE=*/true);
+  }
 }
 
 } // namespace onnx_mlir

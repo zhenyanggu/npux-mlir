@@ -5,7 +5,6 @@
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h" // 核心 Tiling 工具
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
@@ -14,48 +13,72 @@
 
 
 #include "src/Pass/Passes.hpp"
+#include "src/Conversion/NpuTiling/ElemWise.hpp"
+#include "src/Compiler/NpuConfig.hpp"
 
+#define DEBUG_TYPE "npu-tiling"
 using namespace mlir;
 
 namespace {
 
+  static void applyTileConfig(SmallVectorImpl<int64_t> &sizes, 
+                            const std::vector<int64_t> &configSizes) {
+  if (configSizes.empty()) return;
+
+  int opRank = sizes.size();
+  int configRank = configSizes.size();
+
+  int opIdx = opRank - 1;
+  int cfgIdx = configRank - 1;
+
+  // 从最后一个维度向前遍历
+  while (opIdx >= 0 && cfgIdx >= 0) {
+    sizes[opIdx] = configSizes[cfgIdx];
+    opIdx--;
+    cfgIdx--;
+  }
+}
+
+
 // === 1. 定义分块策略逻辑 ===
 // 这里是策略的核心：根据 Op 的特点决定由谁来处理，切多大
 SmallVector<int64_t> getNpuTileSizes(linalg::GenericOp op) {
-  // 获取 library_call 属性
+  // 1. 获取 library_call 属性
   auto libCall = op->getAttrOfType<StringAttr>("library_call");
-  if (!libCall)
-    return {};
+  if (!libCall) return {}; // 不是 NPU Op，不切分
 
   StringRef opName = libCall.getValue();
 
-  // 获取 Op 的 Rank (维度)
-  // 假设输入都是 RankedTensorType
-  auto inputType = mlir::cast<RankedTensorType>(op.getInputs()[0].getType());
+  // 2. 获取 Op 的 Rank
+  auto inputType = mlir::dyn_cast<RankedTensorType>(op.getInputs()[0].getType());
+  if (!inputType) return {}; // 无法处理非 Ranked 类型
   unsigned rank = inputType.getRank();
 
-  // === 策略表 ===
-  // 假设 NPU 的 Gelu 单元一次只能算 32x32
-  // 如果是 4 维 [N, C, H, W]，我们通常希望在最后两个维度切分
-  SmallVector<int64_t> sizes(rank, 0); // 0 代表不切分 (保持原样)
+  // 初始化为 0 (0 表示该维度不切分)
+  SmallVector<int64_t> sizes(rank, 0);
 
+  // 3. 获取全局配置单例
+  auto &config = npux::NPUConfig::getInstance();
+
+  // 4. 根据 Op 名字查找配置
   if (opName == "npu_gelu") {
-    // 简单的启发式策略：最后两个维度切成 32
-    if (rank >= 2) {
-      sizes[rank - 1] = 32; // W
-      sizes[rank - 2] = 32; // H
-    }
-    // 如果还有更多维度，比如 N 和 C，可以设为 1 (完全展开) 或者 0 (不切)
-    // 这里假设我们只对空间维度分块
-  } else if (opName == "npu_add") {
-    // 假设 Add 单元大一点，支持 64
-    if (rank >= 1)
-      sizes[rank - 1] = 64;
-  }
+    // 从 Config 读取 (CLI > JSON > Default)
+    std::vector<int64_t> configSizes = config.getGeluTileSize();
+    applyTileConfig(sizes, configSizes);
+    
+  } else if (opName == "npu_conv") {
+    // 假设你有 getConvTileSize
+    // std::vector<int64_t> configSizes = config.getConvTileSize();
+    // applyTileConfig(sizes, configSizes);
+  } 
+  // ... 其他 Op 处理 ...
 
-  // 如果你在 ONNXConversion 阶段已经把 tile size 挂在 Attribute 上了
-  // 也可以直接读 Attribute，那就更通用了
-  // if (auto attr = op->getAttrOfType<ArrayAttr>("npux.tile_sizes")) ...
+  // Debug 打印 (可选，只在 -debug 时显示)
+  LLVM_DEBUG({
+    llvm::dbgs() << "NPU Tiling " << opName << ": [";
+    for (auto s : sizes) llvm::dbgs() << s << " ";
+    llvm::dbgs() << "]\n";
+  });
 
   return sizes;
 }
@@ -71,11 +94,6 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       return failure();
     }
 
-    // B. 检查是否是 NPU 算子 (通过 library_call 判断)
-    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
-    if (!targetAttr || targetAttr.getValue() != "npu") {
-      return failure();
-    }
 
     // C. 获取切分策略
     SmallVector<int64_t> rawTileSizes = getNpuTileSizes(op);
@@ -94,12 +112,6 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     scf::SCFTilingOptions options;
     options.setTileSizes(tileSizes);
 
-    // E. 执行 Tiling
-    // tileUsingSCF 会做以下事情：
-    // 1. 生成 scf.for 循环嵌套
-    // 2. 在循环内部生成 tensor.extract_slice
-    // 3. 复制原来的 op 到循环内部，并连接 slice
-    // 4. 生成 tensor.insert_slice
     FailureOr<scf::SCFTilingResult> tilingResult =
         scf::tileUsingSCF(rewriter, tilingInterfaceOp, options);
 
@@ -111,13 +123,8 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     // tilingResult->tiledOps包含了循环内部新生成的 linalg.generic
     for (Operation *tiledOp : tilingResult->tiledOps) {
       tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
-
-      // 可选：把 library_call 也传下去 (通常 scf::tileUsingSCF 会自动克隆
-      // Attribute) 但为了保险可以检查一下
     }
 
-    // G. 替换原 Op
-    // replacements 是循环整体的返回值 (scf.for 的 result)
     rewriter.replaceOp(op, tilingResult->replacements);
 
     return success();
@@ -152,7 +159,12 @@ struct NpuElemWiseTilingPass
 
 } // namespace
 
-// 暴露创建函数
+
+void npux::populateElemWiseTilingPatterns(RewritePatternSet &patterns,
+                                    MLIRContext *context) {
+  patterns.add<NpuElemWiseTilingPattern>(context);
+}
+
 std::unique_ptr<Pass> npux::createNpuElemWiseTilingPass() {
   return std::make_unique<NpuElemWiseTilingPass>();
 }

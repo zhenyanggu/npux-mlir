@@ -139,13 +139,7 @@ std::unique_ptr<mlir::Pass> createONNXToLinalgNpuPass();
 
 std::unique_ptr<mlir::Pass> createNpuOutlinePass();
 
-std::unique_ptr<mlir::Pass> createONNXOpLabelPass();
-
 std::unique_ptr<mlir::Pass> createNpuElemWiseTilingPass();
-
-std::unique_ptr<mlir::Pass> createNpuBufferizationPass();
-
-std::unique_ptr<mlir::Pass> createNpuSignatureRewritePass();
 
 std::unique_ptr<mlir::Pass> createNpuMemoryPlacementPass();
 
@@ -158,6 +152,17 @@ std::unique_ptr<mlir::Pass> createNpuInlinePass();
 std::unique_ptr<mlir::Pass> createNpuMemoryAllocationPass();
 
 std::unique_ptr<mlir::Pass> createNpuFinalizeLLVMPass();
+
+std::unique_ptr<mlir::Pass> createNpuDPSConversionPass();
+
+std::unique_ptr<mlir::Pass> createNpuMergePass();
+
+std::unique_ptr<mlir::Pass> createNpuTilingPass();
+
+std::unique_ptr<mlir::Pass> createConvertLinalgToNpuPass();
+
+std::unique_ptr<mlir::Pass> createNpuMemPlanPass();
+
 }// namespace npux
 
 #endif

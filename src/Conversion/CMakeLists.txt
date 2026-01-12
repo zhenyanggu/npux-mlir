@@ -9,7 +9,6 @@ add_subdirectory(ONNXToTOSA)
 
 add_subdirectory(NpuPartition)
 add_subdirectory(NpuTiling)
-add_subdirectory(NpuBufferization)
 add_subdirectory(NpuToLLVM)
 
 

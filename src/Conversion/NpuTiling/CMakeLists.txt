@@ -1,5 +1,6 @@
 add_onnx_mlir_library(NpuTiling
     ElemWise.cpp
+    NpuTiling.cpp
 
     LINK_LIBS PUBLIC
     # === 基础 MLIR 库 ===
@@ -18,4 +19,5 @@ add_onnx_mlir_library(NpuTiling
     MLIRTilingInterface     # fix: cast<TilingInterface>
     MLIRSCFTransforms       # fix: scf::tileUsingSCF
     MLIRDialectUtils        # fix: getAsOpFoldResult
+    OMCompilerOptions
 )

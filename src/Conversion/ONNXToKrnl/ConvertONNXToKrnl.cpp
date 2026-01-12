@@ -24,7 +24,10 @@
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 #include "src/Dialect/Mlir/VectorMachineSupport.hpp"
 
-#include "src/Dialect/npux/ir/npuxDialect.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "src/Conversion/NpuBufferization/NpuBufferizationHelper.hpp"
+
+#include "src/Compiler/CompilerOptions.hpp"
 
 using namespace mlir;
 
@@ -295,8 +298,6 @@ void populateONNXToKrnlConversionPattern(RewritePatternSet &patterns,
   populateLoweringONNXLayoutTransformOpPattern(patterns, typeConverter, ctx, enableParallel);
   populateLoweringONNXShapeTransformOpPattern(patterns, typeConverter, ctx);
   // clang-format on
-
-  npu_middle::populateLoweringNpuxToNpuMiddlePatterns(patterns, typeConverter, ctx);
 }
 
 //===----------------------------------------------------------------------===//
@@ -367,6 +368,13 @@ void FrontendToKrnlLoweringPass::runOnOperation() {
   ModuleOp module = getOperation();
   // Perform dim analysis (useful for SIMD but also to avoid broadcast
   // expressions in index access patterns).
+  if (hasTarget(TargetKind::NPU)) {
+    if (failed(RunNpuBufferization(module))) {
+      return signalPassFailure();
+    }
+  }
+
+  KrnlTypeConverter krnlTypeConverter;
   DimAnalysis *dimAnalysis = new DimAnalysis(module);
   dimAnalysis->analyze();
 
@@ -394,15 +402,11 @@ void FrontendToKrnlLoweringPass::runOnOperation() {
   // memref dealloc, the previous the following statement is commented out
   // (Chentong)
 
-
-  target.addLegalDialect<npu_middle::NpuMiddleDialect>();
-
-
-
   target.addIllegalOp<mlir::memref::DeallocOp>();
 
-
-  target.addIllegalDialect<npux::npuxDialect>();
+  if (hasTarget(TargetKind::NPU)) {
+  target.addIllegalOp<bufferization::ToBufferOp,bufferization::ToTensorOp>();
+  }
 
   // TODO: enable this once more ops are supported.
   // We also define the ONNX dialect as Illegal so that the conversion will
@@ -434,7 +438,6 @@ void FrontendToKrnlLoweringPass::runOnOperation() {
   RewritePatternSet patterns(&getContext());
 
   // Convert types to legal types for the Krnl dialect.
-  KrnlTypeConverter krnlTypeConverter;
   target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
     // FuncOp is legal only if types have been converted to Std types.
     return krnlTypeConverter.isSignatureLegal(op.getFunctionType());
@@ -460,6 +463,9 @@ void FrontendToKrnlLoweringPass::runOnOperation() {
   for (auto *accel : onnx_mlir::accel::Accelerator::getAccelerators())
     accel->rewritePatternONNXToKrnl(patterns, krnlTypeConverter, &getContext());
 
+  if (hasTarget(TargetKind::NPU)) {
+  populateBufferizationCleanUpHelperPatterns(patterns);
+  }
   // With the target and rewrite patterns defined, we can now attempt the
   // conversion. The conversion will signal failure if any of our `illegal`
   // operations were not converted successfully.

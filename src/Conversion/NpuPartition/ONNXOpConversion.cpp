@@ -14,81 +14,320 @@
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+
+#include "src/Conversion/NpuPartition/NpuQuantHelper.hpp"
 
 using namespace mlir;
 
 namespace npux {
 
-struct GeluToLinalg : public OpRewritePattern<ONNXGeluOp> {
-  using OpRewritePattern<ONNXGeluOp>::OpRewritePattern;
+struct GeluToLinalg : public OpConversionPattern<ONNXGeluOp> {
+  using OpConversionPattern<ONNXGeluOp>::OpConversionPattern;
 
-  // === 必须实现的静态检查函数 ===
   static bool isHardwareSupported(ONNXGeluOp op) {
-    // 你的硬件检查逻辑
     return true;
   }
 
-  // === 转换逻辑 ===
+
   LogicalResult matchAndRewrite(
-      ONNXGeluOp op, PatternRewriter &rewriter) const override {
+      ONNXGeluOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    
     Location loc = op.getLoc();
-    Value input = op.getX();
-    auto inputType = mlir::cast<RankedTensorType>(input.getType());
-    Type elementType = inputType.getElementType();
 
-    // 1. 准备 Output (Empty Tensor)
+    // 1. 向上匹配 Dequantize
+    Value originInput = op.getX();
+    auto dequantOp = originInput.getDefiningOp<ONNXDequantizeLinearOp>();
+    if (!dequantOp) return failure();
+
+    Value quantizedInput = dequantOp.getX(); // int8 Input
+    auto inScaleOpt = getScalarQuantParams(dequantOp).scale;
+    auto inZpOpt = getScalarQuantParams(dequantOp).zeroPoint;
+    if (!inScaleOpt || !inZpOpt) return failure();
+
+    // 2. 向下匹配 Quantize
+    if (!op.getResult().hasOneUse()) return failure();
+    Operation *userOp = *op.getResult().getUsers().begin();
+    auto quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(userOp);
+    if (!quantOp) return failure();
+
+    auto outputType = mlir::dyn_cast<RankedTensorType>(quantOp.getResult().getType());
+    if (!outputType) return failure();
+
+    auto outScaleOpt = getScalarQuantParams(quantOp).scale;
+    auto outZpOpt = getScalarQuantParams(quantOp).zeroPoint;
+    if (!outScaleOpt || !outZpOpt) return failure();
+
+    // ============================================================
+    // 3. 创建包裹层 (scf.execute_region)
+    // ============================================================
+    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(
+        loc, outputType /* Result Type: int8 */
+    );
+
+    // === 【进入 Region 内部】 ===
+
+    OpBuilder::InsertionGuard guard(rewriter);
+    
+    rewriter.createBlock(&executeRegion.getRegion());
+
+
     Value emptyTensor = rewriter.create<bufferization::AllocTensorOp>(
-            loc, inputType, /*dynamicSizes=*/ValueRange{});
+            loc, outputType, /*dynamicSizes=*/ValueRange{});
 
-    // 2. Maps & Iterators (标准 Elementwise 配置)
+    // B. Maps & Iterators
     SmallVector<AffineMap, 2> indexingMaps = {
-        rewriter.getMultiDimIdentityMap(inputType.getRank()),
-        rewriter.getMultiDimIdentityMap(inputType.getRank())};
+        rewriter.getMultiDimIdentityMap(outputType.getRank()), 
+        rewriter.getMultiDimIdentityMap(outputType.getRank())};
     SmallVector<utils::IteratorType> iteratorTypes(
-        inputType.getRank(), utils::IteratorType::parallel);
+        outputType.getRank(), utils::IteratorType::parallel);
 
-    // 3. 创建 linalg.generic
+    // C. 创建 Linalg Generic
     auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
-        /*resultTypes=*/inputType,
-        /*inputs=*/input,
-        /*outputs=*/emptyTensor, // 下面我们会换掉这个
+        /*resultTypes=*/outputType,
+        /*inputs=*/quantizedInput, 
+        /*outputs=*/emptyTensor,
         indexingMaps, iteratorTypes,
         /*bodyBuilder=*/[&](OpBuilder &b, Location loc, ValueRange args) {
-          // 【关键修改】不要只 Yield args[0]
-          // 加一点虚假的计算，防止被 Canonicalizer 优化成 Copy。
-          // 比如：y = x + x (虽然数学不对，但后端只看 library_call，所以没关系)
-          // 这样编译器就认为这是一个“加法操作”，不敢随便删了。
-          Value dummyResult = b.create<arith::AddFOp>(loc, args[0], args[0]);
-          b.create<linalg::YieldOp>(loc, dummyResult);
+            Value in = args[0];
+            Value dummyResult = b.create<arith::AddIOp>(loc, in, in);
+            b.create<linalg::YieldOp>(loc, dummyResult);
         });
 
-    // === 4. 贴标签 (传家宝) ===
-
-    // 标签 A: 身份识别 (给 CodeGen 看)
-    // 告诉后端：虽然我 body 里写的是 yield x，但我其实是 Gelu！
-    linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_gelu"));
-
+    // D. 设置 Attr
+    linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_gelu")); 
     linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    linalgOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScaleOpt));
+    linalgOp->setAttr("in_zp", rewriter.getIntegerAttr(
+        rewriter.getI32Type(), static_cast<int64_t>(inZpOpt)));
+    linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScaleOpt));
+    linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(
+        rewriter.getI16Type(), static_cast<int64_t>(outZpOpt)));
 
-    // 标签 B: 硬件限制 (给 Tiling Pass 看)
-    // 假设 Gelu 单元一次只能算 32x32，你就贴个 32
-    // 这个值你可以从你的 NPU 硬件配置表里查
-    // 如果是 Add 算子，可能这里就贴 64
-    rewriter.replaceOp(op, linalgOp.getResults());
+    // E. Region 结束，返回 Linalg 的结果
+    rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
 
-    // 也可以直接在这里把 tile size 以 attribute 形式挂上去，
-    // 比如叫 "npux.tile_size"，这样通用的 tiling pass 读这个值就行了
-    // 这里假设 Gelu 只能处理 rank 维度的切分建议
-    linalgOp->setAttr("npux.max_tile_size",
-        rewriter.getI32ArrayAttr({32, 32, 32, 32})); // 示例
+    // === 退出 Region (guard 析构) ===
+
+    // ============================================================
+    // 4. 替换外部 Op
+    // ============================================================
+    rewriter.replaceOp(quantOp, executeRegion.getResults());
+
+    rewriter.eraseOp(op);
+    if (dequantOp->hasOneUse()) {
+        rewriter.eraseOp(dequantOp);
+    }
 
     return success();
   }
 };
 
-// 注册！
-// 这里也不会产生歧义，这就是一个 Registration
+struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
+  using OpConversionPattern<ONNXConvOp>::OpConversionPattern;
+
+  static bool isHardwareSupported(ONNXConvOp op) { return true; }
+
+  // 辅助函数：报告错误
+  LogicalResult reportError(Operation *op, ConversionPatternRewriter &rewriter,
+                            const std::string &msg) const {
+    llvm::errs() << "[[ConvToLinalg FAIL]] " << msg << "\n";
+    return rewriter.notifyMatchFailure(op, msg);
+  }
+
+
+  LogicalResult matchAndRewrite(ONNXConvOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    // 1. Input Side
+    Value originInput = op.getX();
+    auto dequantX = originInput.getDefiningOp<ONNXDequantizeLinearOp>();
+    if (!dequantX) return reportError(op, rewriter, "Input not from Dequantize");
+
+    Value quantizedX = dequantX.getX();
+    auto xScale = getScalarQuantParams(dequantX).scale;
+    auto xZp = getScalarQuantParams(dequantX).zeroPoint;
+    if (!xScale || !xZp) return reportError(op, rewriter, "Input params missing");
+
+    // 2. Weight Side
+    Value originWeight = op.getW();
+    auto dequantW = originWeight.getDefiningOp<ONNXDequantizeLinearOp>();
+    if (!dequantW) return reportError(op, rewriter, "Weight not from Dequantize");
+
+    Value quantizedW = dequantW.getX();
+    
+
+    // 3. Bias Side
+    Value bias = op.getB();
+    bool hasBias = !mlir::isa<NoneType>(bias.getType());
+    
+    // [Fix 1] 专门定义一个变量来记录 Bias 的 Dequant Op，以便稍后删除
+    ONNXDequantizeLinearOp dequantBias = nullptr; 
+
+    if (hasBias) {
+      if (auto db = bias.getDefiningOp<ONNXDequantizeLinearOp>()) {
+        dequantBias = db; // 记录下来！
+        bias = db.getX(); // 获取 Int32 的 Bias 输入
+      }
+    }
+
+    // 4. Output Side
+    if (!op.getResult().hasOneUse()) return failure();
+    auto quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(*op.getResult().getUsers().begin());
+    if (!quantOp) return failure();
+    auto outputType = mlir::dyn_cast<RankedTensorType>(quantOp.getResult().getType());
+
+    auto outScale = getScalarQuantParams(quantOp).scale;
+    auto outZp = getScalarQuantParams(quantOp).zeroPoint;
+    if (!outScale || !outZp) return failure();
+
+    // ============================================================
+    // Linalg Generation
+    // ============================================================
+    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outputType);
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.createBlock(&executeRegion.getRegion());
+
+      // === Explicit Padding ===
+      Value inputToLinalg = quantizedX; 
+      SmallVector<int64_t> padsVal;
+      if (auto padsAttr = op.getPadsAttr()) {
+         for(auto p : padsAttr) padsVal.push_back(mlir::cast<IntegerAttr>(p).getInt());
+      }
+      
+      bool needPadding = !padsVal.empty() && llvm::any_of(padsVal, [](int64_t v){ return v > 0; });
+      
+      if (needPadding && padsVal.size() == 4) {
+          int64_t pH_begin = padsVal[0];
+          int64_t pW_begin = padsVal[1];
+          int64_t pH_end = padsVal[2];
+          int64_t pW_end = padsVal[3];
+          
+          // [Fix 1] 准备填充值 (i8)
+          Value padVal = rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr((int8_t)xZp));
+          
+          // [Fix 2] 准备 Low/High 参数
+          // 使用 OpFoldResult 存储 Attribute (静态值)，完全匹配 build 签名
+          SmallVector<OpFoldResult> low, high;
+          
+          // Low: [0, 0, pH_begin, pW_begin]
+          low.push_back(rewriter.getIndexAttr(0));
+          low.push_back(rewriter.getIndexAttr(0));
+          low.push_back(rewriter.getIndexAttr(pH_begin));
+          low.push_back(rewriter.getIndexAttr(pW_begin));
+
+          // High: [0, 0, pH_end, pW_end]
+          high.push_back(rewriter.getIndexAttr(0));
+          high.push_back(rewriter.getIndexAttr(0));
+          high.push_back(rewriter.getIndexAttr(pH_end));
+          high.push_back(rewriter.getIndexAttr(pW_end));
+          
+          // [Fix 3] 计算 Result Type (Static Shape)
+          auto srcType = mlir::cast<RankedTensorType>(quantizedX.getType());
+          auto inputShape = srcType.getShape();
+          SmallVector<int64_t> paddedShape = {
+              inputShape[0], inputShape[1], 
+              inputShape[2] + pH_begin + pH_end, 
+              inputShape[3] + pW_begin + pW_end
+          };
+          auto paddedType = RankedTensorType::get(paddedShape, srcType.getElementType());
+
+          // [Fix 4] 调用 create，直接传入 padVal，不需要 lambda
+          // 签名匹配: (Type resultType, Value source, ArrayRef<OpFoldResult> low, ArrayRef<OpFoldResult> high, Value constantPadValue, bool nofold)
+          auto padOp = rewriter.create<tensor::PadOp>(
+              loc, 
+              paddedType,     // resultType
+              quantizedX,     // source
+              low,            // low
+              high,           // high
+              padVal,         // constantPadValue <--- 关键！直接传值
+              /*nofold=*/false 
+          );
+          
+          inputToLinalg = padOp.getResult();
+      }
+
+      Value emptyTensor = rewriter.create<bufferization::AllocTensorOp>(loc, outputType, ValueRange{});
+
+      MLIRContext *ctx = rewriter.getContext();
+      auto d0 = getAffineDimExpr(0, ctx); 
+      auto d1 = getAffineDimExpr(1, ctx); 
+      auto d2 = getAffineDimExpr(2, ctx); 
+      auto d3 = getAffineDimExpr(3, ctx); 
+      auto d4 = getAffineDimExpr(4, ctx); 
+      auto d5 = getAffineDimExpr(5, ctx); 
+      auto d6 = getAffineDimExpr(6, ctx); 
+
+      // Input Map logic: OH + KH -> IH
+      auto inputMap = AffineMap::get(7, 0, {d0, d4, d2 + d5, d3 + d6}, ctx);
+      auto weightMap = AffineMap::get(7, 0, {d1, d4, d5, d6}, ctx);
+      auto outputMap = AffineMap::get(7, 0, {d0, d1, d2, d3}, ctx);
+
+      SmallVector<AffineMap> maps = {inputMap, weightMap};
+      SmallVector<Value> inputs = {inputToLinalg, quantizedW}; 
+
+      if (hasBias) {
+        maps.push_back(AffineMap::get(7, 0, {d1}, ctx));
+        inputs.push_back(bias);
+      }
+      maps.push_back(outputMap);
+
+      SmallVector<utils::IteratorType> iterators = {
+          utils::IteratorType::parallel, utils::IteratorType::parallel,
+          utils::IteratorType::parallel, utils::IteratorType::parallel,
+          utils::IteratorType::reduction, utils::IteratorType::reduction,
+          utils::IteratorType::reduction};
+
+      auto linalgOp = rewriter.create<linalg::GenericOp>(
+          loc, outputType, inputs, emptyTensor, maps, iterators,
+          [&](OpBuilder &b, Location loc, ValueRange args) {
+            Value in = args[0];
+            Value w = args[1];
+            Value res = b.create<arith::MulIOp>(loc, in, w);
+            b.create<linalg::YieldOp>(loc, res);
+          });
+      
+      linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_conv_nchwc32"));
+      linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+      linalgOp->setAttr("in_scale", rewriter.getF32FloatAttr(xScale));
+      linalgOp->setAttr("in_zp", rewriter.getI32IntegerAttr((int32_t)xZp));
+      linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
+      linalgOp->setAttr("out_zp", rewriter.getI32IntegerAttr((int32_t)outZp));
+      
+      if (auto strides = op.getStridesAttr()) linalgOp->setAttr("strides", strides);
+      if (auto dilations = op.getDilationsAttr()) linalgOp->setAttr("dilations", dilations);
+
+      rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
+    }
+
+    rewriter.replaceOp(quantOp, executeRegion.getResults());
+
+    rewriter.eraseOp(op);
+
+
+    if (dequantW && dequantW->hasOneUse()) {
+        rewriter.eraseOp(dequantW);
+    }
+    if (dequantX && dequantX->hasOneUse()) {
+        rewriter.eraseOp(dequantX);
+    }
+
+    if (dequantBias && dequantBias->hasOneUse()) {
+        rewriter.eraseOp(dequantBias);
+    }
+
+    return success();
+  }
+};
+
+
+
 static npux::NPUOpRegistration<GeluToLinalg, ONNXGeluOp> registerGelu;
+//static npux::NPUOpRegistration<ConvToLinalg, ONNXConvOp> registerConv;
 
 void registerNpuOpConversions() {};
 

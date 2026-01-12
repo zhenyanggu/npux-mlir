@@ -19,10 +19,12 @@ add_onnx_mlir_library(OMKrnlToLLVM
   KrnlUnaryMath.cpp
   KrnlVectorTypeCast.cpp 
   RuntimeAPI.cpp
+  ../NpuToLLVM/ConvertNpuxToLLVM.cpp
 
   LINK_LIBS PUBLIC
   OMAccelerator
   OMSupport
+  OMCompilerOptions
   MLIRAffineToStandard
   MLIRArithTransforms
   MLIRFuncDialect

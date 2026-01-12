@@ -3,5 +3,4 @@
 add_subdirectory(Mlir)
 add_subdirectory(Krnl)
 add_subdirectory(ONNX)
-add_subdirectory(npux)
-add_subdirectory(NpuMiddle)
+add_subdirectory(Npux)

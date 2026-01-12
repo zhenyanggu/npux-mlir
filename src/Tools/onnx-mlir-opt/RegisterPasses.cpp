@@ -165,66 +165,61 @@ void registerOMPasses(int optLevel) {
 
 
 void registerNpuPasses() {
-  // 1. Labeling
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createONNXOpLabelPass();
-  });
 
-  // 2. Outlining
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuOutlinePass();
   });
 
-  // 3. Conversion (ONNX -> Linalg)
-  // 注意：因为你的 PassWrapper 里写了 getArgument()="convert-npu-onnx-to-linalg"
-  // 所以注册后，命令行参数就是这个。
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createONNXToLinalgNpuPass();
   });
 
-  // 4. ElemWise Tiling
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuElemWiseTilingPass();
   });
 
-  // 5. Bufferization
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuBufferizationPass();
-  });
-
-  // 6. Signature Rewrite
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuSignatureRewritePass();
-  });
-
-  // 7. Memory Placement
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuMemoryPlacementPass();
   });
 
-  // 8. SRAM Promotion
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuSramPromotionPass();
   });
 
-  // 9. Instruction Lowering
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuInstructionLoweringPass();
   });
 
-  // 10. Inline
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuInlinePass();
   });
 
-  // 11. Memory Allocation
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuMemoryAllocationPass();
   });
 
-  // 12. Finalize LLVM
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuFinalizeLLVMPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuDPSConversionPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuMergePass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuTilingPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createConvertLinalgToNpuPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuMemPlanPass();
   });
 }
 

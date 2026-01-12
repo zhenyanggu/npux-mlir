@@ -20,6 +20,8 @@
 #include "onnx-mlir/Compiler/OMCompilerTypes.h"
 #include "src/Compiler/CompilerOptions.hpp"
 
+#include "src/Compiler/NpuConfig.hpp"
+
 #define DEBUG_TYPE "compiler_options"
 
 // Default env var where to find default options, when defined.
@@ -101,6 +103,29 @@ bool split_input_file;                                 // onnx-mlir-opt only
 bool verify_diagnostics;                               // onnx-mlir-opt only
 bool verify_passes;                                    // onnx-mlir-opt only
 bool allowUnregisteredDialects;                        // onnx-mlir-opt only
+
+std::vector<TargetKind> Targets;
+
+bool hasTarget(TargetKind target) {
+    for (auto k : Targets) {
+        if (k == target) return true;
+    }
+    return false;
+}
+
+static llvm::cl::list<TargetKind, std::vector<TargetKind>> targetOpt(
+    "target",
+    llvm::cl::desc("Specify target hardware backends (comma separated)."),
+    llvm::cl::location(Targets), 
+    llvm::cl::values(
+        clEnumValN(TargetKind::NPU, "npu", "Enable specific NPU optimization"),
+        clEnumValN(TargetKind::GPU, "gpu", "Enable generic GPU optimization"),
+        clEnumValN(TargetKind::None, "none", "No specific target")
+    ),
+    llvm::cl::CommaSeparated,
+    llvm::cl::ZeroOrMore,
+    llvm::cl::cat(OnnxMlirCommonOptions)
+);
 
 // Category for common options shared between onnx-mlir and onnx-mlir-opt.
 llvm::cl::OptionCategory OnnxMlirCommonOptions("common options",
@@ -1383,6 +1408,7 @@ void removeUnrelatedOptions(
 // llvm::cl::ParseCommandLineOptions should be called from main.
 void initCompilerConfig() {
   // Test option requirements.
+  npux::NPUConfig::getInstance().loadConfigIfNeeded();
   if (!ONNXOpStats.empty() && emissionTarget <= EmitONNXIR)
     llvm::errs()
         << "\nWarning: --onnx-op-stats requires targets like --EmitMLIR, "

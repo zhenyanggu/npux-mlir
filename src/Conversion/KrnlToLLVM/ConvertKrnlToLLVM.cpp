@@ -62,10 +62,16 @@
 #include "src/Conversion/KrnlToLLVM/ConvertKrnlToLLVM.hpp"
 #include "src/Conversion/KrnlToLLVM/KrnlToLLVMHelper.hpp"
 #include "src/Conversion/KrnlToLLVM/RuntimeAPI.hpp"
+#include "src/Conversion/NpuToLLVM/ConvertNpuxToLLVM.hpp"
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 #include "src/Dialect/Krnl/KrnlOps.hpp"
 #include "src/Pass/Passes.hpp"
 #include "src/Support/Common.hpp"
+
+#include "src/Conversion/NpuToLLVM/ConvertNpuxToLLVM.hpp"
+#include "src/Dialect/Npux/NpuxOps.hpp"
+
+#include "src/Compiler/CompilerOptions.hpp"
 
 using namespace mlir;
 
@@ -928,8 +934,10 @@ void ConvertKrnlToLLVMPass::runOnOperation() {
       outputOMTensorOwnerships, singleEntryPoint, entryGlobalOps,
       inSigGlobalOps, outSigGlobalOps, inputMemRefTypes, outputMemRefTypes,
       verifyInputTensors, enableParallel);
-
-  // Rewrite patterns for accelerators.
+  if (hasTarget(TargetKind::NPU)) {
+    npux::populateNpuxToLLVMConversionPatterns(patterns, typeConverter);
+  }
+ // Rewrite patterns for accelerators.
   for (auto *accel : onnx_mlir::accel::Accelerator::getAccelerators())
     accel->rewritePatternKrnlToLLVM(patterns, typeConverter, ctx);
 

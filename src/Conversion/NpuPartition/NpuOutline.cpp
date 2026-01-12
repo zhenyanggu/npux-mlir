@@ -5,13 +5,14 @@
 //=============================================================================
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
 #include "src/Pass/Passes.hpp"
-#include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "mlir/Transforms/RegionUtils.h"
 
 using namespace mlir;
 
@@ -22,169 +23,113 @@ struct NpuOutlinePass
 
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(NpuOutlinePass)
 
-  llvm::StringRef getArgument() const override { return "onnx-npu-outline"; }
+  llvm::StringRef getArgument() const override { return "npu-outline"; }
   llvm::StringRef getDescription() const override {
-    return "Outline NPU clusters into independent functions.";
+    return "Outline scf.execute_region blocks into independent NPU kernels.";
   }
 
-  // 辅助函数：处理单个 Cluster
-  void outlineCluster(ModuleOp module, func::FuncOp mainFunc, int clusterId,
-      const std::vector<Operation *> &clusterOps) {
-    OpBuilder builder(module.getContext());
-
-    // === 1. 分析输入输出 ===
-    llvm::SetVector<Value> inputs;
-    llvm::SetVector<Value> outputs;
-    llvm::DenseSet<Operation *> clusterOpSet(
-        clusterOps.begin(), clusterOps.end());
-
-    for (Operation *op : clusterOps) {
-      // A. 找输入：如果操作数定义在 Cluster 外部，就是输入
-      for (Value operand : op->getOperands()) {
-        // 如果 operand 是 Block 参数 (比如函数参数)，肯定是输入
-        // 如果 operand 的 DefiningOp 不在 clusterOpSet 里，也是输入
-        Operation *defOp = operand.getDefiningOp();
-        if (!defOp || clusterOpSet.find(defOp) == clusterOpSet.end()) {
-          inputs.insert(operand);
-        }
-      }
-
-      // B. 找输出：如果结果被 Cluster 外部使用了，就是输出
-      for (Value result : op->getResults()) {
-        for (Operation *user : result.getUsers()) {
-          if (clusterOpSet.find(user) == clusterOpSet.end()) {
-            outputs.insert(result);
-            break; // 只要有一个外部 User，它就是 Output
-          }
-        }
-      }
+  std::string getUniqueKernelName(ModuleOp module, StringRef prefix) {
+    int id = 0;
+    while (module.lookupSymbol(prefix.str() + "_" + std::to_string(id))) {
+      id++;
     }
+    return prefix.str() + "_" + std::to_string(id);
+  }
 
-    // === 2. 创建新函数 ===
-    // 名字：npu_kernel_<id>
-    std::string funcName = "npu_kernel_" + std::to_string(clusterId);
+  void outlineRegion(ModuleOp module, scf::ExecuteRegionOp executeOp) {
+    OpBuilder builder(module.getContext());
+    Region &region = executeOp.getRegion();
 
-    // 类型：(inputs) -> (outputs)
-    SmallVector<Type, 4> inputTypes;
-    for (Value v : inputs)
+    // === 1. 使用官方工具分析 Captures (修复点) ===
+    // getUsedValuesDefinedAbove 会自动找到所有在 Region 内使用但定义在 Region 外的值
+    llvm::SetVector<Value> captures;
+    mlir::getUsedValuesDefinedAbove(region, captures);
+
+    // === 2. 创建 Kernel 函数 ===
+    SmallVector<Type> inputTypes;
+    for (Value v : captures)
       inputTypes.push_back(v.getType());
 
-    SmallVector<Type, 4> outputTypes;
-    for (Value v : outputs)
-      outputTypes.push_back(v.getType());
+    ResultRange results = executeOp.getResults();
+    SmallVector<Type> outputTypes(results.getTypes().begin(), results.getTypes().end());
 
+    std::string kernelName = getUniqueKernelName(module, "npu_kernel");
     auto funcType = builder.getFunctionType(inputTypes, outputTypes);
 
-    // 插入到 Module 末尾
     builder.setInsertionPointToEnd(module.getBody());
-    auto newFunc =
-        builder.create<func::FuncOp>(mainFunc.getLoc(), funcName, funcType);
+    auto kernelFunc = builder.create<func::FuncOp>(executeOp.getLoc(), kernelName, funcType);
+    kernelFunc->setAttr("npu.target", builder.getStringAttr("npu"));
+    kernelFunc.setVisibility(SymbolTable::Visibility::Private);
 
-    // 【关键】加上 target="npu" 属性，为了给后续的 Conversion Pass 识别
-    newFunc->setAttr("npu.target", builder.getStringAttr("npu"));
-    // 私有函数，不导出符号
-    newFunc.setVisibility(SymbolTable::Visibility::Private);
+    // === 3. 填充函数体 ===
+    Block *entryBlock = kernelFunc.addEntryBlock();
+    IRMapping mapping;
 
-    // === 3. 填充函数体 (Clone Ops) ===
-    Block *entryBlock = newFunc.addEntryBlock();
+    // 3.1 映射 Captures -> BlockArgs
+    for (auto [idx, captureVal] : llvm::enumerate(captures)) {
+      mapping.map(captureVal, entryBlock->getArgument(idx));
+    }
+
     builder.setInsertionPointToStart(entryBlock);
 
-    // 映射表：旧值 (Main里的) -> 新值 (Kernel里的 BlockArg 或 Clone 结果)
-    IRMapping mapping; // 旧版 MLIR 请用 BlockAndValueMapping
-
-    // 3.1 映射输入参数
-    for (auto [idx, input] : llvm::enumerate(inputs)) {
-      mapping.map(input, entryBlock->getArgument(idx));
+    // 3.2 Clone Op (排除 Terminator)
+    Block &srcBlock = region.front();
+    for (Operation &op : srcBlock.without_terminator()) {
+      builder.clone(op, mapping);
     }
 
-    // 3.2 克隆 Op
-    for (Operation *op : clusterOps) {
-      builder.clone(*op, mapping);
+    // 3.3 处理 Terminator (scf.yield -> func.return)
+    auto yieldOp = cast<scf::YieldOp>(srcBlock.getTerminator());
+    SmallVector<Value> returnOperands;
+    for (Value val : yieldOp.getOperands()) {
+      // 必须从 mapping 中查找。如果是内部值，肯定在 map 里；如果是 capture，也在 map 里。
+      Value mappedVal = mapping.lookup(val);
+      
+      // 【安全检查】如果 mappedVal 为空，说明前面的 clone 或 capture 分析有误
+      // 这通常意味着 val 是一个未被捕获的外部值，或者 clone 遗漏了。
+      if (!mappedVal) {
+        // Fallback: 如果它是一个常量或未被捕获的外部值（理论上不应发生），尝试直接使用
+        // 但为了调试，我们这里做一个断言，因为这往往是 Crash 的根源
+        llvm::errs() << "Error: Value not mapped for return: " << val << "\n";
+        assert(mappedVal && "Yield operand not found in mapping! Use-Def chain broken.");
+      }
+      returnOperands.push_back(mappedVal);
     }
+    builder.create<func::ReturnOp>(yieldOp.getLoc(), returnOperands);
 
-    // 3.3 创建 Return Op
-    SmallVector<Value, 4> newReturns;
-    for (Value oldOutput : outputs) {
-      newReturns.push_back(mapping.lookup(oldOutput));
-    }
-    builder.create<func::ReturnOp>(mainFunc.getLoc(), newReturns);
-
-    // === 4. 在原位置创建 Call Op 并替换 ===
-// 获取 Cluster 的最后一个 Op
-    Operation *lastOp = clusterOps.back();
-
-    // 【核心修正】：将插入点设置在 lastOp 的“前面” (SetInsertionPoint)
-    // 1. 依赖安全：lastOp 能运行，说明此时所有 Input 都 ready 了。
-    // 2. 结构安全：即使 lastOp 是 Return，插在它前面也不会破坏 Block 的 Terminator 约束。
-    builder.setInsertionPoint(lastOp);
-
+    // === 4. 替换调用 ===
+    builder.setInsertionPoint(executeOp);
     auto callOp = builder.create<func::CallOp>(
-        lastOp->getLoc(), 
-        newFunc, 
-        inputs.getArrayRef()
+        executeOp.getLoc(),
+        kernelFunc,
+        captures.getArrayRef()
     );
 
-    for (auto [idx, oldOutput] : llvm::enumerate(outputs)) {
-      // 这里的 oldOutput 可能是 const Value，导致无法调用 replaceAllUsesWith
-      // 解决方法：直接复制一份 Value (Value
-      // 本质是轻量级指针，复制是廉价且合法的)
-      Value mutableOutput = oldOutput;
-      mutableOutput.replaceAllUsesWith(callOp.getResult(idx));
-    }
+    // 替换 execute_region 的结果用途
+    executeOp.replaceAllUsesWith(callOp.getResults());
 
-    bool erasedTerminator = false;
-    for (Operation *op : clusterOps) {
-      if (op->hasTrait<OpTrait::IsTerminator>()) {
-        erasedTerminator = true;
-      }
-    }
-
-
-    // 4.2 删掉旧 Op (注意要按反向顺序删，防止 use-def
-    // 链报错，或者直接最后统一删)
-    for (auto it = clusterOps.rbegin(); it != clusterOps.rend(); ++it) {
-      (*it)->erase();
-    }
-
-    // 【补丁】：如果刚才删掉了 Terminator，现在 Block 结尾应该是 CallOp。
-    // 我们需要在 CallOp 后面补一个 Return。
-    if (erasedTerminator) {
-        // 将 Builder 移到 Block 的最末端 (也就是 CallOp 后面)
-        builder.setInsertionPointToEnd(lastOp->getBlock());
-        // 创建新的 Return
-        builder.create<func::ReturnOp>(mainFunc.getLoc(), callOp.getResults());
-    }
-
+    // === 5. 安全删除 ===
+    // 此时 executeOp 应该是无用的。
+    // 如果 executeOp 内部还有 Op 被外部引用（理论上不可能，除非 IR 非法），erase 会崩溃。
+    // Drop all references explicitly just in case (though erase does this).
+    executeOp.erase();
   }
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+    SmallVector<scf::ExecuteRegionOp> regionsToOutline;
 
-    // 我们假设所有的 NPU Op 都在 FuncOp 里面 (通常是 main)
-    // 遍历所有非 NPU 的函数 (防止递归处理)
-    SmallVector<func::FuncOp, 4> funcsToProcess;
-    for (auto func : module.getOps<func::FuncOp>()) {
-      if (!func->hasAttr("npu.target")) {
-        funcsToProcess.push_back(func);
-      }
-    }
-
-    for (auto func : funcsToProcess) {
-      // 1. 扫描并按照 Cluster ID 分组
-      // 使用 MapVector 保持插入顺序，这对保持 Op 的拓扑序很重要！
-      llvm::MapVector<int, std::vector<Operation *>> clusters;
-
-      func.walk([&](Operation *op) {
-        if (auto attr = op->getAttrOfType<IntegerAttr>("npu.cluster_id")) {
-          int id = attr.getInt();
-          clusters[id].push_back(op);
-        }
+    // 收集
+    module.walk([&](func::FuncOp func) {
+      if (func->hasAttr("npu.target")) return;
+      func.walk([&](scf::ExecuteRegionOp op) {
+        regionsToOutline.push_back(op);
       });
+    });
 
-      // 2. 对每个 Cluster 执行 Outline
-      for (auto &[id, ops] : clusters) {
-        outlineCluster(module, func, id, ops);
-      }
+    // 执行
+    for (auto op : regionsToOutline) {
+      outlineRegion(module, op);
     }
   }
 };
@@ -194,4 +139,3 @@ struct NpuOutlinePass
 std::unique_ptr<Pass> npux::createNpuOutlinePass() {
   return std::make_unique<NpuOutlinePass>();
 }
-

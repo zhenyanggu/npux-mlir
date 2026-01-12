@@ -63,6 +63,12 @@ typedef enum {
   // clang-format on
 } OptReport;
 
+enum class TargetKind {
+    None,
+    NPU,
+    GPU
+};
+
 extern const std::string modelSizeStr[];
 
 // Common options shared between onnx-mlir and onnx-mlir-opt.
@@ -150,6 +156,9 @@ extern bool verify_passes;             // onnx-mlir-opt only
 extern bool allowUnregisteredDialects; // onnx-mlir-opt only
 
 extern std::string customEnvFlags;
+
+extern std::vector<TargetKind> Targets;
+bool hasTarget(TargetKind target);
 
 // The customEnvFlags must be scanned before the normal options.
 bool parseCustomEnvFlagsCommandLineOption(int argc, const char *const *argv,

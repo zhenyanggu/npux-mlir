@@ -5,4 +5,4 @@ add_subdirectory(onnx-mlir-reduce)
 add_subdirectory(lrodata-script)
 add_subdirectory(binary-decoder)
 add_subdirectory(onnx-lsp-server)
-add_subdirectory(npux-opt)
+

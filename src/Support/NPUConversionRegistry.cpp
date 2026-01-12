@@ -19,11 +19,13 @@ void NPUConversionRegistry::registerOp(StringRef opName, CheckFn check, AddPatte
     getRegistry()[opName.str()] = {check, addPattern};
 }
 
-bool NPUConversionRegistry::isSupported(Operation* op) {
+// [新增] 实现动态添加 Illegal Ops
+void NPUConversionRegistry::setIllegalOps(ConversionTarget& target, MLIRContext* context) {
     auto& registry = getRegistry();
-    auto it = registry.find(op->getName().getStringRef().str());
-    if (it == registry.end()) return false;
-    return it->second.check(op);
+    for (auto& [opName, entry] : registry) {
+        // 使用 opName 字符串和 context 构造 OperationName，动态添加到 target
+        target.addIllegalOp(OperationName(opName, context));
+    }
 }
 
 void NPUConversionRegistry::populatePatterns(RewritePatternSet& patterns) {

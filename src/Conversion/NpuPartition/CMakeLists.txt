@@ -1,8 +1,9 @@
 add_onnx_mlir_library(NpuPatition
     ConvertONNXToLinalgNpu.cpp
-    ONNXOpLabel.cpp
     NpuOutline.cpp
     ONNXOpConversion.cpp
+    NpuQuantHelper.cpp
+    NpuMerge.cpp
 
     LINK_LIBS PUBLIC
     OMONNXOps
@@ -11,5 +12,12 @@ add_onnx_mlir_library(NpuPatition
     MLIRPass
     MLIRSupport
     MLIRTransforms
+    MLIRTransformUtils
     MLIRFuncDialect
+    MLIRLinalgDialect
+    MLIRArithDialect
+    MLIRTensorDialect
+    MLIRBufferizationDialect
+    MLIRSCFDialect
+    OMONNXDialectCore
 )

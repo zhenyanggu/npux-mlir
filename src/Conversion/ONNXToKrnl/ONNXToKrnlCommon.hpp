@@ -48,7 +48,6 @@
 
 
 
-#include "src/Conversion/ONNXToKrnl/NPU/NpuxToNpuMiddleUtils.h"
 
 //===----------------------------------------------------------------------===//
 // Extends OnnxBuilder with member functions that might generate Krnl dialect

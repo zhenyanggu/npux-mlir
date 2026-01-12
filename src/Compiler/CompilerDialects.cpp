@@ -42,6 +42,7 @@
 #include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
 #include "mlir/Dialect/Func/Extensions/AllExtensions.h"
 
+#include "src/Dialect/Npux/NpuxOps.hpp"
 using namespace mlir;
 
 namespace onnx_mlir {
@@ -67,6 +68,7 @@ DialectRegistry registerDialects(ArrayRef<accel::Accelerator::Kind> accels) {
   registry.insert<cf::ControlFlowDialect>();
   registry.insert<tensor::TensorDialect>();
   registry.insert<bufferization::BufferizationDialect>();
+  registry.insert<npux::NpuxDialect>();
 
   mlir::linalg::registerTilingInterfaceExternalModels(registry);
   arith::registerBufferizableOpInterfaceExternalModels(registry);
