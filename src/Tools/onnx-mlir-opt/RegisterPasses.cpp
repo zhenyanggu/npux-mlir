@@ -178,28 +178,13 @@ void registerNpuPasses() {
     return npux::createNpuElemWiseTilingPass();
   });
 
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuMemoryPlacementPass();
-  });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuSramPromotionPass();
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuInstructionLoweringPass();
-  });
-
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuInlinePass();
-  });
-
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuMemoryAllocationPass();
-  });
-
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuFinalizeLLVMPass();
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
@@ -221,6 +206,8 @@ void registerNpuPasses() {
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuMemPlanPass();
   });
+
+  npux::registerBufferDeallocTest();
 }
 
 

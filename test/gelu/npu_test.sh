@@ -28,7 +28,7 @@ enter_stage() {
     local folder_name="$1"
     
     # 序号自增
-    STAGE_COUNT=$((STAGE_COUNT + 1))
+    STAGE_COUNT=$((STAGE_COUNT + 1))=
     CURRENT_DIR="$folder_name"
     
     echo ""

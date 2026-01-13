@@ -287,6 +287,14 @@ void addKrnlToLLVMPasses(
 
   pm.addPass(mlir::memref::createFoldMemRefAliasOpsPass());
 
+  if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+      pm.addPass(npux::createConvertLinalgToNpuPass());
+      pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(npux::createNpuMemPlanPass());
+      pm.addPass(npux::createNpuInlinePass());
+      pm.addPass(mlir::memref::createExpandStridedMetadataPass());
+    }
+
   if (profileIR)
     pm.addNestedPass<func::FuncOp>(onnx_mlir::createInstrumentCleanupPass());
 
@@ -359,11 +367,7 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR){
     if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
-      pm.addPass(npux::createConvertLinalgToNpuPass());
-      pm.addPass(mlir::createCanonicalizerPass());
-      pm.addPass(npux::createNpuMemPlanPass());
-      pm.addPass(npux::createNpuInlinePass());
-      pm.addPass(mlir::memref::createExpandStridedMetadataPass());
+      pm.addPass(npux::createNpuSramPromotionPass());
     }
     addKrnlToLLVMPasses(pm, outputNameNoExt, /*enableCSE=*/true);
   }

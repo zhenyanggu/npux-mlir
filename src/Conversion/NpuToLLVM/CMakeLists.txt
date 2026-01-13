@@ -1,17 +1,13 @@
 add_onnx_mlir_library(NpuToLLVM
-    NpuInstructionLowering.cpp
-    NpuMemoryPlacement.cpp
     NpuInline.cpp
-    NpuAlloc.cpp
-    NpuSramPromotion.cpp
-    NpuFinalizeLLVM.cpp
-
     ConvertLinalgToNpux.cpp
     NpuxConversionHelper.cpp
     SfuOpConvert.cpp
     NpuMemoryManagement.cpp
     NpuMemPlan.cpp
     InsertNpuLifecycle.cpp
+    NpuSramPromotion.cpp
+    BufferDeallocTest.cpp
 
     LINK_LIBS PUBLIC
     # --- 基础库 ---
