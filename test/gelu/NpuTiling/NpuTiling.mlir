@@ -28,11 +28,26 @@ module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i6
   "onnx.EntryPoint"() {func = @main_graph} : () -> ()
   func.func private @npu_kernel_0(%arg0: tensor<1x16xi8>) -> tensor<1x16xi8> attributes {npu.target = "npu"} {
     %0 = bufferization.alloc_tensor() : tensor<1x16xi8>
-    %1 = linalg.generic {indexing_maps = [#map, #map], iterator_types = ["parallel", "parallel"], library_call = "npu_gelu"} ins(%arg0 : tensor<1x16xi8>) outs(%0 : tensor<1x16xi8>) attrs =  {in_scale = 0.0193985682 : f32, in_zp = 13 : i32, npu.target = "npu", out_scale = 0.00922563393 : f32, out_zp = -110 : i16} {
-    ^bb0(%in: i8, %out: i8):
-      %2 = arith.addi %in, %in : i8
-      linalg.yield %2 : i8
-    } -> tensor<1x16xi8>
+    %c0 = arith.constant 0 : index
+    %c0_0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c16 = arith.constant 16 : index
+    %c1_1 = arith.constant 1 : index
+    %c2 = arith.constant 2 : index
+    %1 = scf.for %arg1 = %c0 to %c1 step %c1_1 iter_args(%arg2 = %0) -> (tensor<1x16xi8>) {
+      %2 = scf.for %arg3 = %c0_0 to %c16 step %c2 iter_args(%arg4 = %arg2) -> (tensor<1x16xi8>) {
+        %extracted_slice = tensor.extract_slice %arg0[%arg1, %arg3] [1, 2] [1, 1] : tensor<1x16xi8> to tensor<1x2xi8>
+        %extracted_slice_2 = tensor.extract_slice %arg4[%arg1, %arg3] [1, 2] [1, 1] : tensor<1x16xi8> to tensor<1x2xi8>
+        %3 = linalg.generic {indexing_maps = [#map, #map], iterator_types = ["parallel", "parallel"], library_call = "npu_gelu"} ins(%extracted_slice : tensor<1x2xi8>) outs(%extracted_slice_2 : tensor<1x2xi8>) attrs =  {in_scale = 0.0193985682 : f32, in_zp = 13 : i32, npu.target = "npu", npu.tiled, out_scale = 0.00922563393 : f32, out_zp = -110 : i16} {
+        ^bb0(%in: i8, %out: i8):
+          %4 = arith.addi %in, %in : i8
+          linalg.yield %4 : i8
+        } -> tensor<1x2xi8>
+        %inserted_slice = tensor.insert_slice %3 into %arg4[%arg1, %arg3] [1, 2] [1, 1] : tensor<1x2xi8> into tensor<1x16xi8>
+        scf.yield %inserted_slice : tensor<1x16xi8>
+      }
+      scf.yield %2 : tensor<1x16xi8>
+    }
     return %1 : tensor<1x16xi8>
   }
 }

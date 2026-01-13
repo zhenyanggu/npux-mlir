@@ -2,23 +2,6 @@
 #map1 = affine_map<(d0) -> (-d0 + 9, 3)>
 module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128", llvm.target_triple = "x86_64-unknown-linux-gnu", "onnx-mlir.symbol-postfix" = "model_quant_only_gelu"} {
   func.func @main_graph(%arg0: memref<1x1x8x8xf32> {onnx.name = "input"}) -> (memref<1x10xf32> {onnx.name = "output"}) attributes {llvm.emit_c_interface} {
-    %c0 = arith.constant 0 : index
-    %c2 = arith.constant 2 : index
-    %c2_i16 = arith.constant 2 : i16
-    %c1_i16 = arith.constant 1 : i16
-    %c64_i16 = arith.constant 64 : i16
-    %c0_i32 = arith.constant 0 : i32
-    %false = arith.constant false
-    %c0_i8 = arith.constant 0 : i8
-    %c0_i16 = arith.constant 0 : i16
-    %c20341_i16 = arith.constant 20341 : i16
-    %c-20_i16 = arith.constant -20 : i16
-    %c13_i32 = arith.constant 13 : i32
-    %c19348_i16 = arith.constant 19348 : i16
-    %c-21_i16 = arith.constant -21 : i16
-    %c-110_i16 = arith.constant -110 : i16
-    %c8_i8 = arith.constant 8 : i8
-    %true = arith.constant true
     %cst = arith.constant 0.000000e+00 : f32
     %c16 = arith.constant 16 : index
     %cst_0 = arith.constant 1.000000e+00 : f32
@@ -217,19 +200,7 @@ module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i6
       affine.store %39, %reshape_17[%arg1] : memref<16xi8>
     }
     %19 = npux.alloc : memref<1x16xi8>
-    scf.for %arg1 = %c0 to %c16 step %c2 {
-      %base_buffer, %offset, %sizes:2, %strides:2 = memref.extract_strided_metadata %14 : memref<1x16xi8> -> memref<i8>, index, index, index, index, index
-      %reinterpret_cast_21 = memref.reinterpret_cast %base_buffer to offset: [%arg1], sizes: [1, 2], strides: [16, 1] : memref<i8> to memref<1x2xi8, strided<[16, 1], offset: ?>>
-      %base_buffer_22, %offset_23, %sizes_24:2, %strides_25:2 = memref.extract_strided_metadata %19 : memref<1x16xi8> -> memref<i8>, index, index, index, index, index
-      %reinterpret_cast_26 = memref.reinterpret_cast %base_buffer_22 to offset: [%arg1], sizes: [1, 2], strides: [16, 1] : memref<i8> to memref<1x2xi8, strided<[16, 1], offset: ?>>
-      %alloc_27 = memref.alloc() {npu.offset = 0 : i32} : memref<1x2xi8, 2>
-      %alloc_28 = memref.alloc() {npu.offset = 32 : i32} : memref<1x2xi8, 2>
-      npux.dma_mvin %reinterpret_cast_21, %alloc_27 shape(%c2_i16 x %c1_i16) stride(%c2_i16, %c64_i16) cfg(%c0_i8, %c0_i8, %c0_i8) quant(%false, %c0_i32, %c0_i16, %c0_i16) : memref<1x2xi8, strided<[16, 1], offset: ?>>, memref<1x2xi8, 2>
-      npux.sfu_run gelu %c8_i8, %true in(%alloc_27) shape(%c2_i16 x %c1_i16) out(%alloc_28) quant(%c13_i32, %c-110_i16, %c20341_i16, %c-20_i16, %c19348_i16, %c-21_i16) : memref<1x2xi8, 2>, memref<1x2xi8, 2>
-      npux.dma_mvout %reinterpret_cast_26, %alloc_28 shape(%c2_i16 x %c1_i16) stride(%c2_i16, %c64_i16) cfg(%c0_i8, %c0_i8, %c0_i8) quant(%false, %c0_i32, %c0_i16, %c0_i16) : memref<1x2xi8, strided<[16, 1], offset: ?>>, memref<1x2xi8, 2>
-      memref.dealloc %alloc_27 : memref<1x2xi8, 2>
-      memref.dealloc %alloc_28 : memref<1x2xi8, 2>
-    }
+    call @npu_kernel_0(%14, %19) : (memref<1x16xi8>, memref<1x16xi8>) -> ()
     %alloc_18 = memref.alloc() {alignment = 16 : i64} : memref<1x16xf32>
     affine.for %arg1 = 0 to 1 {
       affine.for %arg2 = 0 to 16 {
@@ -289,5 +260,37 @@ module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i6
     return %alloc_20 : memref<1x10xf32>
   }
   "krnl.entry_point"() {func = @main_graph, numInputs = 1 : i32, numOutputs = 1 : i32, signature = "[    { \22type\22 : \22f32\22 , \22dims\22 : [1 , 1 , 8 , 8] , \22name\22 : \22input\22 }\0A\0A]\00@[   { \22type\22 : \22f32\22 , \22dims\22 : [1 , 10] , \22name\22 : \22output\22 }\0A\0A]\00"} : () -> ()
+  func.func private @npu_kernel_0(%arg0: memref<1x16xi8>, %arg1: memref<1x16xi8>) attributes {llvm.emit_c_interface, npu.target = "npu"} {
+    %true = arith.constant true
+    %c8_i8 = arith.constant 8 : i8
+    %c-110_i16 = arith.constant -110 : i16
+    %c-21_i16 = arith.constant -21 : i16
+    %c19348_i16 = arith.constant 19348 : i16
+    %c13_i32 = arith.constant 13 : i32
+    %c-20_i16 = arith.constant -20 : i16
+    %c20341_i16 = arith.constant 20341 : i16
+    %c0_i16 = arith.constant 0 : i16
+    %c0_i8 = arith.constant 0 : i8
+    %false = arith.constant false
+    %c0_i32 = arith.constant 0 : i32
+    %c64_i16 = arith.constant 64 : i16
+    %c1_i16 = arith.constant 1 : i16
+    %c2_i16 = arith.constant 2 : i16
+    %c2 = arith.constant 2 : index
+    %c16 = arith.constant 16 : index
+    %c0 = arith.constant 0 : index
+    scf.for %arg2 = %c0 to %c16 step %c2 {
+      %subview = memref.subview %arg0[0, %arg2] [1, 2] [1, 1] : memref<1x16xi8> to memref<1x2xi8, strided<[16, 1], offset: ?>>
+      %subview_0 = memref.subview %arg1[0, %arg2] [1, 2] [1, 1] : memref<1x16xi8> to memref<1x2xi8, strided<[16, 1], offset: ?>>
+      %alloc = memref.alloc() {npu.offset = 0 : i32} : memref<1x2xi8, 2>
+      %alloc_1 = memref.alloc() {npu.offset = 32 : i32} : memref<1x2xi8, 2>
+      npux.dma_mvin %subview, %alloc shape(%c2_i16 x %c1_i16) stride(%c2_i16, %c64_i16) cfg(%c0_i8, %c0_i8, %c0_i8) quant(%false, %c0_i32, %c0_i16, %c0_i16) : memref<1x2xi8, strided<[16, 1], offset: ?>>, memref<1x2xi8, 2>
+      npux.sfu_run gelu %c8_i8, %true in(%alloc) shape(%c2_i16 x %c1_i16) out(%alloc_1) quant(%c13_i32, %c-110_i16, %c20341_i16, %c-20_i16, %c19348_i16, %c-21_i16) : memref<1x2xi8, 2>, memref<1x2xi8, 2>
+      npux.dma_mvout %subview_0, %alloc_1 shape(%c2_i16 x %c1_i16) stride(%c2_i16, %c64_i16) cfg(%c0_i8, %c0_i8, %c0_i8) quant(%false, %c0_i32, %c0_i16, %c0_i16) : memref<1x2xi8, strided<[16, 1], offset: ?>>, memref<1x2xi8, 2>
+      memref.dealloc %alloc : memref<1x2xi8, 2>
+      memref.dealloc %alloc_1 : memref<1x2xi8, 2>
+    }
+    return
+  }
 }
 
