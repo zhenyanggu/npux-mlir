@@ -45,7 +45,7 @@ struct GeluToLinalg : public OpConversionPattern<ONNXGeluOp> {
     Value quantizedInput = dequantOp.getX(); // int8 Input
     auto inScaleOpt = getScalarQuantParams(dequantOp).scale;
     auto inZpOpt = getScalarQuantParams(dequantOp).zeroPoint;
-    if (!inScaleOpt || !inZpOpt) return failure();
+
 
     // 2. 向下匹配 Quantize
     if (!op.getResult().hasOneUse()) return failure();
@@ -58,7 +58,7 @@ struct GeluToLinalg : public OpConversionPattern<ONNXGeluOp> {
 
     auto outScaleOpt = getScalarQuantParams(quantOp).scale;
     auto outZpOpt = getScalarQuantParams(quantOp).zeroPoint;
-    if (!outScaleOpt || !outZpOpt) return failure();
+
 
     // ============================================================
     // 3. 创建包裹层 (scf.execute_region)
