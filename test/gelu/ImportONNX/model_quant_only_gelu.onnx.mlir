@@ -1,4 +1,3 @@
-#map = affine_map<(d0, d1) -> (d0, d1)>
 module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128", llvm.target_triple = "x86_64-unknown-linux-gnu", "onnx-mlir.symbol-postfix" = "model_quant_only_gelu"} {
   func.func @main_graph(%arg0: tensor<1x1x8x8xf32> {onnx.name = "input"}) -> (tensor<1x10xf32> {onnx.name = "output"}) {
     %0 = onnx.Constant dense<[[[[-0.136620969, -0.154645011, -0.0283638649], [-0.101517521, 0.263210744, -0.153906196], [0.0119882822, -0.153886318, 0.280502141]]], [[[-0.24400568, -0.134665653, 0.3290084], [0.257611632, -0.174255535, 0.0433042459], [0.330585659, -0.188850045, -0.00950316619]]], [[[0.21247682, 0.267664492, 0.0366977081], [-0.235352874, -0.0487430096, -0.278206289], [-0.173427939, 0.22541818, 0.0731731653]]], [[[0.0216948986, 0.0877867564, -0.295153588], [-0.319416642, -0.199906945, 0.280566186], [-0.132105947, 0.199486494, -0.242532134]]]]> : tensor<4x1x3x3xf32>
@@ -19,21 +18,13 @@ module attributes {llvm.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i6
     %15 = "onnx.Gemm"(%14, %2, %3) {alpha = 1.000000e+00 : f32, beta = 1.000000e+00 : f32, onnx_node_name = "node_linear", transA = 0 : si64, transB = 1 : si64} : (tensor<1x256xf32>, tensor<16x256xf32>, tensor<16xf32>) -> tensor<1x16xf32>
     %Y, %Mean, %InvStdDev = "onnx.LayerNormalization"(%15, %4, %5) {axis = -1 : si64, epsilon = 9.99999974E-6 : f32, onnx_node_name = "node_layer_norm", stash_type = 1 : si64} : (tensor<1x16xf32>, tensor<16xf32>, tensor<16xf32>) -> (tensor<1x16xf32>, none, none)
     %16 = "onnx.QuantizeLinear"(%Y, %10, %9) {axis = 1 : si64, onnx_node_name = "layer_norm_QuantizeLinear", saturate = 1 : si64} : (tensor<1x16xf32>, tensor<f32>, tensor<i8>) -> tensor<1x16xi8>
-    %17 = call @npu_kernel_0(%16) : (tensor<1x16xi8>) -> tensor<1x16xi8>
-    %18 = "onnx.DequantizeLinear"(%17, %12, %11) {axis = 1 : si64, onnx_node_name = "gelu_DequantizeLinear"} : (tensor<1x16xi8>, tensor<f32>, tensor<i8>) -> tensor<1x16xf32>
-    %19 = "onnx.Gemm"(%18, %6, %7) {alpha = 1.000000e+00 : f32, beta = 1.000000e+00 : f32, onnx_node_name = "node_linear_1", transA = 0 : si64, transB = 1 : si64} : (tensor<1x16xf32>, tensor<10x16xf32>, tensor<10xf32>) -> tensor<1x10xf32>
-    %20 = "onnx.Softmax"(%19) {axis = 1 : si64, onnx_node_name = "node_softmax"} : (tensor<1x10xf32>) -> tensor<1x10xf32>
-    return %20 : tensor<1x10xf32>
+    %17 = "onnx.DequantizeLinear"(%16, %10, %9) {axis = 1 : si64, onnx_node_name = "layer_norm_DequantizeLinear"} : (tensor<1x16xi8>, tensor<f32>, tensor<i8>) -> tensor<1x16xf32>
+    %18 = "onnx.Gelu"(%17) {approximate = "none", onnx_node_name = "node_gelu"} : (tensor<1x16xf32>) -> tensor<1x16xf32>
+    %19 = "onnx.QuantizeLinear"(%18, %12, %11) {axis = 1 : si64, onnx_node_name = "gelu_QuantizeLinear", saturate = 1 : si64} : (tensor<1x16xf32>, tensor<f32>, tensor<i8>) -> tensor<1x16xi8>
+    %20 = "onnx.DequantizeLinear"(%19, %12, %11) {axis = 1 : si64, onnx_node_name = "gelu_DequantizeLinear"} : (tensor<1x16xi8>, tensor<f32>, tensor<i8>) -> tensor<1x16xf32>
+    %21 = "onnx.Gemm"(%20, %6, %7) {alpha = 1.000000e+00 : f32, beta = 1.000000e+00 : f32, onnx_node_name = "node_linear_1", transA = 0 : si64, transB = 1 : si64} : (tensor<1x16xf32>, tensor<10x16xf32>, tensor<10xf32>) -> tensor<1x10xf32>
+    %22 = "onnx.Softmax"(%21) {axis = 1 : si64, onnx_node_name = "node_softmax"} : (tensor<1x10xf32>) -> tensor<1x10xf32>
+    return %22 : tensor<1x10xf32>
   }
   "onnx.EntryPoint"() {func = @main_graph} : () -> ()
-  func.func private @npu_kernel_0(%arg0: tensor<1x16xi8>) -> tensor<1x16xi8> attributes {npu.target = "npu"} {
-    %0 = bufferization.alloc_tensor() : tensor<1x16xi8>
-    %1 = linalg.generic {indexing_maps = [#map, #map], iterator_types = ["parallel", "parallel"], library_call = "npu_gelu"} ins(%arg0 : tensor<1x16xi8>) outs(%0 : tensor<1x16xi8>) attrs =  {in_scale = 0.0193985682 : f32, in_zp = 13 : i32, npu.target = "npu", out_scale = 0.00922563393 : f32, out_zp = -110 : i16} {
-    ^bb0(%in: i8, %out: i8):
-      %2 = arith.addi %in, %in : i8
-      linalg.yield %2 : i8
-    } -> tensor<1x16xi8>
-    return %1 : tensor<1x16xi8>
-  }
 }
-

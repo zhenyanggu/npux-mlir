@@ -313,7 +313,7 @@ void NpuRuntime::coalesce(BlockHeader* block) {
 
 extern "C" {
 
-int _mlir_ciface_npu_init() {
+int npu_init() {
     if (g_npu_runtime) return 0; // Already initialized
     
     g_npu_runtime = new NpuRuntime();
@@ -325,27 +325,27 @@ int _mlir_ciface_npu_init() {
     return 0;
 }
 
-void _mlir_ciface_npu_destroy() {
+void npu_destroy() {
     if (g_npu_runtime) {
         delete g_npu_runtime;
         g_npu_runtime = nullptr;
     }
 }
 
-void* _mlir_ciface_npu_mem_alloc(size_t size) {
+void* npu_mem_alloc(size_t size) {
     if (!g_npu_runtime) {
-        if (_mlir_ciface_npu_init() < 0) return nullptr;
+        if (npu_init() < 0) return nullptr;
     }
     return g_npu_runtime->alloc(size);
 }
 
-void _mlir_ciface_npu_mem_free(void* ptr) {
+void npu_mem_free(void* ptr) {
     if (g_npu_runtime) {
         g_npu_runtime->free(ptr);
     }
 }
 
-void _mlir_ciface_npu_dma_mvin(
+void npu_dma_mvin(
     void* host_ptr,
     uint32_t sram_addr,
     uint16_t col_num,
@@ -379,7 +379,7 @@ void _mlir_ciface_npu_dma_mvin(
     }
 }
 
-void _mlir_ciface_npu_dma_mvout(
+void npu_dma_mvout(
     void* host_ptr,
     uint32_t sram_addr,
     uint16_t col_num,
@@ -413,7 +413,7 @@ void _mlir_ciface_npu_dma_mvout(
     }
 }
 
-void _mlir_ciface_npu_sfu_run(
+void npu_sfu_run(
     uint8_t  op_type,
     uint8_t  int_type,
     bool     is_quant,
@@ -447,7 +447,7 @@ void _mlir_ciface_npu_sfu_run(
     }
 }
 
-void _mlir_ciface_npu_dma_mvin_test(
+void npu_dma_mvin_test(
     void* host_ptr,
     uint32_t sram_addr,
     uint16_t col_num,
@@ -480,7 +480,7 @@ void _mlir_ciface_npu_dma_mvin_test(
     }
 }
 
-void _mlir_ciface_npu_dma_mvout_test(
+void npu_dma_mvout_test(
     void* host_ptr,
     uint32_t sram_addr,
     uint16_t col_num,

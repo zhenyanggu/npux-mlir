@@ -154,13 +154,13 @@ private:
 
 extern "C" {
     // C Interface for MLIR / Compiler
-    int _mlir_ciface_npu_init();
-    void _mlir_ciface_npu_destroy();
-    void* _mlir_ciface_npu_mem_alloc(size_t size);
-    void _mlir_ciface_npu_mem_free(void* ptr);
+    int npu_init();
+    void npu_destroy();
+    void* npu_mem_alloc(size_t size);
+    void npu_mem_free(void* ptr);
 
     // DMA Interface
-    void _mlir_ciface_npu_dma_mvin(
+    void npu_dma_mvin(
         void* host_ptr,
         uint32_t sram_addr,
         uint16_t col_num,
@@ -176,7 +176,7 @@ extern "C" {
         uint16_t quant_shift
     );
 
-    void _mlir_ciface_npu_dma_mvout(
+    void npu_dma_mvout(
         void* host_ptr,
         uint32_t sram_addr,
         uint16_t col_num,
@@ -191,7 +191,7 @@ extern "C" {
         uint16_t quant_scale,
         uint16_t quant_shift
     );
-void _mlir_ciface_npu_sfu_run(
+void npu_sfu_run(
         uint8_t  op_type,
         uint8_t  int_type,
         bool     is_quant,
@@ -209,7 +209,7 @@ void _mlir_ciface_npu_sfu_run(
 
     
     // Test Interface (Dummy Print)
-    void _mlir_ciface_npu_dma_mvin_test(
+    void npu_dma_mvin_test(
         void* host_ptr,
         uint32_t sram_addr,
         uint16_t col_num,
@@ -225,7 +225,7 @@ void _mlir_ciface_npu_sfu_run(
         uint16_t quant_shift
     );
 
-    void _mlir_ciface_npu_dma_mvout_test(
+    void npu_dma_mvout_test(
         void* host_ptr,
         uint32_t sram_addr,
         uint16_t col_num,
