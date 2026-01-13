@@ -189,6 +189,43 @@ run_pass "Bufferize" \
 # ------------------------------------------------
 enter_stage "NpuToLLVM"
 
+run_pass "Npu Sram Promotion" \
+        "--npu-sram-promotion" \
+        "NpuSramPromotion.mlir"
+
+run_pass "convert-vector-to-scf" \
+        "--convert-vector-to-scf" \
+        "convert-vector-to-scf.mlir"
+
+run_pass "lower-affine" \
+        "--lower-affine" \
+        "lower-affine.mlir"
+
+run_pass "lower-krnl-region" \
+        "--lower-krnl-region" \
+        "lower-krnl-region.mlir"
+
+run_pass "buffer-loop-hoisting" \
+        "--buffer-loop-hoisting" \
+        "buffer-loop-hoisting.mlir"
+
+
+run_pass "buffer-dealloc-test" \
+        "--buffer-dealloc-test " \
+        "buffer-dealloc-test.mlir"
+
+run_pass "optimize-allocation-liveness" \
+        "--optimize-allocation-liveness" \
+        "optimize-allocation-liveness.mlir"
+
+run_pass "convert-bufferization-to-memref" \
+        "--convert-bufferization-to-memref" \
+        "convert-bufferization-to-memref.mlir"
+
+run_pass "fold-memref-alias-ops" \
+        "--fold-memref-alias-ops" \
+        "fold-memref-alias-ops.mlir"      
+
 run_pass "Npux Conversion" \
          "--convert-linalg-to-npux --canonicalize" \
          "ConvertLinalgToNpux.mlir"
@@ -202,7 +239,7 @@ run_pass "Npu Inline" \
         "NpuInline.mlir"
 
 run_pass "LLVM Lowering" \
-        "--convert-krnl-to-llvm --target=npu" \
+        "--convert-krnl-to-llvm --target=npu --reconcile-unrealized-casts --canonicalize" \
         "llvm.mlir"
 
 # ------------------------------------------------
