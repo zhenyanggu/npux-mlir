@@ -100,6 +100,7 @@ public:
     // 2. Output Quant
     double outScale = 1.0;
     if (auto attr = op->getAttrOfType<FloatAttr>("out_scale")) outScale = attr.getValueAsDouble();
+    outScale=1.0/outScale;
     auto outFP = getFixedPointParams(outScale);
 
     Value vOutScale = rewriter.create<arith::ConstantIntOp>(loc, outFP.multiplier, 16);
