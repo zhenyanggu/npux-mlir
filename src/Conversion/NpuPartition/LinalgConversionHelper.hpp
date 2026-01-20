@@ -1,6 +1,12 @@
-#ifndef NPU_QUANT_HELPER_HPP
-#define NPU_QUANT_HELPER_HPP
+//==============================================================
+//src/Conversion/NpuPartition/LinalgConversionHelper.hpp
+// this file provides helper functions for NPU partitioning conversions.
+//==============================================================
 
+
+#pragma once
+
+#include "mlir/Support/LLVM.h"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "mlir/IR/BuiltinAttributes.h"
 
@@ -45,7 +51,19 @@ QuantizationParam getScalarQuantParams(OpT op) {
   return params;
 }
 
+mlir::SmallVector<mlir::Value> getDynamicSizes(
+    mlir::OpBuilder &rewriter, mlir::Location loc, mlir::Value input, 
+    mlir::ArrayRef<int64_t> shape);
+
+
+void populateLinalgConversionPatterns(mlir::RewritePatternSet &patterns);
+
+void populateLinalgLayerNormPattern(mlir::RewritePatternSet &patterns);
+
+void populateLinalgConvPattern(mlir::RewritePatternSet &patterns);
+
+void populateLinalgUnaryPatterns(mlir::RewritePatternSet &patterns);
+
 }// namespace npux
 
 
-#endif // NPU_QUANT_HELPER_HPP

@@ -19,45 +19,19 @@ using namespace npux;
 
 namespace {
 
-  static bool isNpuManagedMemref(Value memref) {
-  // 1. 必须是 Space 0 (Host Memory)
-  auto type = dyn_cast<MemRefType>(memref.getType());
-  if (!type || type.getMemorySpaceAsInt() != 0) return false;
-
-  // 2. 检查用途：是否被 NPU 相关的 Op 使用
-  for (Operation *user : memref.getUsers()) {
-    // A. 直接传给 NPU Kernel (CallOp)
-    if (auto callOp = dyn_cast<func::CallOp>(user)) {
-      auto module = callOp->getParentOfType<ModuleOp>();
-      auto callee = module.lookupSymbol<func::FuncOp>(callOp.getCallee());
-      if (callee && callee->hasAttr("npu.target")) return true;
-    }
-    
-    // B. 被用作 NPU DMA (CopyOp)
-    // 检查这个 memref 是否参与了和 SRAM (Space 2) 的交互
-    if (auto copyOp = dyn_cast<memref::CopyOp>(user)) {
-       Value src = copyOp.getSource();
-       Value dst = copyOp.getTarget();
-       auto srcType = cast<MemRefType>(src.getType());
-       auto dstType = cast<MemRefType>(dst.getType());
-       
-       // 如果我是源，且目标是 SRAM -> 我是 Input
-       if (src == memref && dstType.getMemorySpaceAsInt() == 2) return true;
-       // 如果我是目标，且源是 SRAM -> 我是 Output
-       if (dst == memref && srcType.getMemorySpaceAsInt() == 2) return true;
-    }
-
-    // C. 如果在同一个 Pass 中 alloc 已经被转成了 npux.alloc，
-    // 那么它的 DeallocOp 的操作数可能已经是 npux.alloc 的结果了
-    // 这种情况下，user 不再是判定标准，而是 definingOp
+// =========================================================
+// 辅助函数：判断 Op 是否在 NPU Kernel 内部
+// =========================================================
+static bool isInNpuKernel(Operation *op) {
+  auto funcOp = op->getParentOfType<func::FuncOp>();
+  if (!funcOp) return false;
+  // 只要函数有 npu.target = "npu" 属性，就认为是 Kernel
+  if (auto attr = funcOp->getAttrOfType<StringAttr>("npu.target")) {
+    return attr.getValue() == "npu";
   }
-  
-  // 3. 补充检查：DefiningOp 是否已经是 npux.alloc
-  // 这是为了处理 DialectConversion 中途状态或多次 Pass 的情况
-  if (memref.getDefiningOp<npux::AllocOp>()) return true;
-
   return false;
 }
+
 struct ConvertLinalgToNpuPass
     : public PassWrapper<ConvertLinalgToNpuPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ConvertLinalgToNpuPass)
@@ -79,13 +53,13 @@ struct ConvertLinalgToNpuPass
     target.addLegalDialect<NpuxDialect>();
     target.addLegalDialect<arith::ArithDialect, memref::MemRefDialect>();
 
+    // B. Linalg Generic 限制
     target.addDynamicallyLegalOp<linalg::GenericOp>(
         [](linalg::GenericOp op) { return !op->hasAttr("npu.target"); });
 
-
+    // C. FuncOp 限制 (用于插入 npux.init)
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
         if (op.getName() == "main_graph" || op.getName() == "main") {
-            // 如果函数体非空，且开头不是 npux.init，则认为非法，触发 InsertNpuLifecyclePattern
             if (!op.getBody().empty()) {
                 auto &entryBlock = op.getBody().front();
                 if (entryBlock.getOps<npux::InitOp>().empty()) {
@@ -96,62 +70,51 @@ struct ConvertLinalgToNpuPass
         return true;
     });
 
+    // =========================================================
+    // D. AllocOp 限制 (简化版)
+    // 逻辑：Space 0 + 在 NPU Kernel 内 = 非法 (需转 npux.alloc)
+    // =========================================================
     target.addDynamicallyLegalOp<memref::AllocOp>([&](memref::AllocOp op) {
-      // 1. 如果已经是 NPU Space (1) 或者 SRAM (2)，则是合法的
-      if (op.getType().getMemorySpaceAsInt() != 0) return true;
-
-      // 2. 检查用途：如果被传入了带有 "npu.target" 的函数，则非法
-      for (Operation *user : op->getUsers()) {
-        if (auto callOp = dyn_cast<func::CallOp>(user)) {
-           // 查找被调用的函数
-           auto module = op->getParentOfType<ModuleOp>();
-           auto callee = module.lookupSymbol<func::FuncOp>(callOp.getCallee());
-           if (callee && callee->hasAttr("npu.target")) {
-             return false; // 非法！强制触发 HostAllocToNpuxPattern
-           }
-        }
+      if (isInNpuKernel(op)) {
+          return false; 
       }
-      return true; // 其他情况（纯CPU使用）是合法的
+      return true; 
     });
 
-    // 4. AllocOp 限制 (Space 0 且被 NPU 使用的必须转 npux.alloc)
-    target.addDynamicallyLegalOp<memref::AllocOp>([&](memref::AllocOp op) {
-      if (op.getType().getMemorySpaceAsInt() != 0) return true; 
-      // 使用提取出来的逻辑：如果是 NPU 内存，则非法 -> 转 npux.alloc
-      if (isNpuManagedMemref(op.getResult())) return false; 
-      return true;
+
+    target.addDynamicallyLegalOp<memref::DeallocOp>([&](memref::DeallocOp op) {
+        Value memref = op.getMemref();
+        auto type = cast<MemRefType>(memref.getType());
+        int space = type.getMemorySpaceAsInt();
+        
+        // 1. SRAM (Space 2) 的 dealloc 必须被移除 -> 非法
+        if (space == 2) return false;
+
+        // 2. DRAM (Space 0) 且在 Kernel 内 -> 必须转 npux.free -> 非法
+        if (space == 0 && isInNpuKernel(op)) {
+            return false;
+        }
+        
+        return true; 
     });
 
     // =========================================================
-    // 5. 新增: CopyOp 限制
-    // 任何涉及 Space 2 (SRAM) 的 Copy 都是非法的，必须转为 DMA
+    // F. CopyOp 限制
+    // 逻辑：只要涉及 SRAM (Space 2)，就是 DMA -> 非法
     // =========================================================
     target.addDynamicallyLegalOp<memref::CopyOp>([&](memref::CopyOp op) {
         auto srcSpace = cast<MemRefType>(op.getSource().getType()).getMemorySpaceAsInt();
         auto dstSpace = cast<MemRefType>(op.getTarget().getType()).getMemorySpaceAsInt();
+        
+        // 只要源或目的有一个是 Space 2，就需要转换为 DMA Op
         if (srcSpace == 2 || dstSpace == 2) return false;
+        
         return true;
-    });
-
-    // =========================================================
-    // 6. 新增: DeallocOp 限制
-    // =========================================================
-    target.addDynamicallyLegalOp<memref::DeallocOp>([&](memref::DeallocOp op) {
-        Value memref = op.getMemref();
-        auto type = cast<MemRefType>(memref.getType());
-        
-        // A. SRAM (Space 2) Dealloc -> 非法 (Pattern里会 erase 掉)
-        if (type.getMemorySpaceAsInt() == 2) return false;
-
-        // B. Host (Space 0) Dealloc
-        // 如果这个 memref 被判定为 NPU 管理的内存 -> 非法 (必须转 npux.free)
-        if (isNpuManagedMemref(memref)) return false; 
-        
-        return true; // 普通 CPU Dealloc -> 合法
     });
 
     // 2. 收集 Patterns
     RewritePatternSet patterns(context);
+    
     npux::populateLinalgToNpuxPatterns(patterns);
 
     if (failed(applyPartialConversion(

@@ -2,10 +2,11 @@ add_onnx_mlir_library(NpuToLLVM
     NpuInline.cpp
     ConvertLinalgToNpux.cpp
     NpuxConversionHelper.cpp
-    SfuOpConvert.cpp
-    NpuMemoryManagement.cpp
+    Npux/SfuOpConvert.cpp
+    Npux/ComputeOpConvert.cpp
+    Npux/NpuMemoryManagement.cpp
     NpuMemPlan.cpp
-    InsertNpuLifecycle.cpp
+    Npux/InsertNpuLifecycle.cpp
     NpuSramPromotion.cpp
     BufferDeallocTest.cpp
 

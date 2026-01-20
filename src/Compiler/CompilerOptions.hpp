@@ -69,6 +69,16 @@ enum class TargetKind {
     GPU
 };
 
+enum class NpuOp {
+    None,
+    Conv,
+    MatMul,
+    LayerNorm,
+    Softmax,
+    Gelu,
+    Gemm
+};
+
 extern const std::string modelSizeStr[];
 
 // Common options shared between onnx-mlir and onnx-mlir-opt.
@@ -159,6 +169,9 @@ extern std::string customEnvFlags;
 
 extern std::vector<TargetKind> Targets;
 bool hasTarget(TargetKind target);
+
+extern std::vector<NpuOp> NpuOps;
+bool hasNpuOp(NpuOp npuOp);
 
 // The customEnvFlags must be scanned before the normal options.
 bool parseCustomEnvFlagsCommandLineOption(int argc, const char *const *argv,

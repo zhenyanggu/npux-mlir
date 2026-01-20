@@ -93,6 +93,7 @@ add_onnx_mlir_library(OMCompilerDialects
   MLIRVectorDialect
 
   MLIRArithValueBoundsOpInterfaceImpl
+  MLIRTensorInferTypeOpInterfaceImpl
 
 
   )

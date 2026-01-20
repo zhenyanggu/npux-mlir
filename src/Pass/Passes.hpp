@@ -139,8 +139,6 @@ std::unique_ptr<mlir::Pass> createONNXToLinalgNpuPass();
 
 std::unique_ptr<mlir::Pass> createNpuOutlinePass();
 
-std::unique_ptr<mlir::Pass> createNpuElemWiseTilingPass();
-
 std::unique_ptr<mlir::Pass> createNpuSramPromotionPass();
 
 
@@ -155,6 +153,10 @@ std::unique_ptr<mlir::Pass> createNpuTilingPass();
 std::unique_ptr<mlir::Pass> createConvertLinalgToNpuPass();
 
 std::unique_ptr<mlir::Pass> createNpuMemPlanPass();
+
+std::unique_ptr<mlir::Pass> createNpuCleanPackPass();
+
+std::unique_ptr<mlir::Pass> createNpuLowerPackPass();
 
 void registerBufferDeallocTest();
 }// namespace npux

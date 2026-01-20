@@ -1,3 +1,36 @@
+# NPUX-MLIR
+
+> ⚠️ **注意**: 本项目目前只支持 **QDQ** 模型。
+
+## 使用步骤
+
+1. **生成配置文件**
+   首先对模型运行 python 目录下脚本：
+   ```bash
+   python3 conv_dse.py -i <input onnx filename> -o <output json file name>
+   ```
+   > 脚本会生成一个 json 文件供编译器使用，如果没有加载 json 文件，编译器会使用默认参数。
+
+2. **运行测试**
+   具体 pass 的使用见 [npu_test.sh](/test/npu_test.sh)
+
+## 选项说明 (Options)
+
+| 选项 (Flag) | 适用阶段 (Pass) | 说明 (Description) |
+| :--- | :--- | :--- |
+| `--npu-ops` | `convert-npu-onnx-to-linalg` | **指定 NPU 算子**。<br>支持传入 `LayerNorm`, `Gelu`, `Conv`, `Softmax`。<br>只有传入的参数才会被识别成 NPU 的 op 并进行转换；如果不使用这个选项，则默认加入项目里注册的所有 op。 |
+| `--npu-tiling-config` | `convert-npu-onnx-to-linalg`<br>`npu-memory-plan` | **加载 Tiling 配置**。<br>传入 `conv_dse.py` 生成的 json 文件，负责配置卷积分块，提供内存分配需要的内存 size。 |
+| `--gelu-tile-size` | `npu-tiling` | **手动覆盖 Tile Size**。<br>覆盖编译器算出来的 tile size，以便测试。 |
+| `--npu-spm-size`<br>`--npu-acc-size`<br>`--npu-sram-size` | `npu-memory-plan` | **手动指定内存大小**。<br>优先级高于 `--npu-tiling-config`。 |
+
+---
+### 👇 以下是原项目文档 / Original README below
+
+<details>
+<summary><strong>点击展开查看原 ONNX-MLIR 文档 (Click to Expand)</strong></summary>
+
+<br>
+
 <!--- SPDX-License-Identifier: Apache-2.0 -->
 <p align="center"><img width="50%" src="docs/logo/onnx-mlir-1280x640.png" /></p>
 
@@ -169,3 +202,6 @@ The ONNX-MLIR code of conduct is described at https://onnx.ai/codeofconduct.html
 ## Projects related/using onnx-mlir
 
 * The [onnx-mlir-serving](https://github.com/IBM/onnx-mlir-serving) project implements a GRPC server written with C++ to serve onnx-mlir compiled models. Benefiting from C++ implementation, ONNX Serving has very low latency overhead and high throughput.
+
+<br>
+</details>

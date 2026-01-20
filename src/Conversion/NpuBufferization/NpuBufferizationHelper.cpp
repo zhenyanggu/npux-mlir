@@ -7,13 +7,13 @@
 
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
-#include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotModuleBufferize.h"
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
+#include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/DialectConversion.h" 
+#include "mlir/Transforms/DialectConversion.h"
 
 using namespace mlir;
 using namespace mlir::bufferization;
@@ -36,16 +36,12 @@ LogicalResult RunNpuBufferization(ModuleOp module) {
   // State 对象
   bufferization::BufferizationState state;
 
-  // 遍历 Module，针对 NPU Kernel 运行
-  for (auto func : module.getOps<func::FuncOp>()) {
-    if (func->hasAttr("npu.target")) {
-      if (failed(bufferization::runOneShotBufferize(func, options, state))) {
-        func.emitError("NPU Kernel One-Shot Bufferization failed");
-        // 修复 2: 普通函数不能调用 signalPassFailure，只能返回 failure()
-        return failure(); 
-      }
-    }
+  if (failed(bufferization::runOneShotBufferize(module, options, state))) {
+    module.emitError("NPU Kernel One-Shot Bufferization failed");
+    // 修复 2: 普通函数不能调用 signalPassFailure，只能返回 failure()
+    return failure();
   }
+
   // 修复 3: 如果成功跑完，返回 success
   return success();
 }
@@ -79,7 +75,8 @@ struct DowngradeToTensorPattern
 
 // 辅助函数：让外部文件也能注册这两个 Pattern
 void populateBufferizationCleanUpHelperPatterns(RewritePatternSet &patterns) {
-  patterns.insert<DowngradeToBufferPattern, DowngradeToTensorPattern>(patterns.getContext());
+  patterns.insert<DowngradeToBufferPattern, DowngradeToTensorPattern>(
+      patterns.getContext());
 }
 
 // 你的 Pass 定义保持不变

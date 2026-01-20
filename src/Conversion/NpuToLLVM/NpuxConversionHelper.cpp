@@ -13,4 +13,5 @@ void npux::populateLinalgToNpuxPatterns(mlir::RewritePatternSet &patterns)
     populateSramDataMovementPatterns(patterns);
     populateHostAllocToNpuxPatterns(patterns);
     populateNpuLifecyclePatterns(patterns);
+    populateLinalgConvToNpuxPattern(patterns);
 }

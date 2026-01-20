@@ -15,14 +15,12 @@
 #include "src/Dialect/ONNX/ONNXDialect.hpp"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "src/Pass/Passes.hpp"
-#include "src/Support/NPUConversionRegistry.hpp"
+#include "src/Compiler/CompilerOptions.hpp"
+#include "src/Conversion/NpuPartition/LinalgConversionHelper.hpp"
 
 
 using namespace mlir;
 
-namespace npux {
-void registerNpuOpConversions();
-}
 
 namespace {
 struct ONNXToLinalgNpuPass
@@ -38,7 +36,6 @@ struct ONNXToLinalgNpuPass
   }
 
   void runOnOperation() override {
-    npux::registerNpuOpConversions();
     ModuleOp module = getOperation();
     MLIRContext *context = &getContext();
 
@@ -52,14 +49,46 @@ struct ONNXToLinalgNpuPass
     target.addLegalDialect<BuiltinDialect>();
     target.addLegalDialect<bufferization::BufferizationDialect>();
     target.addLegalDialect<scf::SCFDialect>();
+    target.addLegalDialect<ONNXDialect>();
 
-    npux::NPUConversionRegistry::setIllegalOps(target, context);
+    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv))
+    {
+      target.addIllegalOp<ONNXConvOp>();
+    }
+    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul))
+    {
+      target.addIllegalOp<ONNXMatMulOp>();
+    }
+    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm))
+    {
+      target.addIllegalOp<ONNXLayerNormalizationOp>();
+    }
+    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax))
+    {
+      target.addIllegalOp<ONNXSoftmaxOp>();
+    }
+    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu))
+    {
+      target.addIllegalOp<ONNXGeluOp>();
+    }
+    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm))
+    {
+      target.addIllegalOp<ONNXGemmOp>();
+    }
+
+    if(onnx_mlir::NpuOps.empty())
+    {
+      target.addIllegalOp<ONNXConvOp, ONNXLayerNormalizationOp,
+                          ONNXSoftmaxOp, ONNXGeluOp>();
+    }
+    
 
 
 
     RewritePatternSet patterns(context);
 
-    npux::NPUConversionRegistry::populatePatterns(patterns);
+    npux::populateLinalgConversionPatterns(patterns);
+
 
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {

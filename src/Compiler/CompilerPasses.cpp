@@ -347,7 +347,7 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
       pm.addPass(npux::createONNXToLinalgNpuPass());
       pm.addPass(npux::createNpuMergePass());
       pm.addPass(npux::createNpuOutlinePass());
-      pm.addNestedPass<func::FuncOp>(npux::createNpuElemWiseTilingPass());
+      pm.addNestedPass<func::FuncOp>(npux::createNpuTilingPass());
   }
 
   if (emissionTarget >= EmitMLIR) {

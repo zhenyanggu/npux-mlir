@@ -127,6 +127,32 @@ static llvm::cl::list<TargetKind, std::vector<TargetKind>> targetOpt(
     llvm::cl::cat(OnnxMlirCommonOptions)
 );
 
+std::vector<NpuOp> NpuOps;
+bool hasNpuOp(NpuOp npuOp) {
+    for (auto op : NpuOps) {
+        if (op == npuOp) return true;
+    }
+    return false;
+}
+
+static llvm::cl::list<NpuOp, std::vector<NpuOp>> npuOpOpt(
+    "npu-ops",
+    llvm::cl::desc("Specify NPU operations to accelerate (comma separated)."),
+    llvm::cl::location(NpuOps), 
+    llvm::cl::values(
+        clEnumValN(NpuOp::Conv, "Conv", "Accelerate Conv operation"),
+        clEnumValN(NpuOp::MatMul, "MatMul", "Accelerate MatMul operation"),
+        clEnumValN(NpuOp::LayerNorm, "LayerNorm", "Accelerate LayerNormalization operation"),
+        clEnumValN(NpuOp::Softmax, "Softmax", "Accelerate Softmax operation"),
+        clEnumValN(NpuOp::Gelu, "Gelu", "Accelerate Gelu operation"),
+        clEnumValN(NpuOp::Gemm, "Gemm", "Accelerate Gemm operation"),
+        clEnumValN(NpuOp::None, "None", "No NPU operation acceleration")
+    ),
+    llvm::cl::CommaSeparated,
+    llvm::cl::ZeroOrMore,
+    llvm::cl::cat(OnnxMlirCommonOptions)
+);
+
 // Category for common options shared between onnx-mlir and onnx-mlir-opt.
 llvm::cl::OptionCategory OnnxMlirCommonOptions("common options",
     "These are options shared between onnx-mlir and onnx-mlir-opt.");
@@ -1408,7 +1434,8 @@ void removeUnrelatedOptions(
 // llvm::cl::ParseCommandLineOptions should be called from main.
 void initCompilerConfig() {
   // Test option requirements.
-  npux::NPUConfig::getInstance().loadConfigIfNeeded();
+  npux::NPUConfig::getInstance().loadHardwareConfigIfNeeded();
+  npux::NPUConfig::getInstance().loadTilingConfigIfNeeded();
   if (!ONNXOpStats.empty() && emissionTarget <= EmitONNXIR)
     llvm::errs()
         << "\nWarning: --onnx-op-stats requires targets like --EmitMLIR, "

@@ -1,6 +1,8 @@
 add_onnx_mlir_library(NpuTiling
     ElemWise.cpp
     NpuTiling.cpp
+    Conv.cpp
+    NpuTilingHelper.cpp
 
     LINK_LIBS PUBLIC
     # === 基础 MLIR 库 ===

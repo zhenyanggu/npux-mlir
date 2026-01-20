@@ -1,13 +1,17 @@
 add_onnx_mlir_library(NpuPatition
     ConvertONNXToLinalgNpu.cpp
     NpuOutline.cpp
-    ONNXOpConversion.cpp
-    NpuQuantHelper.cpp
+    LinalgConversionHelper.cpp
     NpuMerge.cpp
+    NpuCleanPack.cpp
+    NpuLowerPack.cpp
+
+    Linalg/LayerNorm.cpp
+    Linalg/Conv.cpp
+    Linalg/Unary.cpp
 
     LINK_LIBS PUBLIC
     OMONNXOps
-    NpuSupport
     MLIRIR
     MLIRPass
     MLIRSupport

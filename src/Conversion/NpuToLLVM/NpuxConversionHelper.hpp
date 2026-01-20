@@ -21,4 +21,6 @@ namespace npux {
     void populateHostAllocToNpuxPatterns(mlir::RewritePatternSet &patterns);
 
     void populateNpuLifecyclePatterns(mlir::RewritePatternSet &patterns);
+
+    void populateLinalgConvToNpuxPattern(mlir::RewritePatternSet &patterns);
 }

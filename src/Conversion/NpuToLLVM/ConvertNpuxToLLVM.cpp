@@ -4,12 +4,10 @@
 //which will be used in convert-krnl-to-llvm pass
 //================================================
 
-
-
 #include "src/Conversion/NpuToLLVM/ConvertNpuxToLLVM.hpp"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/Conversion/LLVMCommon/Pattern.h" // 通常需要这个来支持 ConvertOpToLLVMPattern
+#include "mlir/Conversion/LLVMCommon/Pattern.h" 
 
 using namespace mlir;
 using namespace npux;
@@ -53,12 +51,22 @@ Value getFlatPtrFromMemRef(Location loc, Value memrefDescVal,
   return finalPtr;
 }
 
+// 【修复】修改 getSramAddress 以支持 npux::SramAllocOp
 Value getSramAddress(Location loc, Value sramMemRef, ConversionPatternRewriter &rewriter) {
-  auto allocOp = sramMemRef.getDefiningOp<memref::AllocOp>();
-  if (!allocOp || !allocOp->hasAttr("npu.offset")) {
+  // 现在定义 Op 是 npux::SramAllocOp
+  auto allocOp = sramMemRef.getDefiningOp<npux::SramAllocOp>();
+  
+  // 增加对 Function Argument 的兼容性（虽然目前主要是 alloc，但为了健壮性）
+  // 如果不是 AllocOp 定义的，可能没有 npu.offset 属性，这通常是逻辑错误
+  if (!allocOp) {
+      return nullptr;
+  }
+
+  if (!allocOp->hasAttr("npu.offset")) {
     // 这里的错误处理最好加上，防止空指针崩溃
     return nullptr;
   }
+
   int32_t offsetVal = allocOp->getAttrOfType<IntegerAttr>("npu.offset").getInt();
   return rewriter.create<LLVM::ConstantOp>(
       loc, rewriter.getI32Type(), rewriter.getI32IntegerAttr(offsetVal));
@@ -76,7 +84,6 @@ public:
     auto module = op->getParentOfType<ModuleOp>();
     auto i32Type = rewriter.getI32Type();
     
-    // Init 返回 int，所以这里 CallOp 需要返回 i32Type，这是对的
     auto fnRef = getOrInsertExternFunc(rewriter, module, "npu_init", i32Type, {});
     auto callOp = rewriter.create<LLVM::CallOp>(op.getLoc(), i32Type, fnRef, ValueRange{});
     
@@ -93,10 +100,8 @@ public:
     auto module = op->getParentOfType<ModuleOp>();
     auto voidType = LLVM::LLVMVoidType::get(getContext());
     
-    // 函数声明需要 voidType
     auto fnRef = getOrInsertExternFunc(rewriter, module, "npu_destroy", voidType, {});
     
-    // 【修复】CallOp 不能有 Result，传 TypeRange{}
     rewriter.create<LLVM::CallOp>(op.getLoc(), TypeRange{}, fnRef, ValueRange{});
     
     rewriter.eraseOp(op);
@@ -105,7 +110,7 @@ public:
 };
 
 // ==========================================
-// 2. Memory (Alloc/Free)
+// 2. Memory (Alloc/Free) - DRAM Only
 // ==========================================
 
 class NpuxAllocLowering : public ConvertOpToLLVMPattern<npux::AllocOp> {
@@ -127,7 +132,6 @@ public:
         loc, i64Type, rewriter.getI64IntegerAttr(totalBytes));
 
     auto voidPtrType = LLVM::LLVMPointerType::get(getContext());
-    // Alloc 返回 ptr，所以 CallOp 需要 result
     auto fnRef = getOrInsertExternFunc(rewriter, op->getParentOfType<ModuleOp>(), 
                                        "npu_mem_alloc", voidPtrType, {i64Type});
     
@@ -167,13 +171,11 @@ public:
     auto voidType = LLVM::LLVMVoidType::get(getContext());
     auto voidPtrType = LLVM::LLVMPointerType::get(getContext());
 
-    // 函数声明需要 voidType
     auto fnRef = getOrInsertExternFunc(rewriter, module, "npu_mem_free", voidType, {voidPtrType});
     
     MemRefDescriptor desc(adaptor.getMemref());
     Value ptr = desc.allocatedPtr(rewriter, op.getLoc());
 
-    // 【修复】CallOp 传 TypeRange{}
     rewriter.create<LLVM::CallOp>(op.getLoc(), TypeRange{}, fnRef, ValueRange{ptr});
     rewriter.eraseOp(op);
     return success();
@@ -221,37 +223,35 @@ public:
     SmallVector<Type> argTypes;
     for(auto v : args) argTypes.push_back(v.getType());
 
-    // 函数声明需要 voidType
     FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, "npu_dma_mvin", voidType, argTypes);
     
-    // 【修复】CallOp 传 TypeRange{}
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
     
     return success();
   }
 };
 
-class NpuxSramAllocLowering : public ConvertOpToLLVMPattern<memref::AllocOp> {
+// 【修复】匹配 npux::SramAllocOp
+class NpuxSramAllocLowering : public ConvertOpToLLVMPattern<npux::SramAllocOp> {
 public:
-  using ConvertOpToLLVMPattern<memref::AllocOp>::ConvertOpToLLVMPattern;
-  LogicalResult matchAndRewrite(memref::AllocOp op, OpAdaptor adaptor,
+  using ConvertOpToLLVMPattern<npux::SramAllocOp>::ConvertOpToLLVMPattern;
+  LogicalResult matchAndRewrite(npux::SramAllocOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    if (op.getType().getMemorySpaceAsInt() != 2) return failure();
-    for (Operation *user : op->getUsers()) {
-      if (!isa<memref::DeallocOp>(user)) return failure();
-    }
+    // SRAM Alloc 在 LLVM 层面不需要任何指令。
+    // 它的 offset 已经被 Plan Pass 计算并在 use-site (如 mvin, sfu_run) 解析了。
+    // 所以这里直接擦除即可。
     rewriter.eraseOp(op);
     return success();
   }
 };
 
-class NpuxSramDeallocLowering : public ConvertOpToLLVMPattern<memref::DeallocOp> {
+// 【修复】匹配 npux::SramFreeOp
+class NpuxSramFreeLowering : public ConvertOpToLLVMPattern<npux::SramFreeOp> {
 public:
-  using ConvertOpToLLVMPattern<memref::DeallocOp>::ConvertOpToLLVMPattern;
-  LogicalResult matchAndRewrite(memref::DeallocOp op, OpAdaptor adaptor,
+  using ConvertOpToLLVMPattern<npux::SramFreeOp>::ConvertOpToLLVMPattern;
+  LogicalResult matchAndRewrite(npux::SramFreeOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const override {
-    auto type = cast<MemRefType>(op.getMemref().getType());
-    if (type.getMemorySpaceAsInt() != 2) return failure();
+    // SRAM Free 只是 Planner 的逻辑指令，生码时无需任何操作。
     rewriter.eraseOp(op);
     return success();
   }
@@ -289,10 +289,8 @@ public:
     SmallVector<Type> argTypes;
     for(auto v : args) argTypes.push_back(v.getType());
 
-    // 函数声明需要 voidType
     FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, "npu_sfu_run", voidType, argTypes);
     
-    // 【修复】CallOp 传 TypeRange{}
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
 
     return success();
@@ -333,12 +331,100 @@ public:
     SmallVector<Type> argTypes;
     for(auto v : args) argTypes.push_back(v.getType());
 
-    // 函数声明需要 voidType
     FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, "npu_dma_mvout", voidType, argTypes);
     
-    // 【修复】CallOp 传 TypeRange{}
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
     
+    return success();
+  }
+};
+
+class NpuxComputeRunLowering : public ConvertOpToLLVMPattern<ComputeRunOp> {
+public:
+  using ConvertOpToLLVMPattern<ComputeRunOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(ComputeRunOp op, OpAdaptor adaptor,
+                                ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    auto i32Type = rewriter.getI32Type();
+
+    Value addrA = getSramAddress(loc, op.getInputA(), rewriter);
+    Value addrB = getSramAddress(loc, op.getInputB(), rewriter);
+    Value addrBias = getSramAddress(loc, op.getBias(), rewriter);
+    Value addrOut = getSramAddress(loc, op.getOutput(), rewriter);
+
+    if (!addrA || !addrB || !addrBias || !addrOut) {
+      return rewriter.notifyMatchFailure(op, "Failed to resolve SRAM address for buffers");
+    }
+
+    auto getI1AsI32 = [&](Value val) -> Value {
+      return rewriter.create<LLVM::ZExtOp>(loc, i32Type, val);
+    };
+
+    auto getEnumAsI32 = [&](auto enumAttr) -> Value {
+      uint32_t val = static_cast<uint32_t>(enumAttr);
+      return rewriter.create<LLVM::ConstantOp>(loc, i32Type, rewriter.getI32IntegerAttr(val));
+    };
+
+    SmallVector<Value> args;
+
+    // 4.1 Operation Control
+    args.push_back(getEnumAsI32(op.getOpType()));      
+    args.push_back(adaptor.getPrecision());            
+    args.push_back(getI1AsI32(adaptor.getIsQuant()));  
+
+    // 4.2 Addresses (SRAM Offsets)
+    args.push_back(addrA);
+    args.push_back(addrB);
+    args.push_back(addrBias);
+    args.push_back(addrOut);
+
+    // 4.3 Dimensions
+    args.push_back(adaptor.getDimH());
+    args.push_back(adaptor.getDimW());
+    args.push_back(adaptor.getDimCIn());
+    args.push_back(adaptor.getDimCOut());
+
+    // 4.4 Strides
+    args.push_back(adaptor.getStrideInA());
+    args.push_back(adaptor.getStrideInB());
+    args.push_back(adaptor.getStrideBias());
+    args.push_back(adaptor.getStrideOut());
+
+    // 4.5 Convolution Specifics
+    args.push_back(adaptor.getKernelSize());
+    args.push_back(adaptor.getStride());
+    args.push_back(adaptor.getDilation());
+    args.push_back(adaptor.getPadTop());
+    args.push_back(adaptor.getPadBottom());
+    args.push_back(adaptor.getPadLeft());
+    args.push_back(adaptor.getPadRight());
+    args.push_back(getI1AsI32(adaptor.getIsGroupConv())); 
+
+    // 4.6 Output Config
+    args.push_back(adaptor.getOutWidth());
+    args.push_back(adaptor.getOutHeight());
+    args.push_back(getI1AsI32(adaptor.getDoAccumulate())); 
+    args.push_back(getI1AsI32(adaptor.getDoRelu()));      
+    args.push_back(getEnumAsI32(op.getReluType()));        
+
+    // 4.7 Quantization Params
+    args.push_back(adaptor.getInputAZp());
+    args.push_back(adaptor.getInputBZp());
+    args.push_back(adaptor.getOutputZp());
+    args.push_back(adaptor.getQuantScale());
+    args.push_back(adaptor.getQuantShift());
+
+    auto module = op->getParentOfType<ModuleOp>();
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    
+    SmallVector<Type> argTypes(args.size(), i32Type);
+
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(
+        rewriter, module, "npu_compute_run", voidType, argTypes);
+
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+
     return success();
   }
 };
@@ -351,9 +437,10 @@ void npux::populateNpuxToLLVMConversionPatterns(RewritePatternSet &patterns,
         NpuxAllocLowering,
         NpuxFreeLowering,
         NpuxDmaMvinLowering,
-        NpuxSramAllocLowering,
-        NpuxSramDeallocLowering,
+        NpuxSramAllocLowering, // 【修复】注册新的 Pattern
+        NpuxSramFreeLowering,  // 【修复】注册新的 Pattern
         NpuxSfuRunLowering,
+        NpuxComputeRunLowering,
         NpuxDmaMvoutLowering
   >(typeConverter);
 }

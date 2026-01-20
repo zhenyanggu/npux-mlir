@@ -3,20 +3,14 @@
 // this file implements the all the tiling patterns for NPU
 //===================================================
 
-#include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
-#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h" 
 #include "src/Pass/Passes.hpp"
 
-#include "src/Conversion/NpuTiling/ElemWise.hpp"
+#include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 
 using namespace mlir;
 
@@ -24,6 +18,7 @@ namespace npux {
 void populateNpuTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
   populateElemWiseTilingPatterns(patterns, context);
+  populateConvTilingPatterns(patterns, context);
 };
 } // namespace npux
 
@@ -46,20 +41,18 @@ struct NpuTilingPass
     }
 
     MLIRContext *context = &getContext();
-
-    ConversionTarget target(*context);
-
-    target.addLegalDialect<tensor::TensorDialect, scf::SCFDialect,
-        arith::ArithDialect, bufferization::BufferizationDialect,
-        linalg::LinalgDialect>();
-    target.addDynamicallyLegalOp<linalg::GenericOp>(
-        [](linalg::GenericOp op) { return op->hasAttr("npu.tiled"); });
-
     RewritePatternSet patterns(context);
 
+    // 添加 Tiling Patterns
     npux::populateNpuTilingPatterns(patterns, context);
 
-    if (failed(applyPartialConversion(func, target, std::move(patterns)))) {
+    // 修改：配置 GreedyRewriteConfig (参考你的例子)
+    GreedyRewriteConfig config;
+    config.setUseTopDownTraversal(true)
+        .enableFolding(true);
+
+    // 修改：使用 applyPatternsGreedily 替代 applyPartialConversion
+    if (failed(applyPatternsGreedily(func.getBody(), std::move(patterns), config))) {
       signalPassFailure();
     }
   };
