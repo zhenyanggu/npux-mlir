@@ -1,6 +1,6 @@
 //=============================================================
-// src/Conversion/NpuTiling/ElemWise.cpp
-// this file is for elemwise op tiling pattern
+// src/Conversion/NpuTiling/Conv.cpp
+// this file is for Conv op tiling pattern
 //=============================================================
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -37,42 +37,26 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       return failure();
     }
 
-    // 3. 读取 DSE 属性 [t_oh, t_ow, t_ic, t_oc]
-    // 这个属性是你刚刚在 ConvToLinalg 里 setAttr 的
-    auto dseAttr = op->getAttrOfType<ArrayAttr>("npu.dse_tiling");
-    if (!dseAttr || dseAttr.size() != 4) {
-        // 如果没有 DSE 数据，这里可以 fallback 到默认值或者 fail
-        // 为了稳健性，建议 fail 或者使用默认值 1
-        return failure(); 
+
+    SmallVector<int64_t> tileSizes = getNpuTileSizes(op);
+
+
+    auto loopRanges = op.getStaticLoopRanges();
+
+    // 2. 检查是否真的需要切分
+    if (!isTilingNecessary(tileSizes, loopRanges)) {
+        // 情况 A：不需要切分 (例如 DSE 这里的 size 刚好等于或大于 feature map size)
+        
+        op->setAttr("npu.tiled", rewriter.getUnitAttr());
+        
+        // 打上特殊标记
+        op->setAttr("npu.trivial_tiling", rewriter.getUnitAttr());
+      
+        
+        op->setAttr("npu.accumulate_mode", rewriter.getUnitAttr());
+
+        return success();
     }
-
-    // 提取物理维度的切分参数
-    int64_t dse_oh = cast<IntegerAttr>(dseAttr[0]).getInt();
-    int64_t dse_ow = cast<IntegerAttr>(dseAttr[1]).getInt();
-    int64_t dse_ic = cast<IntegerAttr>(dseAttr[2]).getInt();
-    int64_t dse_oc = cast<IntegerAttr>(dseAttr[3]).getInt();
-
-    // 4. 映射到 NCHWc32 的 9 个维度
-    // Generic Loop Order: 
-    // d0: N
-    // d1: OC_chunk (Parallel)  <-- 对应 dse_oc
-    // d2: OH       (Parallel)  <-- 对应 dse_oh
-    // d3: OW       (Parallel)  <-- 对应 dse_ow
-    // d4: IC_chunk (Reduction) <-- 对应 dse_ic
-    // d5: KH       (Reduction)
-    // d6: KW       (Reduction)
-    // d7: IC_block (Reduction) <-- 固定 32，不分块 (0)
-    // d8: OC_block (Parallel)  <-- 固定 32，不分块 (0)
-
-    SmallVector<int64_t> tileSizes(9, 0); // 初始化为 0 (不切分)
-
-    // 【关键】通道除以 32
-    // 如果 DSE 给出的 ic 是 64，意味着我们要切 2 个 block
-    // 确保至少为 1，避免除以 32 变成 0 导致变成 "不切分" (除非本来就是 0)
-    tileSizes[1] = (dse_oc > 32) ? (dse_oc / 32) : 1; 
-    tileSizes[2] = dse_oh;
-    tileSizes[3] = dse_ow;
-    tileSizes[4] = (dse_ic > 32) ? (dse_ic / 32) : 1;
 
     // 5. 执行 Tiling
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());

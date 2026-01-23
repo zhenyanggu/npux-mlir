@@ -195,6 +195,10 @@ void registerNpuPasses() {
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuInnerTilingPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createConvertLinalgToNpuPass();
   });
 
@@ -208,6 +212,10 @@ void registerNpuPasses() {
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuLowerPackPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuRegionExtensionPass();
   });
 
   npux::registerBufferDeallocTest();

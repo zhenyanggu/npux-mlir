@@ -5,10 +5,12 @@ add_onnx_mlir_library(NpuPatition
     NpuMerge.cpp
     NpuCleanPack.cpp
     NpuLowerPack.cpp
+    NpuRegionExtension.cpp
 
     Linalg/LayerNorm.cpp
     Linalg/Conv.cpp
     Linalg/Unary.cpp
+    Linalg/Gemm.cpp
 
     LINK_LIBS PUBLIC
     OMONNXOps

@@ -8,8 +8,6 @@
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h" // 核心 Tiling 工具
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "src/Pass/Passes.hpp"
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
@@ -36,8 +34,15 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     }
 
     SmallVector<int64_t> rawTileSizes = getNpuTileSizes(op);
-    if (rawTileSizes.empty() || llvm::all_of(rawTileSizes, [](int64_t s) { return s == 0; })) {
-      return failure();
+    auto loopRanges = op.getStaticLoopRanges();
+
+
+    if (!isTilingNecessary(rawTileSizes, loopRanges)) {
+        op->setAttr("npu.tiled", rewriter.getUnitAttr());
+        
+        op->setAttr("npu.trivial_tiling", rewriter.getUnitAttr());
+
+        return success();
     }
 
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());

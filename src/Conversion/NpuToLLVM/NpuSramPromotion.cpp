@@ -161,6 +161,13 @@ struct SramPromotionPass : public PassWrapper<SramPromotionPass, OperationPass<f
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
+
+    func::FuncOp func = getOperation();
+
+    auto targetAttr = func->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu") {
+      return;
+    }
     patterns.add<PromoteLinalgToSramPattern>(context);
     if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
       signalPassFailure();

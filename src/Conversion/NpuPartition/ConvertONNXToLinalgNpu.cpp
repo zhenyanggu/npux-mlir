@@ -57,7 +57,7 @@ struct ONNXToLinalgNpuPass
     }
     if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul))
     {
-      target.addIllegalOp<ONNXMatMulOp>();
+      target.addIllegalOp<ONNXQLinearMatMulOp>();
     }
     if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm))
     {
@@ -79,7 +79,7 @@ struct ONNXToLinalgNpuPass
     if(onnx_mlir::NpuOps.empty())
     {
       target.addIllegalOp<ONNXConvOp, ONNXLayerNormalizationOp,
-                          ONNXSoftmaxOp, ONNXGeluOp>();
+                          ONNXSoftmaxOp, ONNXGeluOp,ONNXQLinearMatMulOp,ONNXGemmOp>();
     }
     
 

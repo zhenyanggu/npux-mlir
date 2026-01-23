@@ -124,7 +124,18 @@ public:
 
     if (!memRefType.hasStaticShape()) return failure(); 
     int64_t numElements = memRefType.getNumElements();
-    int64_t elementSize = memRefType.getElementTypeBitWidth() / 8;
+    Type elementType = memRefType.getElementType();
+    int64_t elementSize;
+
+    if (elementType.isIndex()) {
+        // IndexType 在 LLVM lowering 中通常对应指针宽度 (64-bit / 8 bytes)
+        elementSize = 8; 
+    } else if (elementType.isIntOrFloat()) {
+        elementSize = elementType.getIntOrFloatBitWidth() / 8;
+    } else {
+        // 如果遇到其他不支持的类型（如 complex, vector 等），返回失败
+        return rewriter.notifyMatchFailure(op, "Unsupported element type for allocation");
+    }
     if (elementSize == 0) elementSize = 1;
     int64_t totalBytes = numElements * elementSize;
 

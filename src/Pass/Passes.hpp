@@ -150,6 +150,8 @@ std::unique_ptr<mlir::Pass> createNpuMergePass();
 
 std::unique_ptr<mlir::Pass> createNpuTilingPass();
 
+std::unique_ptr<mlir::Pass> createNpuInnerTilingPass();
+
 std::unique_ptr<mlir::Pass> createConvertLinalgToNpuPass();
 
 std::unique_ptr<mlir::Pass> createNpuMemPlanPass();
@@ -157,6 +159,8 @@ std::unique_ptr<mlir::Pass> createNpuMemPlanPass();
 std::unique_ptr<mlir::Pass> createNpuCleanPackPass();
 
 std::unique_ptr<mlir::Pass> createNpuLowerPackPass();
+
+std::unique_ptr<mlir::Pass> createNpuRegionExtensionPass();
 
 void registerBufferDeallocTest();
 }// namespace npux

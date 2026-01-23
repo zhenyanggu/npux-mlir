@@ -49,6 +49,7 @@ void populateLinalgConversionPatterns(RewritePatternSet &patterns)
   populateLinalgLayerNormPattern(patterns);
   populateLinalgConvPattern(patterns);
   populateLinalgUnaryPatterns(patterns);
+  populateLinalgGemmPattern(patterns);
 }
 
 } // namespace npux

@@ -153,12 +153,16 @@ fi
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg" \
+         "--convert-npu-onnx-to-linalg --npu-ops=Softmax,LayerNorm,Gelu" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
          "--npu-merge" \
          "NpuMerge.mlir"
+
+run_pass "Region Extent" \
+         "--npu-region-extension" \
+         "NpuRegionExtension.mlir"
 
 run_pass "Outline" \
          "--npu-outline" \
