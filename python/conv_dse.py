@@ -24,8 +24,9 @@ class HardwareConfig:
     u_oc: int = 32
     u_ic: int = 32
 
-    measured_latency_us: float = 6.737
-    measured_bandwidth_mbps: float = 320.41
+    measured_latency_us: float = 15.579
+    measured_bandwidth_mbps: float = 1133.40 
+    measured_conv_us = 27
 
 # ==========================================
 # 2. 层参数 (保持不变)
@@ -164,33 +165,45 @@ class AdvancedCostModel:
         return t_ih, t_iw
 
     def evaluate(self, layer: LayerParams, t_oh, t_ow, t_oc, t_ic):
-        real_tile_ic = min(t_ic, layer.IC)
-        real_tile_oc = min(t_oc, layer.OC)
+        real_tile_ic = max(32,min(t_ic, layer.IC))
+        real_tile_oc = max(32,min(t_oc, layer.OC))
 
+        # 2. ACC 空间检查
         acc_needed = t_oh * t_ow * real_tile_oc * self.hw.dtype_acc
         
+        # 3. SPM 空间检查
         raw_t_ih, raw_t_iw = self.get_raw_input_tile_dim(t_oh, t_ow, layer)
         input_needed = raw_t_ih * raw_t_iw * real_tile_ic * self.hw.dtype_input
         weight_needed = layer.K_h * layer.K_w * real_tile_ic * real_tile_oc * self.hw.dtype_input
+        output_needed = t_oh * t_ow * real_tile_oc * self.hw.dtype_input
+        
         spm_needed = input_needed + weight_needed
+        if output_needed > spm_needed:
+            spm_needed = output_needed
 
-        if acc_needed > self.hw.acc_size_bytes: return None
-        if spm_needed > self.hw.spm_size_bytes: return None
+        # 4. 判定是否溢出
+        if acc_needed > self.hw.acc_size_bytes:
+            return None # ACC OOM
+        if spm_needed > self.hw.spm_size_bytes:
+            return None # SPM OOM
 
+        # 5. 性能计算 (Latency)
         n_h = math.ceil(layer.OH / t_oh)
         n_w = math.ceil(layer.OW / t_ow)
         n_spatial = n_h * n_w
         n_oc = math.ceil(layer.OC / t_oc)
         n_ic = math.ceil(layer.IC / t_ic)
         
+        # Traffic Calculation
         traffic_in = input_needed * n_spatial * n_oc * n_ic
         traffic_wgt = weight_needed * n_spatial * n_oc * n_ic
         traffic_out = layer.OH * layer.OW * layer.OC * self.hw.dtype_input
-        total_traffic_mb = (traffic_in + traffic_wgt + traffic_out) / 1024**2
+        traffic_bias = layer.OC * self.hw.dtype_acc
         
+        total_traffic_mb = (traffic_in + traffic_wgt + traffic_out + traffic_bias) / 1024**2
         time_transfer_ms = (total_traffic_mb / self.hw.measured_bandwidth_mbps) * 1000
         
-        cycles_per_tile = (math.ceil(t_ic/self.hw.u_ic) * math.ceil(t_oc/self.hw.u_oc) * layer.K_h * layer.K_w)
+        # Compute / Instruction Time
         total_tiles = n_spatial * n_oc * n_ic
         time_inst_ms = (total_tiles * self.hw.measured_latency_us) / 1000
         
@@ -205,7 +218,7 @@ class AdvancedCostModel:
         }
 
 # ==========================================
-# 5. DSE 探索逻辑 (保持不变)
+# 5. DSE 探索逻辑
 # ==========================================
 class DesignSpaceExplorer:
     def __init__(self, layers: List[LayerParams], total_mem_bytes: int):

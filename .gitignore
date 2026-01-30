@@ -3,7 +3,7 @@ cmake-*/
 docs/
 install/
 CMakePresets.json
-
+python/static_onnx_models/
 # Prerequisites
 *.d
 
