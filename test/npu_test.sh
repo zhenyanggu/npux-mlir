@@ -82,40 +82,54 @@ echo ">>> Starting NPU Compilation Pipeline"
 echo ">>> Initial Input: $CURRENT_INPUT"
 
 # ------------------------------------------------
-# Stage 1: NpuPartition
+#  NpuPartition
 # ------------------------------------------------
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg -npu-ops=Gelu,LayerNorm,Softmax " \
+         "--convert-npu-onnx-to-linalg --npu-ops=Gemm,MatMul,Relu,Conv --npu-tiling-config=model.json" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
-         "--npu-merge --npu-clean-pack" \
+         "--npu-clean-pack --npu-merge" \
          "NpuMerge.mlir"
+
+run_pass "Region Extent" \
+         "--npu-region-extension" \
+         "NpuRegionExtension.mlir"
 
 run_pass "Outline" \
          "--npu-outline" \
          "NpuOutline.mlir"
 
-run_pass "Pack&UnPack Lower" \
-         "--npu-lower-pack" \
-         "NpuLowerPack.mlir"
+# ------------------------------------------------
+# NpuFuse
+# ------------------------------------------------
+
+enter_stage "NpuFuse"
+
+run_pass "Fusing" \
+         "--npu-fuse" \
+         "NpuFuse.mlir"
 
 # ------------------------------------------------
-# Stage 2: NpuTiling
+#  NpuTiling
 # ------------------------------------------------
 enter_stage "NpuTiling"
 
-# 下一步会自动使用上一步 (ConvertONNXToLinalgNpu.mlir) 作为输入
+
 run_pass "Tiling " \
-         "--npu-tiling --npu-tiling-config=model.json " \
+         "--npu-tiling --canonicalize" \
          "NpuTiling.mlir"
 
 # ------------------------------------------------
-# Stage 3: NpuBufferization
+#  NpuBufferization
 # ------------------------------------------------
 enter_stage "NpuBufferization"
+
+run_pass "Pack&UnPack Lower" \
+         "--npu-lower-pack" \
+         "NpuLowerPack.mlir"
 
 # 这是一个很长的命令，现在写起来很清爽
 run_pass "Bufferize" \
@@ -124,7 +138,7 @@ run_pass "Bufferize" \
 
 
 # ------------------------------------------------
-# Stage 4: NpuToLLVM
+#  NpuToLLVM
 # ------------------------------------------------
 enter_stage "NpuToLLVM"
 
@@ -170,6 +184,26 @@ run_pass "fold-memref-alias-ops" \
 run_pass "Npux Conversion" \
          "--convert-linalg-to-npux --canonicalize" \
          "ConvertLinalgToNpux.mlir"
+
+run_pass "Split Loop" \
+         "--npu-split-loop" \
+         "LoopSplit.mlir"
+
+run_pass "Split Conv" \
+         "--split-conv-ic" \
+         "ConvSplit.mlir"
+
+run_pass "Gemm Pipeline" \
+         "--npu-gemm-pipeline" \
+         "GemmPipeline.mlir"
+
+run_pass "Lower Subview" \
+         "--npu-lower-subview" \
+         "NpuLowerSubview.mlir"
+
+run_pass "Npux Compute Fuse" \
+         "--npux-compute-fusion" \
+         "NpuxComputeFusion.mlir"
 
 run_pass "convert-linalg-to-loops" \
         "--convert-linalg-to-loops" \
