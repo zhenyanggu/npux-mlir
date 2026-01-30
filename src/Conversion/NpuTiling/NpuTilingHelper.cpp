@@ -3,7 +3,6 @@
 // this file contains helper functions for npu tiling patterns
 //=======================================================
 
-
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h" // 核心 Tiling 工具
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
@@ -13,7 +12,6 @@
 
 #include <algorithm> // 必须添加
 #include <cmath>
-
 
 using namespace mlir;
 
@@ -113,10 +111,6 @@ std::pair<int64_t, int64_t> calculateAutoSpatialTile(
     tileW = maxTotalPixels;
   }
 
-  // 7. 对齐建议 (可选)：为了 SIMD 效率，H 最好是偶数或特定倍数
-  // 这里简单处理：如果 tileH > 1，尽量保持不做太细碎的切分
-  // (用户现在的需求是"尽量放满"，暂不强制对齐)
-
   return {tileH, tileW};
 }
 
@@ -139,30 +133,27 @@ SmallVector<int64_t> getNpuTileSizes(linalg::GenericOp op) {
   auto &config = npux::NPUConfig::getInstance();
   std::vector<int64_t> configSizes;
 
-  // ================= MODIFIED START =================
   if (opName == "npu_gelu") {
     // 1. 尝试从 Config (JSON/CLI) 读取
     configSizes = config.getGeluTileSize();
 
     // 2. 如果没有配置，则根据 SRAM 自动计算
+    bool isAuto = false;
     if (configSizes.empty()) {
-      // 获取 SRAM 大小 (e.g., 128KB -> 131072)
+      isAuto = true;
       int64_t spmSize = config.getSpmSize();
-      
-      // 调用计算逻辑
       std::pair<int64_t, int64_t> autoHW = calculateAutoSpatialTile(op, spmSize);
-      
-      // 注意：calculateAutoSpatialTile 返回的是 {H, W}
-      // 我们需要放入 configSizes 向量，随后由 applyTileConfigNCHWc32 映射
       configSizes = {autoHW.first, autoHW.second};
-      
-
-      llvm::errs() << "Auto Tiling Gelu: SRAM=" << spmSize 
-                   << ", Shape=[" << sizes.size() << "]"
-                   << " -> Tile=[" << autoHW.first << "x" << autoHW.second << "]\n";
     }
 
     applyTileConfigNCHWc32(sizes, configSizes);
+    
+    // [LOGGING] Gelu
+    if (!configSizes.empty()) {
+        llvm::errs() << "Tiling [Gelu] (" << (isAuto ? "Auto" : "Manual") << "): "
+                     << "Shape Rank=[" << sizes.size() << "] "
+                     << "-> Tile=[H:" << configSizes[0] << ", W:" << configSizes[1] << "]\n";
+    }
 
   } else if (opName == "npu_conv") {
     // 1. 尝试获取 Config (CLI > JSON)
@@ -173,18 +164,21 @@ SmallVector<int64_t> getNpuTileSizes(linalg::GenericOp op) {
         configSizes = getDseAttrValues(op);
     }
 
-    // 3. 如果找到了参数 (无论是来自 Config 还是 Attribute)，进行维度映射
+    // 3. 如果找到了参数，进行维度映射
     if (configSizes.size() >= 4) {
         int64_t t_oh = configSizes[0];
         int64_t t_ow = configSizes[1];
         int64_t t_ic = configSizes[2];
         int64_t t_oc = configSizes[3];
 
-        // 这里的映射逻辑与 Conv.cpp 中一致
-        // Generic Loop Order for Conv: 
-        // d0:N, d1:OC_chunk, d2:OH, d3:OW, d4:IC_chunk, d5:KH, d6:KW, d7:IC_blk, d8:OC_blk
+        // [LOGGING] Conv (新增)
+        llvm::errs() << "Tiling [Conv]: "
+                     << "Shape Rank=[" << sizes.size() << "] "
+                     << "-> Tile=[OH:" << t_oh << ", OW:" << t_ow 
+                     << ", IC_blk:" << t_ic << ", OC_blk:" << t_oc << "]\n";
 
-        // 安全检查：Rank 必须足够 (Conv 通常是 9)
+        // Generic Loop Order for Conv: 
+        // d0:N, d1:OC_chunk, d2:OH, d3:OW, d4:IC_chunk, ...
         if (sizes.size() >= 5) { 
             sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1; 
             sizes[2] = t_oh;
@@ -193,7 +187,6 @@ SmallVector<int64_t> getNpuTileSizes(linalg::GenericOp op) {
         }
     }
   }
-  // ================= MODIFIED END =================
 
   return sizes;
 }
@@ -202,7 +195,7 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
     int64_t M, int64_t N, int64_t K, 
     int64_t spmSize, int64_t accSize) {
 
-    // 硬件对齐参数 (硬编码 32，或者如果你想也可以从 Config 读)
+    // 硬件对齐参数
     const int64_t arraySizeH = 32;
     const int64_t arraySizeW = 32;
     const int64_t inputDtypeBytes = 1; // int8
@@ -213,7 +206,6 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
     // ---------------------------------------------------------
     int64_t maxAccElem = accSize / accDtypeBytes;
     
-    // 初始贪心策略
     int64_t targetDim = std::floor(std::sqrt(maxAccElem));
     
     // M 维度分块
@@ -236,7 +228,6 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
     // ---------------------------------------------------------
     // Step 2: 确定 Tk (基于 SPM 容量)
     // ---------------------------------------------------------
-    // SPM 公式: Tk * (Tm + Tn) * inputBytes <= SpmSize
     int64_t bytesPerK = (t_m + t_n) * inputDtypeBytes;
     int64_t t_k = K;
 
@@ -245,49 +236,60 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
         t_k = std::min(K, maxTk);
     }
 
-    // Tk 对齐 (通常 K 也是 32 对齐)
+    // Tk 对齐
     if (t_k >= arraySizeH) t_k = (t_k / arraySizeH) * arraySizeH;
-    else t_k = arraySizeH; // 这里的对齐逻辑保留你的原意
+    else t_k = arraySizeH; 
 
     return {t_m, t_n, t_k};
 }
 
-SmallVector<int64_t> getGemmTileSizes(linalg::MatmulOp op) {
+SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
     auto &config = npux::NPUConfig::getInstance();
     
-    // 1. 优先尝试从 Config/CLI 获取手动指定的参数
-    // Matmul 顺序通常为 [M, N, K]
+    // 1. 获取手动配置
     std::vector<int64_t> manualSizes = config.getMatMulTileSize();
-    if (!manualSizes.empty() && manualSizes.size() >= 2) {
-        // config 可能只给了 [M, N]，K 默认为 0 (全量) 或者需要补全
-        // 这里做一个简单的映射，假设 config 是 {t_m, t_n, t_k}
-        SmallVector<int64_t> result;
-        for(auto s : manualSizes) result.push_back(s);
-        // 如果缺 K，默认补 0 (SCFTiling 会理解为不切分) 或 32
-        while (result.size() < 3) result.push_back(0); 
-        return result;
+    
+    // 2. 获取 Loop Ranges
+    SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
+    int64_t rank = loopRanges.size();
+    
+    if (rank < 3) {
+        return {}; 
     }
 
-    // 2. 如果没有手动配置，执行自动计算算法
-    // 获取 Shape: Matmul [M, K] * [K, N] -> [M, N]
-    auto AType = cast<ShapedType>(op.getInputs()[0].getType());
-    auto BType = cast<ShapedType>(op.getInputs()[1].getType());
+    // 提取 M, N, K
+    int64_t K = loopRanges[rank - 1];
+    int64_t N = loopRanges[rank - 2];
+    int64_t M = loopRanges[rank - 3];
 
-    if (!AType.hasStaticShape() || !BType.hasStaticShape()) {
-        return {}; // 动态 Shape 暂不处理
+    SmallVector<int64_t, 3> computedSizes;
+    bool isManual = false;
+
+    if (!manualSizes.empty() && manualSizes.size() >= 3) {
+        computedSizes = {manualSizes[0], manualSizes[1], manualSizes[2]};
+        isManual = true;
+    } else {
+        int64_t spmSize = config.getSpmSize();
+        int64_t accSize = config.getAccSize();
+        computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize);
     }
 
-    ArrayRef<int64_t> shapeA = AType.getShape();
-    ArrayRef<int64_t> shapeB = BType.getShape();
+    // [LOGGING] Gemm (新增)
+    llvm::errs() << "Tiling [Gemm] (" << (isManual ? "Manual" : "Auto") << "): "
+                 << "Problem=[M:" << M << ", N:" << N << ", K:" << K << "] "
+                 << "-> Tile=[Tm:" << computedSizes[0] 
+                 << ", Tn:" << computedSizes[1] 
+                 << ", Tk:" << computedSizes[2] << "]\n";
 
-    int64_t M = shapeA[0];
-    int64_t K = shapeA[1];
-    int64_t N = shapeB[1];
+    // 3. 构建最终的 Tile Sizes 数组
+    SmallVector<int64_t> finalTileSizes(rank, 0);
 
-    int64_t spmSize = config.getSpmSize();
-    int64_t accSize = config.getAccSize();
+    // [..., tm, tn, tk]
+    finalTileSizes[rank - 3] = computedSizes[0]; // M -> tm
+    finalTileSizes[rank - 2] = computedSizes[1]; // N -> tn
+    finalTileSizes[rank - 1] = computedSizes[2]; // K -> tk
 
-    return calculateAutoGemmTile(M, N, K, spmSize, accSize);
+    return finalTileSizes;
 }
 
 

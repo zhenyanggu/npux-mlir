@@ -19,6 +19,7 @@ void populateNpuTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
   populateElemWiseTilingPatterns(patterns, context);
   populateConvTilingPatterns(patterns, context);
+  populateGemmTilingPatterns(patterns, context);
 };
 } // namespace npux
 

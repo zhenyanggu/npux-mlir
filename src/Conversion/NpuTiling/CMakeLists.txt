@@ -2,6 +2,7 @@ add_onnx_mlir_library(NpuTiling
     ElemWise.cpp
     NpuTiling.cpp
     Conv.cpp
+    Gemm.cpp
     NpuTilingHelper.cpp
     NpuInnerTiling.cpp
     ElemWiseInnerTiling.cpp

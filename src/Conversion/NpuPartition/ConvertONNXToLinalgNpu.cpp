@@ -12,15 +12,13 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "src/Compiler/CompilerOptions.hpp"
+#include "src/Conversion/NpuPartition/LinalgConversionHelper.hpp"
 #include "src/Dialect/ONNX/ONNXDialect.hpp"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "src/Pass/Passes.hpp"
-#include "src/Compiler/CompilerOptions.hpp"
-#include "src/Conversion/NpuPartition/LinalgConversionHelper.hpp"
-
 
 using namespace mlir;
-
 
 namespace {
 struct ONNXToLinalgNpuPass
@@ -39,7 +37,6 @@ struct ONNXToLinalgNpuPass
     ModuleOp module = getOperation();
     MLIRContext *context = &getContext();
 
-
     ConversionTarget target(*context);
 
     target.addLegalDialect<linalg::LinalgDialect>();
@@ -51,45 +48,36 @@ struct ONNXToLinalgNpuPass
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<ONNXDialect>();
 
-    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv))
-    {
+    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv)) {
       target.addIllegalOp<ONNXConvOp>();
     }
-    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul))
-    {
+    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
       target.addIllegalOp<ONNXQLinearMatMulOp>();
     }
-    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm))
-    {
+    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm)) {
       target.addIllegalOp<ONNXLayerNormalizationOp>();
     }
-    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax))
-    {
+    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax)) {
       target.addIllegalOp<ONNXSoftmaxOp>();
     }
-    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu))
-    {
+    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu)) {
       target.addIllegalOp<ONNXGeluOp>();
     }
-    if(onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm))
-    {
+    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm)) {
       target.addIllegalOp<ONNXGemmOp>();
     }
-
-    if(onnx_mlir::NpuOps.empty())
-    {
-      target.addIllegalOp<ONNXConvOp, ONNXLayerNormalizationOp,
-                          ONNXSoftmaxOp, ONNXGeluOp,ONNXQLinearMatMulOp,ONNXGemmOp>();
+    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Relu)) {
+      target.addIllegalOp<ONNXReluOp, ONNXLeakyReluOp>();
     }
-    
-
-
+    if (onnx_mlir::NpuOps.empty()) {
+      target.addIllegalOp<ONNXConvOp, ONNXLayerNormalizationOp, ONNXSoftmaxOp,
+          ONNXGeluOp, ONNXQLinearMatMulOp, ONNXGemmOp, ONNXReluOp,
+          ONNXLeakyReluOp>();
+    }
 
     RewritePatternSet patterns(context);
 
     npux::populateLinalgConversionPatterns(patterns);
-
-
 
     if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
       signalPassFailure();

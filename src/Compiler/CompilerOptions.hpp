@@ -76,7 +76,8 @@ enum class NpuOp {
     LayerNorm,
     Softmax,
     Gelu,
-    Gemm
+    Gemm,
+    Relu
 };
 
 extern const std::string modelSizeStr[];

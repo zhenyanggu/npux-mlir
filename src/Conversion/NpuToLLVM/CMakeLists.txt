@@ -9,6 +9,11 @@ add_onnx_mlir_library(NpuToLLVM
     Npux/InsertNpuLifecycle.cpp
     NpuSramPromotion.cpp
     BufferDeallocTest.cpp
+    LoopSplit.cpp
+    ConvSplit.cpp
+    NpuLowerSubview.cpp
+    NpuxComputeFusion.cpp
+    GemmPipeline.cpp
 
     LINK_LIBS PUBLIC
     # --- 基础库 ---

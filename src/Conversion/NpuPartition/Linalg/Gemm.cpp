@@ -1,480 +1,366 @@
 //==============================================================
-// src/Conversion/NpuPartition/Linalg/Gemm.cpp
-// this file implements the conversion of ONNX Gemm operation(including
-// QLinearMatMul&Gemm) to linalg operations for NPU partitioning.
+// src/Conversion/NpuPartition/Linalg/MatMul.cpp
+// This file implements the conversion of Gemm and QLinearMatMul
+// to linalg operations for NPU partitioning.
 //==============================================================
 
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "src/Conversion/NpuPartition/LinalgConversionHelper.hpp"
-#include "llvm/ADT/SmallPtrSet.h" 
 
 using namespace mlir;
 using namespace npux;
 
 namespace {
 
-// =============================================================================
-// Helper: Extract quantization parameters
-// =============================================================================
-QuantizationParam getQuantParamsFromOperands(
-    Operation *op, int scaleIdx, int zpIdx) {
-  QuantizationParam params;
-  params.scale = 1.0;
-  params.zeroPoint = 0;
+// ==========================================================
+// 辅助函数
+// ==========================================================
 
-  if (auto scaleAttr = getConstAttrFromOperand(op, scaleIdx)) {
-    if (scaleAttr.isSplat()) {
-      params.scale = scaleAttr.getSplatValue<float>();
+static float getScalarFloat(Value v, float defaultVal = 1.0f) {
+  if (auto constOp = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto floatAttr = mlir::dyn_cast<FloatAttr>(constOp.getValue())) {
+      return (float)floatAttr.getValueAsDouble();
     }
   }
+  if (auto constOp = v.getDefiningOp<ONNXConstantOp>()) {
+    if (auto dense = mlir::dyn_cast<DenseElementsAttr>(constOp.getValueAttr())) {
+      return dense.getValues<float>()[0];
+    }
+  }
+  return defaultVal;
+}
 
-  if (auto zpAttr = getConstAttrFromOperand(op, zpIdx)) {
-    if (zpAttr.isSplat()) {
-      Type zpType = zpAttr.getElementType();
-      if (zpType.isUnsignedInteger(8)) {
-        params.zeroPoint = (int64_t)zpAttr.getSplatValue<uint8_t>();
-      } else if (zpType.isInteger(8)) {
-        params.zeroPoint = (int64_t)zpAttr.getSplatValue<int8_t>();
-      } else if (zpType.isInteger(32)) {
-        params.zeroPoint = (int64_t)zpAttr.getSplatValue<int32_t>();
+static int64_t getScalarInt(Value v, int64_t defaultVal = 0) {
+  if (auto constOp = v.getDefiningOp<arith::ConstantOp>()) {
+    if (auto intAttr = mlir::dyn_cast<IntegerAttr>(constOp.getValue())) {
+      return intAttr.getInt();
+    }
+  }
+  if (auto constOp = v.getDefiningOp<ONNXConstantOp>()) {
+    if (auto dense = mlir::dyn_cast<DenseElementsAttr>(constOp.getValueAttr())) {
+       if (dense.getElementType().isInteger(8)) return dense.getValues<int8_t>()[0];
+       if (dense.getElementType().isInteger(32)) return dense.getValues<int32_t>()[0];
+       if (dense.getElementType().isInteger(64)) return dense.getValues<int64_t>()[0];
+    }
+  }
+  return defaultVal;
+}
+
+// 创建显式的 ONNXTransposeOp，交换最后两维
+static Value createExplicitTranspose(OpBuilder &b, Location loc, Value input) {
+  auto type = mlir::dyn_cast<RankedTensorType>(input.getType());
+  if (!type) return input;
+
+  int64_t rank = type.getRank();
+  if (rank < 2) return input;
+
+  SmallVector<int64_t> perm;
+  for (int64_t i = 0; i < rank; ++i) perm.push_back(i);
+  std::swap(perm[rank - 1], perm[rank - 2]);
+
+  auto permArrayAttr = b.getI64ArrayAttr(perm);
+  
+  auto transOp = b.create<ONNXTransposeOp>(loc, 
+      /*resultType=*/UnrankedTensorType::get(type.getElementType()), 
+      /*data=*/input,
+      /*perm=*/permArrayAttr);
+  
+  // 简单的 Shape Inference
+  SmallVector<int64_t> newShape(type.getShape());
+  std::swap(newShape[rank - 1], newShape[rank - 2]);
+  auto newType = RankedTensorType::get(newShape, type.getElementType());
+  transOp.getResult().setType(newType);
+  
+  return transOp.getResult();
+}
+
+// MatMul Body 构建器
+// 确保使用 Integer 运算 (因为输入是 i8/u8/i32)
+static void createMatMulBody(OpBuilder &b, Location loc, ValueRange args) {
+  // args: [A, B, (Optional C), OutAcc]
+  Value lhs = args[0];
+  Value rhs = args[1];
+  Value outAcc = args.back();
+  bool hasBias = (args.size() == 4);
+
+  // Helper: 统一提升到 i32 进行计算
+  auto castToI32 = [&](Value v) -> Value {
+    Type t = v.getType();
+    if (t.isInteger(32)) return v;
+    if (t.isInteger(8) || t.isInteger(1) || t.isInteger(16)) {
+      return b.create<arith::ExtSIOp>(loc, b.getI32Type(), v);
+    }
+    // Fallback for float (should not happen in quantized path usually, but safe to handle)
+    if (mlir::isa<FloatType>(t)) {
+        return b.create<arith::FPToSIOp>(loc, b.getI32Type(), v);
+    }
+    return v; 
+  };
+
+  Value lhsI32 = castToI32(lhs);
+  Value rhsI32 = castToI32(rhs);
+  Value outI32 = castToI32(outAcc);
+
+  // 1. Mul: i32 = i32 * i32
+  Value mul = b.create<arith::MulIOp>(loc, lhsI32, rhsI32);
+
+  // 2. Add Bias: i32 = i32 + i32
+  if (hasBias) {
+    Value biasI32 = castToI32(args[2]);
+    mul = b.create<arith::AddIOp>(loc, biasI32, mul);
+  }
+
+  // 3. Accumulate: i32 = i32 + i32
+  Value resI32 = b.create<arith::AddIOp>(loc, outI32, mul);
+
+  // 4. Cast back to Output Type (usually i8 for quantized output)
+  Type outType = outAcc.getType();
+  Value res;
+  if (outType.isInteger(32)) {
+    res = resI32;
+  } else if (outType.isInteger(8)) {
+    // I32 -> I8 (Truncate)
+    // 注意：实际硬件会有 Scale/ZP 处理，这里作为 Body 占位，Trunc 是合法的 IR
+    res = b.create<arith::TruncIOp>(loc, outType, resI32);
+  } else if (mlir::isa<FloatType>(outType)) {
+     res = b.create<arith::SIToFPOp>(loc, outType, resI32);
+  } else {
+     // Fallback
+     res = resI32;
+  }
+
+  b.create<linalg::YieldOp>(loc, res);
+}
+
+// 通用的 MatMul 构建器
+static Value createGenericMatMulOp(
+    ConversionPatternRewriter &rewriter, Location loc,
+    SmallVector<Value> inputs,           // [A, B] 或 [A, B, C]
+    RankedTensorType outType,            // Output Type
+    // Quant Params
+    float lhsScale, int64_t lhsZp,
+    float rhsScale, int64_t rhsZp,
+    float outScale, int64_t outZp,
+    StringRef libCallName
+) {
+  int64_t outRank = outType.getRank();
+  bool hasBias = (inputs.size() == 3);
+  int32_t withBiasAttr = hasBias ? 1 : 0;
+
+  auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outType);
+  {
+    OpBuilder::InsertionGuard guard(rewriter);
+    rewriter.createBlock(&executeRegion.getRegion());
+
+    // 1. Alloc Output Buffer
+    SmallVector<Value> dynamicSizes =
+        getDynamicSizes(rewriter, loc, inputs[0], outType.getShape());
+    Value regionAlloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, outType, dynamicSizes);
+
+    // 2. 构建 Indexing Maps
+    // 假设 A, B 已经转置好，形状语义: A(..., M, K), B(..., K, N), Out(..., M, N)
+    SmallVector<utils::IteratorType> iteratorTypes(outRank + 1, utils::IteratorType::parallel);
+    iteratorTypes[outRank] = utils::IteratorType::reduction; 
+    
+    // Map 构建 Helper
+    auto getMap = [&](bool isA, bool isB, bool isC, Value val = Value()) -> AffineMap {
+      SmallVector<AffineExpr> exprs;
+      
+      // Batch dims: d0 ... d(R-3)
+      for (int i = 0; i < outRank - 2; ++i) 
+        exprs.push_back(rewriter.getAffineDimExpr(i));
+        
+      AffineExpr m = rewriter.getAffineDimExpr(outRank - 2);
+      AffineExpr n = rewriter.getAffineDimExpr(outRank - 1);
+      AffineExpr k = rewriter.getAffineDimExpr(outRank);
+      
+      if (isA) { // (..., M, K)
+        exprs.push_back(m);
+        exprs.push_back(k);
+      } else if (isB) { // (..., K, N)
+        exprs.push_back(k);
+        exprs.push_back(n);
+      } else if (isC) {
+        // Bias Handling (Broadcasting)
+        // Check actual rank of Bias tensor
+        int64_t biasRank = mlir::cast<RankedTensorType>(val.getType()).getRank();
+        
+        if (biasRank == 1) {
+             // 1D Bias usually broadcasts over the inner dimension (N)
+             // Map: (n)
+             exprs.clear(); // Clear batch dims for 1D
+             exprs.push_back(n);
+             // Note: map domain must still have all dimensions (Rank+1)
+             return AffineMap::get(outRank + 1, 0, exprs, rewriter.getContext());
+        } else {
+             // Assume full broadcasting (..., M, N) matches Output
+             exprs.push_back(m);
+             exprs.push_back(n);
+        }
+      } else { // Out: (..., M, N)
+        exprs.push_back(m);
+        exprs.push_back(n);
       }
+      return AffineMap::get(outRank + 1, 0, exprs, rewriter.getContext());
+    };
+
+    SmallVector<AffineMap> indexingMaps;
+    indexingMaps.push_back(getMap(true, false, false));  // A
+    indexingMaps.push_back(getMap(false, true, false));  // B
+    
+    if (hasBias) {
+      indexingMaps.push_back(getMap(false, false, true, inputs[2])); // C (pass Value to check rank)
     }
+    
+    indexingMaps.push_back(getMap(false, false, false)); // Out
+
+    // 3. Create GenericOp
+    auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
+        /*resultTypes=*/outType,
+        /*inputs=*/inputs,
+        /*outputs=*/regionAlloc,
+        indexingMaps, iteratorTypes,
+        /*bodyBuilder=*/createMatMulBody);
+
+    // 4. 设置属性
+    linalgOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
+    linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    
+    linalgOp->setAttr("lhs_scale", rewriter.getF32FloatAttr(lhsScale));
+    linalgOp->setAttr("lhs_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), lhsZp));
+    linalgOp->setAttr("rhs_scale", rewriter.getF32FloatAttr(rhsScale));
+    linalgOp->setAttr("rhs_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), rhsZp));
+    linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
+    linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), outZp));
+    
+    linalgOp->setAttr("with_bias", rewriter.getI32IntegerAttr(withBiasAttr));
+
+    rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
   }
-  return params;
+  return executeRegion.getResults()[0];
 }
 
-// Helper: Check if the consumer can absorb quantization
-bool isAbsorbableConsumer(Operation *op) {
-  return llvm::isa<ONNXConvOp, ONNXLayerNormalizationOp, ONNXSoftmaxOp,
-      ONNXGeluOp, ONNXQLinearMatMulOp, ONNXGemmOp>(op);
-}
-
-// =============================================================================
-// Pattern 1: GemmToLinalg
-// =============================================================================
+// ============================================================================
+// 1. Gemm Pattern
+// ============================================================================
 struct GemmToLinalg : public OpConversionPattern<ONNXGemmOp> {
   using OpConversionPattern<ONNXGemmOp>::OpConversionPattern;
 
-  struct InputConfig {
-    Value externalValue;            
-    ONNXConstantOp constOpToCopy;   
-    ONNXQuantizeLinearOp quantOpToMove; 
-    
-    bool needsTranspose;
-    SmallVector<int64_t> perm;
-    
-    ONNXDequantizeLinearOp absorbedDq;
-  };
-
   LogicalResult matchAndRewrite(ONNXGemmOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter) const override {
+    
+    Value inputA = op.getA();
+    Value inputB = op.getB();
+    Value inputC = op.getC(); // Bias
+    
+    auto dequantA = inputA.getDefiningOp<ONNXDequantizeLinearOp>();
+    auto dequantB = inputB.getDefiningOp<ONNXDequantizeLinearOp>();
+    
+    if (!dequantA || !dequantB) return failure();
+    
+    Value quantInputA = dequantA.getX();
+    Value quantInputB = dequantB.getX();
+    
+    if (!op.getResult().hasOneUse()) return failure();
+    auto quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(
+        *op.getResult().getUsers().begin());
+    if (!quantOp) return failure();
+    
+    auto outputType = mlir::cast<RankedTensorType>(quantOp.getResult().getType());
 
-    Location loc = op.getLoc();
-
-    // 1. 分析输入 A
-    InputConfig configA;
-    configA.constOpToCopy = nullptr;
-    configA.quantOpToMove = nullptr;
-    configA.absorbedDq = nullptr;
-    configA.needsTranspose = (op.getTransA() != 0);
-    configA.perm = {1, 0};
-
-    Value rawA = op.getA();
-    double aScale = 1.0;
-    int64_t aZp = 0;
-
-    if (auto dqOp = rawA.getDefiningOp<ONNXDequantizeLinearOp>()) {
-      configA.absorbedDq = dqOp;
-      auto params = getScalarQuantParams(dqOp);
-      aScale = params.scale;
-      aZp = params.zeroPoint;
-      rawA = dqOp.getX(); 
+    auto paramsA = getScalarQuantParams(dequantA);
+    auto paramsB = getScalarQuantParams(dequantB);
+    auto paramsOut = getScalarQuantParams(quantOp);
+    
+    // Handle Transpose
+    if (op.getTransA()) {
+      quantInputA = createExplicitTranspose(rewriter, op.getLoc(), quantInputA);
+    }
+    if (op.getTransB()) {
+      quantInputB = createExplicitTranspose(rewriter, op.getLoc(), quantInputB);
     }
 
-    Operation *producerA = rawA.getDefiningOp();
-    if (producerA && llvm::isa<ONNXConstantOp>(producerA)) {
-      configA.constOpToCopy = llvm::cast<ONNXConstantOp>(producerA);
-    } else if (producerA && llvm::isa<ONNXQuantizeLinearOp>(producerA)) {
-      configA.quantOpToMove = llvm::cast<ONNXQuantizeLinearOp>(producerA);
-    } else {
-      configA.externalValue = rawA;
-    }
-
-
-    // 2. 分析输入 B
-    InputConfig configB;
-    configB.constOpToCopy = nullptr;
-    configB.quantOpToMove = nullptr;
-    configB.absorbedDq = nullptr;
-    configB.needsTranspose = (op.getTransB() != 0);
-    configB.perm = {1, 0};
-
-    Value rawB = op.getB();
-    double bScale = 1.0;
-    int64_t bZp = 0;
-
-    if (auto dqOp = rawB.getDefiningOp<ONNXDequantizeLinearOp>()) {
-      configB.absorbedDq = dqOp;
-      auto params = getScalarQuantParams(dqOp);
-      bScale = params.scale;
-      bZp = params.zeroPoint;
-      rawB = dqOp.getX();
-    }
-
-    Operation *producerB = rawB.getDefiningOp();
-    if (producerB && llvm::isa<ONNXConstantOp>(producerB)) {
-      configB.constOpToCopy = llvm::cast<ONNXConstantOp>(producerB);
-    } else if (producerB && llvm::isa<ONNXQuantizeLinearOp>(producerB)) {
-      configB.quantOpToMove = llvm::cast<ONNXQuantizeLinearOp>(producerB);
-    } else {
-      configB.externalValue = rawB;
-    }
-
-
-    // 3. 分析输出
-    if (!op.getResult().hasOneUse())
-      return failure();
-    Operation *userOp = *op.getResult().getUsers().begin();
-    auto outQuantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(userOp);
-    if (!outQuantOp)
-      return failure();
-
-    auto qParams = getScalarQuantParams(outQuantOp);
-    double outScale = qParams.scale;
-    int64_t outZp = qParams.zeroPoint;
-
-    ONNXDequantizeLinearOp outDqOp = nullptr;
-    bool shouldPullDqIntoRegion = false;
-
-    if (outQuantOp.getResult().hasOneUse()) {
-      Operation *nextUser = *outQuantOp.getResult().getUsers().begin();
-      if (auto dq = mlir::dyn_cast<ONNXDequantizeLinearOp>(nextUser)) {
-        outDqOp = dq;
-        bool downstreamAbsorbsDQ = false;
-        for (auto *dqUser : dq.getResult().getUsers()) {
-            if (isAbsorbableConsumer(dqUser)) {
-                downstreamAbsorbsDQ = true;
-                break;
-            }
-        }
-        if (!downstreamAbsorbsDQ) {
-            shouldPullDqIntoRegion = true;
-        }
-      }
-    }
-
-    Type regionResultType;
-    if (shouldPullDqIntoRegion) {
-      regionResultType = outDqOp.getResult().getType(); 
-    } else {
-      regionResultType = outQuantOp.getResult().getType(); 
-    }
-
-    // ============================================================
-    // 创建 Region
-    // ============================================================
-    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(
-        loc, regionResultType);
-
-    {
-      OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.createBlock(&executeRegion.getRegion());
-
-      // --------------------------------------------------------
-      // 处理 Value A
-      // --------------------------------------------------------
-      Value valA;
-      if (configA.constOpToCopy) {
-        Value upstreamA = configA.constOpToCopy.getResult(); 
-        auto tensorType = mlir::cast<RankedTensorType>(upstreamA.getType());
-        SmallVector<Value> dynSizes = 
-            getDynamicSizes(rewriter, loc, upstreamA, tensorType.getShape());
-        Value initA = rewriter.create<tensor::EmptyOp>(
-            loc, tensorType.getShape(), tensorType.getElementType(), dynSizes);
-        auto copyOp = rewriter.create<linalg::CopyOp>(loc, upstreamA, initA);
-        valA = copyOp.getResult(0);
-
-      } else if (configA.quantOpToMove) {
-        Operation *cloned = rewriter.clone(*configA.quantOpToMove);
-        valA = cloned->getResult(0);
-
+    SmallVector<Value> inputs;
+    inputs.push_back(quantInputA);
+    inputs.push_back(quantInputB);
+    
+    // Handle Bias Type Backtracking
+    bool hasBias = !mlir::isa<NoneType>(inputC.getType());
+    if (hasBias) {
+      // 这里的关键：Gemm 的 Bias 输入通常是 float (经过 Dequant)。
+      // 我们需要找到它背后的 Quantized Source (i32)。
+      if (auto dequantC = inputC.getDefiningOp<ONNXDequantizeLinearOp>()) {
+          inputs.push_back(dequantC.getX()); // Use the i32 input
       } else {
-        valA = configA.externalValue;
+          // 如果没有 Dequant，直接使用 C (可能是 Constant)
+          // 注意：如果 C 是 float 常量，这里可能需要手动量化或报错，
+          // 但既然是 qdq 模型，通常都是 Dequant 的结果。
+          inputs.push_back(inputC);
       }
-
-      // --------------------------------------------------------
-      // 处理 Value B
-      // --------------------------------------------------------
-      Value valB;
-      if (configB.constOpToCopy) {
-        Value upstreamB = configB.constOpToCopy.getResult();
-        auto tensorType = mlir::cast<RankedTensorType>(upstreamB.getType());
-        SmallVector<Value> dynSizes = 
-            getDynamicSizes(rewriter, loc, upstreamB, tensorType.getShape());
-        Value initB = rewriter.create<tensor::EmptyOp>(
-            loc, tensorType.getShape(), tensorType.getElementType(), dynSizes);
-        auto copyOp = rewriter.create<linalg::CopyOp>(loc, upstreamB, initB);
-        valB = copyOp.getResult(0);
-
-      } else if (configB.quantOpToMove) {
-        Operation *cloned = rewriter.clone(*configB.quantOpToMove);
-        valB = cloned->getResult(0);
-
-      } else {
-        valB = configB.externalValue;
-      }
-
-      // --------------------------------------------------------
-      // Transpose
-      // --------------------------------------------------------
-      if (configA.needsTranspose) {
-        auto typeA = mlir::cast<RankedTensorType>(valA.getType());
-        SmallVector<int64_t> transShape = {
-            typeA.getShape()[1], typeA.getShape()[0]};
-        auto transType =
-            RankedTensorType::get(transShape, typeA.getElementType());
-        valA = rewriter.create<ONNXTransposeOp>(
-            loc, transType, valA, rewriter.getI64ArrayAttr(configA.perm));
-      }
-
-      if (configB.needsTranspose) {
-        auto typeB = mlir::cast<RankedTensorType>(valB.getType());
-        SmallVector<int64_t> transShape = {
-            typeB.getShape()[1], typeB.getShape()[0]};
-        auto transType =
-            RankedTensorType::get(transShape, typeB.getElementType());
-        valB = rewriter.create<ONNXTransposeOp>(
-            loc, transType, valB, rewriter.getI64ArrayAttr(configB.perm));
-      }
-
-      // --------------------------------------------------------
-      // Linalg Matmul
-      // --------------------------------------------------------
-      auto typeA = mlir::cast<RankedTensorType>(valA.getType());
-      auto typeB = mlir::cast<RankedTensorType>(valB.getType());
-      auto outQType =
-          mlir::cast<RankedTensorType>(outQuantOp.getResult().getType());
-
-      SmallVector<int64_t> outShape = {
-          typeA.getShape()[0], typeB.getShape()[1]};
-      auto linalgOutType =
-          RankedTensorType::get(outShape, outQType.getElementType());
-
-      SmallVector<Value> dynSizes =
-          getDynamicSizes(rewriter, loc, valA, outShape);
-      Value outputInit =
-          rewriter.create<tensor::EmptyOp>(loc, linalgOutType, dynSizes);
-
-      auto linalgOp = rewriter.create<linalg::MatmulOp>(
-          loc, 
-          linalgOutType,         
-          ValueRange{valA, valB}, 
-          outputInit              
-      );
-
-      // Attributes
-      linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_matmul"));
-      linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-      linalgOp->setAttr("a_scale", rewriter.getF32FloatAttr(aScale));
-      linalgOp->setAttr("a_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), aZp));
-      linalgOp->setAttr("b_scale", rewriter.getF32FloatAttr(bScale));
-      linalgOp->setAttr("b_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), bZp));
-      linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
-      linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI16Type(), outZp));
-
-      Value regionResult = linalgOp.getResults()[0];
-
-      // ========================================================
-      // Bias Add using linalg.generic (Broadcasting)
-      // ========================================================
-      if (Value bias = op.getC()) {
-          // 1. 准备 Bias Input (通过 implicit capture)
-          // 通常 Bias 是 [N]，需要广播到 [M, N]
-          
-          // 2. 准备 Output Buffer for Add (Reuse same shape/type as Matmul result)
-          Value addInit = rewriter.create<tensor::EmptyOp>(
-              loc, linalgOutType, dynSizes);
-
-          // 3. 构建 Indexing Maps
-          // Matmul Result: (m, n) -> (m, n)
-          // Bias:          (m, n) -> (n)  <-- Broadcast happens here
-          // Output:        (m, n) -> (m, n)
-          SmallVector<AffineMap> maps;
-          auto m = rewriter.getAffineDimExpr(0);
-          auto n = rewriter.getAffineDimExpr(1);
-          
-          maps.push_back(AffineMap::get(2, 0, {m, n}, rewriter.getContext())); // Input 1
-          maps.push_back(AffineMap::get(2, 0, {n}, rewriter.getContext()));    // Input 2 (Bias)
-          maps.push_back(AffineMap::get(2, 0, {m, n}, rewriter.getContext())); // Output
-
-          // 4. Iterator Types
-          SmallVector<utils::IteratorType> iterators = {
-              utils::IteratorType::parallel, utils::IteratorType::parallel
-          };
-
-          // 5. Create Generic Op
-          auto addOp = rewriter.create<linalg::GenericOp>(
-              loc, 
-              linalgOutType, // Result Type
-              ValueRange{regionResult, bias}, // Inputs
-              addInit, // Outputs
-              maps,
-              iterators,
-              [&](OpBuilder &b, Location loc, ValueRange args) {
-                  Value in1 = args[0];
-                  Value in2 = args[1];
-                  // 假设是 float，如果是 int 用 arith::AddIOp
-                  Value res = b.create<arith::AddIOp>(loc, in1, in2);
-                  b.create<linalg::YieldOp>(loc, res);
-              }
-          );
-          
-          regionResult = addOp.getResult(0);
-      }
-
-      if (shouldPullDqIntoRegion) {
-        Operation *clonedDq = rewriter.clone(*outDqOp);
-        clonedDq->setOperand(0, regionResult);
-        regionResult = clonedDq->getResult(0);
-      }
-
-      rewriter.create<scf::YieldOp>(loc, regionResult);
     }
 
-    // Cleanup / Replacements
-    if (shouldPullDqIntoRegion) {
-      rewriter.replaceOp(outDqOp, executeRegion.getResults());
-      rewriter.eraseOp(outQuantOp);
-    } else {
-      rewriter.replaceOp(outQuantOp, executeRegion.getResults());
-    }
+    Value result = createGenericMatMulOp(rewriter, op.getLoc(),
+        inputs, outputType,
+        paramsA.scale, paramsA.zeroPoint,
+        paramsB.scale, paramsB.zeroPoint,
+        paramsOut.scale, paramsOut.zeroPoint,
+        "npu_gemm");
 
+    rewriter.replaceOp(quantOp, result);
     rewriter.eraseOp(op);
-
-    llvm::SmallPtrSet<Operation*, 4> potentialDeadOps;
-    if (configA.absorbedDq) potentialDeadOps.insert(configA.absorbedDq);
-    if (configB.absorbedDq) potentialDeadOps.insert(configB.absorbedDq);
-    if (configA.constOpToCopy) potentialDeadOps.insert(configA.constOpToCopy);
-    if (configB.constOpToCopy) potentialDeadOps.insert(configB.constOpToCopy);
-    if (configA.quantOpToMove) potentialDeadOps.insert(configA.quantOpToMove);
-    if (configB.quantOpToMove) potentialDeadOps.insert(configB.quantOpToMove);
-
-    for (Operation* deadOp : potentialDeadOps) {
-        if (deadOp->use_empty()) {
-            rewriter.eraseOp(deadOp);
-        }
+    
+    if (dequantA->hasOneUse()) rewriter.eraseOp(dequantA);
+    if (dequantB->hasOneUse()) rewriter.eraseOp(dequantB);
+    // 尝试清理 Bias 的 Dequant Op
+    if (hasBias) {
+       if (auto dequantC = inputC.getDefiningOp<ONNXDequantizeLinearOp>()) {
+           if (dequantC->hasOneUse()) rewriter.eraseOp(dequantC);
+       }
     }
-
+    
     return success();
   }
 };
 
-// =============================================================================
-// Pattern 2: QLinearMatMulToLinalg
-// =============================================================================
+// ============================================================================
+// 2. QLinearMatMul Pattern
+// ============================================================================
 struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
   using OpConversionPattern<ONNXQLinearMatMulOp>::OpConversionPattern;
 
   LogicalResult matchAndRewrite(ONNXQLinearMatMulOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter) const override {
-
-    Location loc = op.getLoc();
+    
     Value inputA = op.getA();
     Value inputB = op.getB();
-
-    QuantizationParam aParams = getQuantParamsFromOperands(op, 1, 2);
-    QuantizationParam bParams = getQuantParamsFromOperands(op, 4, 5);
-    QuantizationParam outParams = getQuantParamsFromOperands(op, 6, 7);
-
-    Operation *producerA = inputA.getDefiningOp();
-    bool copyA = producerA && llvm::isa<ONNXConstantOp>(producerA);
-    bool moveA = producerA && llvm::isa<ONNXQuantizeLinearOp>(producerA);
-
-    Operation *producerB = inputB.getDefiningOp();
-    bool copyB = producerB && llvm::isa<ONNXConstantOp>(producerB);
-    bool moveB = producerB && llvm::isa<ONNXQuantizeLinearOp>(producerB);
-
     auto outputType = mlir::cast<RankedTensorType>(op.getResult().getType());
-
-    auto executeRegion =
-        rewriter.create<scf::ExecuteRegionOp>(loc, outputType); 
     
-    {
-      OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.createBlock(&executeRegion.getRegion());
-
-      Value valA;
-      if (copyA) {
-        Value upstreamA = producerA->getResult(0);
-        auto tensorType = mlir::cast<RankedTensorType>(upstreamA.getType());
-        SmallVector<Value> dynSizes = 
-            getDynamicSizes(rewriter, loc, upstreamA, tensorType.getShape());
-        Value initA = rewriter.create<tensor::EmptyOp>(
-            loc, tensorType.getShape(), tensorType.getElementType(), dynSizes);
-        valA = rewriter.create<linalg::CopyOp>(loc, upstreamA, initA).getResult(0);
-      } else if (moveA) {
-        valA = rewriter.clone(*producerA)->getResult(0);
-      } else {
-        valA = inputA; 
-      }
-
-      Value valB;
-      if (copyB) {
-        Value upstreamB = producerB->getResult(0);
-        auto tensorType = mlir::cast<RankedTensorType>(upstreamB.getType());
-        SmallVector<Value> dynSizes = 
-            getDynamicSizes(rewriter, loc, upstreamB, tensorType.getShape());
-        Value initB = rewriter.create<tensor::EmptyOp>(
-            loc, tensorType.getShape(), tensorType.getElementType(), dynSizes);
-        valB = rewriter.create<linalg::CopyOp>(loc, upstreamB, initB).getResult(0);
-      } else if (moveB) {
-        valB = rewriter.clone(*producerB)->getResult(0);
-      } else {
-        valB = inputB;
-      }
-
-      SmallVector<Value> dynSizes =
-          getDynamicSizes(rewriter, loc, valA, outputType.getShape());
-      Value outputInit =
-          rewriter.create<tensor::EmptyOp>(loc, outputType, dynSizes);
-
-      auto linalgOp = rewriter.create<linalg::MatmulOp>(
-          loc, 
-          outputType,            
-          ValueRange{valA, valB}, 
-          outputInit              
-      );
-
-      linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_matmul"));
-      linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-      linalgOp->setAttr("a_scale", rewriter.getF32FloatAttr(aParams.scale));
-      linalgOp->setAttr("a_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), aParams.zeroPoint));
-      linalgOp->setAttr("b_scale", rewriter.getF32FloatAttr(bParams.scale));
-      linalgOp->setAttr("b_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), bParams.zeroPoint));
-      linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outParams.scale));
-      linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI16Type(), outParams.zeroPoint));
-
-      rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
-    }
-
-    rewriter.replaceOp(op, executeRegion.getResults());
-
-    llvm::SmallPtrSet<Operation*, 4> qOpsToClean;
-    if (moveA || copyA) qOpsToClean.insert(producerA);
-    if (moveB || copyB) qOpsToClean.insert(producerB);
-
-    for (Operation* deadOp : qOpsToClean) {
-        if (deadOp->use_empty()) rewriter.eraseOp(deadOp);
-    }
-
+    float scaleA = getScalarFloat(op.getAScale());
+    int64_t zpA = getScalarInt(op.getAZeroPoint());
+    float scaleB = getScalarFloat(op.getBScale());
+    int64_t zpB = getScalarInt(op.getBZeroPoint());
+    float scaleY = getScalarFloat(op.getYScale());
+    int64_t zpY = getScalarInt(op.getYZeroPoint());
+    
+    SmallVector<Value> inputs = {inputA, inputB};
+    
+    Value result = createGenericMatMulOp(rewriter, op.getLoc(),
+        inputs, outputType,
+        scaleA, zpA, scaleB, zpB, scaleY, zpY,
+        "npu_matmul");
+        
+    rewriter.replaceOp(op, result);
     return success();
   }
 };
@@ -482,6 +368,5 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
 } // namespace
 
 void npux::populateLinalgGemmPattern(RewritePatternSet &patterns) {
-  patterns.add<GemmToLinalg>(patterns.getContext());
-  patterns.add<QLinearMatMulToLinalg>(patterns.getContext());
+  patterns.add<GemmToLinalg, QLinearMatMulToLinalg>(patterns.getContext());
 }

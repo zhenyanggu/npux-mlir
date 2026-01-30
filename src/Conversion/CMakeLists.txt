@@ -10,6 +10,8 @@ add_subdirectory(ONNXToTOSA)
 add_subdirectory(NpuPartition)
 add_subdirectory(NpuTiling)
 add_subdirectory(NpuToLLVM)
+add_subdirectory(NpuBufferization)
+add_subdirectory(NpuFuse)
 
 
 if (ONNX_MLIR_ENABLE_STABLEHLO)

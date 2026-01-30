@@ -7,7 +7,7 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/IR/PatternMatch.h"
-#include "src/Pass/Passes.hpp"
+#include "mlir/IR/IRMapping.h" 
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
 
@@ -16,94 +16,138 @@ using namespace npux;
 
 namespace {
 
+// 复用 helper 函数
+LogicalResult peelFirstIteration(RewriterBase &rewriter, scf::ForOp loopOp, 
+                                 SmallVectorImpl<Operation*> &peeledOps) {
+  OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(loopOp);
+
+  Location loc = loopOp.getLoc();
+  Value lb = loopOp.getLowerBound();
+  Value step = loopOp.getStep();
+
+  IRMapping mapper; 
+  mapper.map(loopOp.getInductionVar(), lb);
+  
+  for (auto it : llvm::zip(loopOp.getBody()->getArguments().drop_front(), loopOp.getInitArgs())) {
+    mapper.map(std::get<0>(it), std::get<1>(it));
+  }
+
+  for (auto &op : loopOp.getBody()->without_terminator()) {
+    Operation *clonedOp = rewriter.clone(op, mapper);
+    peeledOps.push_back(clonedOp);
+  }
+
+  auto yieldOp = cast<scf::YieldOp>(loopOp.getBody()->getTerminator());
+  SmallVector<Value> firstIterResults;
+  for (Value operand : yieldOp.getOperands()) {
+    firstIterResults.push_back(mapper.lookupOrDefault(operand));
+  }
+
+  Value newLb = rewriter.create<arith::AddIOp>(loc, lb, step);
+  loopOp.setLowerBound(newLb);
+  loopOp.getInitArgsMutable().assign(firstIterResults);
+
+  return success();
+}
+
 struct NpuConvInnerTilingPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(linalg::GenericOp op,
                                 PatternRewriter &rewriter) const override {
     
-    // 1. 检查是否是 NPU 卷积
+    // 1. 基础检查
     auto libCall = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCall || libCall.getValue() != "npu_conv") {
-      return failure();
+    if (!libCall || libCall.getValue() != "npu_conv") return failure();
+    if (!op->hasAttr("npu.tiled")) return failure();
+    if (op->hasAttr("npu.trivial_tiling")) return failure();
+    if (op->hasAttr("npu.inner_tiled")) return failure();
+
+    // 2. 获取外层传下来的模式
+    StringRef parentMode = "init"; // 默认假设是第一块
+    if (auto attr = op->getAttrOfType<StringAttr>("npu.accumulate_mode")) {
+        parentMode = attr.getValue();
     }
 
-    // 2. [关键] 必须是已经被外层 Pass 切分过的 Op
-    if (!op->hasAttr("npu.tiled")) {
-      return failure();
-    }
-
-    if (op->hasAttr("npu.trivial_tiling")) {
-      return failure();
-    }
-
-    // 3. [关键] 防止死循环：检查是否已经进行过内层切分
-    if (op->hasAttr("npu.inner_tiled")) {
-      return failure();
-    }
-
-    // 4. 设置切分参数：只切分 OC_chunk (d1) 和 IC_chunk (d4) 为 1
-    // d1: OC_chunk (Parallel)
-    // d4: IC_chunk (Reduction)
+    // 3. Tiling 参数设置
     SmallVector<int64_t> tileSizes(9, 0); 
-    tileSizes[1] = 1; // Inner OC Loop
-    tileSizes[4] = 1; // Inner IC Loop
+    tileSizes[1] = 1; // OC
+    tileSizes[4] = 1; // IC
 
-    // 5. 执行 Tiling
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
     SmallVector<OpFoldResult> tileSizesOpFold =
         getAsOpFoldResult(rewriter.getI64ArrayAttr(tileSizes));
 
     scf::SCFTilingOptions options;
     options.setTileSizes(tileSizesOpFold);
+    // 强制循环交换: IC 在外, OC 在内 -> Input Stationary
+    options.setInterchange(SmallVector<int64_t>{1, 0});
 
     FailureOr<scf::SCFTilingResult> tilingResult =
         scf::tileUsingSCF(rewriter, tilingInterfaceOp, options);
 
-    if (failed(tilingResult)) {
-      return failure();
-    }
+    if (failed(tilingResult)) return failure();
 
-    // ==========================================================
-    // 新增：给生成的 Loop 打 Label
-    // scf::tileUsingSCF 生成的 loops 顺序对应 tileSizes 中非零维度的顺序 (从小到大)
-    // tileSizes[1] 是 OC (Chunk), tileSizes[4] 是 IC (Chunk)
-    // 所以 loops[0] 是 OC Loop, loops[1] 是 IC Loop
-    // ==========================================================
     auto loops = tilingResult->loops;
+    if (loops.empty()) return failure();
 
-    // 标记 OC Inner Loop
-    if (loops.size() > 0) {
-        if (auto loop = dyn_cast<scf::ForOp>(loops[0].getOperation())) {
-            loop->setAttr("npu.loop_type", rewriter.getStringAttr("inner_oc"));
-            // 可选：方便 Debug 查看
-            loop->setAttr("npu.loop_name", rewriter.getStringAttr("Loop_Inner_Cout")); 
-        }
-    }
-
-    // 标记 IC Inner Loop
+    scf::ForOp innerIcLoop = cast<scf::ForOp>(loops[0].getOperation());
+    
+    // 标记 Loop 类型
+    innerIcLoop->setAttr("npu.loop_type", rewriter.getStringAttr("inner_ic"));
     if (loops.size() > 1) {
         if (auto loop = dyn_cast<scf::ForOp>(loops[1].getOperation())) {
-            loop->setAttr("npu.loop_type", rewriter.getStringAttr("inner_ic"));
-            // 可选：方便 Debug 查看
-            loop->setAttr("npu.loop_name", rewriter.getStringAttr("Loop_Inner_Cin"));
+            loop->setAttr("npu.loop_type", rewriter.getStringAttr("inner_oc"));
         }
     }
 
-    // 6. 标记新生成的 Op (最内层的 GenericOp)
-    for (Operation *tiledOp : tilingResult->tiledOps) {
-      tiledOp->setAttr("npu.inner_tiled", rewriter.getUnitAttr());
-      
-      // 继承属性
-      if (op->hasAttr("npu.layer_name")) {
-         tiledOp->setAttr("npu.layer_name", op->getAttr("npu.layer_name"));
-      }
-      if (op->hasAttr("npu.accumulate_mode")) {
-         tiledOp->setAttr("npu.accumulate_mode", op->getAttr("npu.accumulate_mode"));
-      }
+    // ==========================================================
+    // [优化] 条件剥离 (Conditional Peeling)
+    // ==========================================================
+    
+    if (parentMode == "init") {
+        // Case A: 全局 Init 阶段
+        
+        SmallVector<Operation*> peeledOps;
+        if (failed(peelFirstIteration(rewriter, innerIcLoop, peeledOps))) {
+            return failure();
+        }
+
+        // 1. 标记 Peeled Ops (IC=0) -> INIT
+        // 【修正点】使用 walk 深入查找嵌套在 OC Loop 里的 GenericOp
+        for (auto *peeledOp : peeledOps) {
+            peeledOp->walk([&](linalg::GenericOp tiledOp) {
+                tiledOp->setAttr("npu.inner_tiled", rewriter.getUnitAttr());
+                tiledOp->setAttr("npu.accumulate_mode", rewriter.getStringAttr("init"));
+                // 继承 name...
+                if (op->hasAttr("npu.layer_name")) 
+                    tiledOp->setAttr("npu.layer_name", op->getAttr("npu.layer_name"));
+            });
+        }
+
+        // 2. 标记 Loop Body (IC>0) -> ACCUMULATE
+        innerIcLoop.walk([&](linalg::GenericOp tiledOp) {
+            tiledOp->setAttr("npu.inner_tiled", rewriter.getUnitAttr());
+            tiledOp->setAttr("npu.accumulate_mode", rewriter.getStringAttr("accumulate"));
+            // 继承 name...
+            if (op->hasAttr("npu.layer_name")) 
+                tiledOp->setAttr("npu.layer_name", op->getAttr("npu.layer_name"));
+        });
+
+    } else {
+        // Case B: 全局 Accumulate 阶段
+        
+        innerIcLoop.walk([&](linalg::GenericOp tiledOp) {
+            tiledOp->setAttr("npu.inner_tiled", rewriter.getUnitAttr());
+            tiledOp->setAttr("npu.accumulate_mode", rewriter.getStringAttr("accumulate"));
+            
+            if (op->hasAttr("npu.layer_name")) 
+                tiledOp->setAttr("npu.layer_name", op->getAttr("npu.layer_name"));
+        });
     }
 
-    // 7. 替换原 Op
+    // 4. 替换原 Op
     rewriter.replaceOp(op, tilingResult->replacements);
 
     return success();
@@ -115,4 +159,4 @@ struct NpuConvInnerTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 void npux::populateConvInnerTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
   patterns.add<NpuConvInnerTilingPattern>(context);
-};
+}

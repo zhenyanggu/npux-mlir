@@ -146,6 +146,7 @@ static llvm::cl::list<NpuOp, std::vector<NpuOp>> npuOpOpt(
         clEnumValN(NpuOp::Softmax, "Softmax", "Accelerate Softmax operation"),
         clEnumValN(NpuOp::Gelu, "Gelu", "Accelerate Gelu operation"),
         clEnumValN(NpuOp::Gemm, "Gemm", "Accelerate Gemm operation"),
+        clEnumValN(NpuOp::Relu, "Relu", "Accelerate Relu operation"),
         clEnumValN(NpuOp::None, "None", "No NPU operation acceleration")
     ),
     llvm::cl::CommaSeparated,

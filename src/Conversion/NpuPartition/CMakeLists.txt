@@ -4,7 +4,6 @@ add_onnx_mlir_library(NpuPatition
     LinalgConversionHelper.cpp
     NpuMerge.cpp
     NpuCleanPack.cpp
-    NpuLowerPack.cpp
     NpuRegionExtension.cpp
 
     Linalg/LayerNorm.cpp

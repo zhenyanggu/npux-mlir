@@ -25,7 +25,6 @@ namespace {
 static bool isInNpuKernel(Operation *op) {
   auto funcOp = op->getParentOfType<func::FuncOp>();
   if (!funcOp) return false;
-  // 只要函数有 npu.target = "npu" 属性，就认为是 Kernel
   if (auto attr = funcOp->getAttrOfType<StringAttr>("npu.target")) {
     return attr.getValue() == "npu";
   }
@@ -53,11 +52,21 @@ struct ConvertLinalgToNpuPass
     target.addLegalDialect<NpuxDialect>();
     target.addLegalDialect<arith::ArithDialect, memref::MemRefDialect>();
 
-    // B. Linalg Generic 限制
+    // =========================================================
+    // B. Linalg Generic 限制 (修改点 1)
+    // =========================================================
     target.addDynamicallyLegalOp<linalg::GenericOp>(
-        [](linalg::GenericOp op) { return !op->hasAttr("npu.target"); });
+        [](linalg::GenericOp op) { 
+            // 如果 Op 标记为 npu.target (Conv/Elewise)，则非法，需转换
+            if (op->hasAttr("npu.target")) return false;
+            
+            // 如果 Op 标记为 npu.pp_stage (我们新加的量化节点)，也非法，需转换
+            if (op->hasAttr("npu.pp_stage")) return false;
 
-    // C. FuncOp 限制 (用于插入 npux.init)
+            return true; 
+        });
+
+    // C. FuncOp 限制 (保持不变)
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
         if (op.getName() == "main_graph" || op.getName() == "main") {
             if (!op.getBody().empty()) {
@@ -71,26 +80,31 @@ struct ConvertLinalgToNpuPass
     });
 
     // =========================================================
-    // D. AllocOp 限制 (简化版)
-    // 逻辑：Space 0 + 在 NPU Kernel 内 = 非法 (需转 npux.alloc)
+    // D. AllocOp 限制 (修改点 2: 增加 Space 3)
     // =========================================================
     target.addDynamicallyLegalOp<memref::AllocOp>([&](memref::AllocOp op) {
-      if (isInNpuKernel(op)) {
-          return false; 
-      }
-      return true; 
+      if (!isInNpuKernel(op)) return true;
+
+      // 在 Kernel 内：
+      // Space 0 (Host) -> 需转 npux.alloc
+      // Space 2 (SPM)  -> 需转 npux.sram_alloc
+      // Space 3 (ACC)  -> 需转 npux.acc_alloc
+      // 只要是在 Kernel 里的 Alloc，基本上都要接管
+      return false; 
     });
 
-
+    // =========================================================
+    // E. DeallocOp 限制 (修改点 2: 增加 Space 3)
+    // =========================================================
     target.addDynamicallyLegalOp<memref::DeallocOp>([&](memref::DeallocOp op) {
         Value memref = op.getMemref();
         auto type = cast<MemRefType>(memref.getType());
         int space = type.getMemorySpaceAsInt();
         
-        // 1. SRAM (Space 2) 的 dealloc 必须被移除 -> 非法
-        if (space == 2) return false;
+        // 1. SRAM (Space 2) 和 ACC (Space 3) 的 dealloc 必须被转换
+        if (space == 2 || space == 3) return false;
 
-        // 2. DRAM (Space 0) 且在 Kernel 内 -> 必须转 npux.free -> 非法
+        // 2. DRAM (Space 0) 且在 Kernel 内 -> 需转 npux.free
         if (space == 0 && isInNpuKernel(op)) {
             return false;
         }
@@ -99,15 +113,14 @@ struct ConvertLinalgToNpuPass
     });
 
     // =========================================================
-    // F. CopyOp 限制
-    // 逻辑：只要涉及 SRAM (Space 2)，就是 DMA -> 非法
+    // F. CopyOp 限制 (已涵盖 Space 3)
     // =========================================================
     target.addDynamicallyLegalOp<memref::CopyOp>([&](memref::CopyOp op) {
         auto srcSpace = cast<MemRefType>(op.getSource().getType()).getMemorySpaceAsInt();
         auto dstSpace = cast<MemRefType>(op.getTarget().getType()).getMemorySpaceAsInt();
         
-        // 只要源或目的有一个是 Space 2，就需要转换为 DMA Op
-        if (srcSpace == 2 || dstSpace == 2) return false;
+        // 只要源或目的涉及 Space 2 或 3，就需要转换为 DMA Op
+        if (srcSpace == 2 || dstSpace == 2 || srcSpace == 3 || dstSpace == 3) return false;
         
         return true;
     });

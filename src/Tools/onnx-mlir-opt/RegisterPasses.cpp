@@ -218,6 +218,31 @@ void registerNpuPasses() {
     return npux::createNpuRegionExtensionPass();
   });
 
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuFusePass();
+  });
+
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuICLoopSplitPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createSplitConvIcPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createLowerNpuSubviewPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuxComputeFusionPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createGemmPipelinePass();
+  });
+
   npux::registerBufferDeallocTest();
 }
 

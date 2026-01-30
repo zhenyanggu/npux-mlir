@@ -78,8 +78,9 @@ public:
     int rank = shape.size();
     if (rank < 2) return failure();
     
-    int64_t rows = shape[rank - 2];
-    int64_t cols = shape[rank - 1];
+    int64_t rows = shape[rank - 2]-1;
+    int64_t cols = shape[rank - 1]-1;
+
 
     Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
     Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows, 16);
