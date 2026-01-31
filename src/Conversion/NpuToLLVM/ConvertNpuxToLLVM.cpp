@@ -437,7 +437,6 @@ public:
   }
 };
 
-// 【重写】ComputeRun (Matching npu_conv_run C-API)
 class NpuxComputeRunLowering : public ConvertOpToLLVMPattern<ComputeRunOp> {
 public:
   using ConvertOpToLLVMPattern<ComputeRunOp>::ConvertOpToLLVMPattern;
@@ -451,7 +450,7 @@ public:
     auto i16Type = rewriter.getI16Type();
     auto i32Type = rewriter.getI32Type();
 
-    // 1. Resolve Addresses
+    // 1. Resolve Addresses (Common for both)
     Value addrA = getNpuOffsetAddress(loc, op.getInputA(), rewriter);
     Value addrB = getNpuOffsetAddress(loc, op.getInputB(), rewriter);
     Value addrOut = getNpuOffsetAddress(loc, op.getOutput(), rewriter);
@@ -480,72 +479,149 @@ public:
     };
 
     SmallVector<Value> args;
+    std::string funcName;
 
-    // --- 1. Padding (Top, Bottom, Left, Right, Mode) ---
-    // C-API: uint8_t
-    args.push_back(getI8(adaptor.getPadTop()));
-    args.push_back(getI8(adaptor.getPadBottom()));
-    args.push_back(getI8(adaptor.getPadLeft()));
-    args.push_back(getI8(adaptor.getPadRight()));
-    args.push_back(getI8(adaptor.getPadMode())); 
+    // Check OpType
+    // 假设 ODS 生成的 namespace 是 npux
+    if (op.getOpType() == npux::ComputeOpType::gemm) {
+        // ==========================================
+        // Branch 1: GEMM Logic
+        // ==========================================
+        funcName = "npu_gemm_run";
 
-    // --- 2. Weight (Shape_m1, Stride_m1, Dil_m1, IsGroup) ---
-    // C-API: uint8_t
-    args.push_back(getI8(adaptor.getWeightShapeM1()));
-    args.push_back(getI8(adaptor.getWeightStrideM1()));
-    args.push_back(getI8(adaptor.getWeightDilationM1()));
-    args.push_back(getI8(adaptor.getIsGroupConv()));
+        // 1. Dataflow & Control
+        // void npu_gemm_run(
+        //    uint8_t  dataflow,
+        //    uint8_t  int_type,
+        //    uint8_t  optype,
+        //    uint8_t  accout_dest,
+        args.push_back(getEnumI8(op.getDataflowMode()));
+        args.push_back(getI8(adaptor.getIntType()));
+        args.push_back(getEnumI8(op.getOpType()));
+        args.push_back(getEnumI8(op.getAccoutDest()));
 
-    // --- 3. Control (IntType, OpType, Dataflow, Dest) ---
-    // C-API: uint8_t
-    args.push_back(getI8(adaptor.getIntType()));
-    args.push_back(getEnumI8(op.getOpType()));
-    args.push_back(getEnumI8(op.getDataflowMode()));
-    args.push_back(getEnumI8(op.getAccoutDest()));
+        // 2. Quantization Inputs
+        //    uint16_t input_a_zeropoint,
+        //    uint16_t input_b_zeropoint,
+        args.push_back(getI16(adaptor.getInputAZeropoint()));
+        args.push_back(getI16(adaptor.getInputBZeropoint()));
 
-    // --- 4. Quant Input (InA_ZP, InB_ZP) ---
-    // C-API: uint16_t
-    args.push_back(getI16(adaptor.getInputAZeropoint()));
-    args.push_back(getI16(adaptor.getInputBZeropoint()));
+        // 3. Quantization Outputs (Gemm API puts these earlier than Conv)
+        //    uint32_t output_zeropoint,
+        //    uint16_t output_scale,
+        //    uint16_t output_scaleshift,
+        args.push_back(adaptor.getOutputZeropoint()); // i32
+        args.push_back(getI16(adaptor.getQuantScale()));
+        args.push_back(getI16(adaptor.getQuantScaleshift()));
 
-    // --- 5. Input A Geometry (Addr, ColM1, RowM1, Stride) ---
-    // C-API: u32, u8, u8, u16
-    args.push_back(addrA);
-    args.push_back(getI8(adaptor.getInputAColNumM1()));
-    args.push_back(getI8(adaptor.getInputARowNumM1()));
-    args.push_back(getI16(adaptor.getInputAStride()));
+        // 4. Bias/Psum Geometry
+        //    uint32_t biaspsum_addr,
+        //    uint16_t biaspsum_stride,
+        //    uint8_t  biaspsum_width,
+        //    uint8_t  biaspsum_height,
+        args.push_back(addrBias);
+        args.push_back(getI16(adaptor.getBiaspsumStride()));
+        args.push_back(getI8(adaptor.getBiaspsumWidth()));
+        args.push_back(getI8(adaptor.getBiaspsumHeight()));
 
-    // --- 6. Input B Geometry (Addr, ColM1, RowM1, Stride) ---
-    // C-API: u32, u8, u8, u16
-    args.push_back(addrB);
-    args.push_back(getI8(adaptor.getInputBColNumM1()));
-    args.push_back(getI8(adaptor.getInputBRowNumM1()));
-    args.push_back(getI16(adaptor.getInputBStride()));
+        // 5. Output Geometry
+        //    uint32_t output_addr,
+        //    uint16_t output_stride,
+        args.push_back(addrOut);
+        args.push_back(getI16(adaptor.getOutputStride()));
 
-    // --- 7. Bias/Psum Geometry (Width, Height, Addr, Stride) ---
-    // C-API: u8, u8, u32, u16
-    args.push_back(getI8(adaptor.getBiaspsumWidth()));
-    args.push_back(getI8(adaptor.getBiaspsumHeight()));
-    args.push_back(addrBias);
-    args.push_back(getI16(adaptor.getBiaspsumStride()));
+        // 6. Post-Process
+        //    uint8_t  isaccu,
+        //    uint8_t  relu,
+        //    uint8_t  relu_type,
+        //    uint8_t  is_bias,
+        args.push_back(getI8(adaptor.getIsAccumulate()));
+        args.push_back(getI8(adaptor.getReluEnable()));
+        args.push_back(getEnumI8(op.getReluType()));
+        args.push_back(getI8(adaptor.getAccBias()));
 
-    // --- 8. Output Geometry (Addr, Stride) ---
-    // C-API: u32, u16
-    args.push_back(addrOut);
-    args.push_back(getI16(adaptor.getOutputStride()));
+        // 7. Input A Geometry
+        //    uint32_t input_a_addr,
+        //    uint8_t  input_a_col_num,
+        //    uint8_t  input_a_row_num,
+        //    uint16_t input_a_stride,
+        args.push_back(addrA);
+        args.push_back(getI8(adaptor.getInputAColNumM1())); // Assuming API expects m1 or Op provides correct val
+        args.push_back(getI8(adaptor.getInputARowNumM1()));
+        args.push_back(getI16(adaptor.getInputAStride()));
 
-    // --- 9. Post-Process (Accum, Relu, ReluType, AccBias) ---
-    // C-API: u8
-    args.push_back(getI8(adaptor.getIsAccumulate()));
-    args.push_back(getI8(adaptor.getReluEnable()));
-    args.push_back(getEnumI8(op.getReluType()));
-    args.push_back(getI8(adaptor.getAccBias()));
+        // 8. Input B Geometry
+        //    uint32_t input_b_addr,
+        //    uint8_t  input_b_col_num,
+        //    uint8_t  input_b_row_num,
+        //    uint16_t input_b_stride
+        args.push_back(addrB);
+        args.push_back(getI8(adaptor.getInputBColNumM1()));
+        args.push_back(getI8(adaptor.getInputBRowNumM1()));
+        args.push_back(getI16(adaptor.getInputBStride()));
 
-    // --- 10. Quant Output (OutZP, Scale, Shift) ---
-    // C-API: u32, u16, u16
-    args.push_back(adaptor.getOutputZeropoint()); // i32
-    args.push_back(getI16(adaptor.getQuantScale()));
-    args.push_back(getI16(adaptor.getQuantScaleshift()));
+    } else {
+        // ==========================================
+        // Branch 2: CONV Logic (and GEMV)
+        // ==========================================
+        funcName = "npu_conv_run";
+
+        // --- 1. Padding (Top, Bottom, Left, Right, Mode) ---
+        args.push_back(getI8(adaptor.getPadTop()));
+        args.push_back(getI8(adaptor.getPadBottom()));
+        args.push_back(getI8(adaptor.getPadLeft()));
+        args.push_back(getI8(adaptor.getPadRight()));
+        args.push_back(getI8(adaptor.getPadMode())); 
+
+        // --- 2. Weight (Shape_m1, Stride_m1, Dil_m1, IsGroup) ---
+        args.push_back(getI8(adaptor.getWeightShapeM1()));
+        args.push_back(getI8(adaptor.getWeightStrideM1()));
+        args.push_back(getI8(adaptor.getWeightDilationM1()));
+        args.push_back(getI8(adaptor.getIsGroupConv()));
+
+        // --- 3. Control (IntType, OpType, Dataflow, Dest) ---
+        args.push_back(getI8(adaptor.getIntType()));
+        args.push_back(getEnumI8(op.getOpType()));
+        args.push_back(getEnumI8(op.getDataflowMode()));
+        args.push_back(getEnumI8(op.getAccoutDest()));
+
+        // --- 4. Quant Input (InA_ZP, InB_ZP) ---
+        args.push_back(getI16(adaptor.getInputAZeropoint()));
+        args.push_back(getI16(adaptor.getInputBZeropoint()));
+
+        // --- 5. Input A Geometry (Addr, ColM1, RowM1, Stride) ---
+        args.push_back(addrA);
+        args.push_back(getI8(adaptor.getInputAColNumM1()));
+        args.push_back(getI8(adaptor.getInputARowNumM1()));
+        args.push_back(getI16(adaptor.getInputAStride()));
+
+        // --- 6. Input B Geometry (Addr, ColM1, RowM1, Stride) ---
+        args.push_back(addrB);
+        args.push_back(getI8(adaptor.getInputBColNumM1()));
+        args.push_back(getI8(adaptor.getInputBRowNumM1()));
+        args.push_back(getI16(adaptor.getInputBStride()));
+
+        // --- 7. Bias/Psum Geometry (Width, Height, Addr, Stride) ---
+        args.push_back(getI8(adaptor.getBiaspsumWidth()));
+        args.push_back(getI8(adaptor.getBiaspsumHeight()));
+        args.push_back(addrBias);
+        args.push_back(getI16(adaptor.getBiaspsumStride()));
+
+        // --- 8. Output Geometry (Addr, Stride) ---
+        args.push_back(addrOut);
+        args.push_back(getI16(adaptor.getOutputStride()));
+
+        // --- 9. Post-Process (Accum, Relu, ReluType, AccBias) ---
+        args.push_back(getI8(adaptor.getIsAccumulate()));
+        args.push_back(getI8(adaptor.getReluEnable()));
+        args.push_back(getEnumI8(op.getReluType()));
+        args.push_back(getI8(adaptor.getAccBias()));
+
+        // --- 10. Quant Output (OutZP, Scale, Shift) ---
+        args.push_back(adaptor.getOutputZeropoint()); // i32
+        args.push_back(getI16(adaptor.getQuantScale()));
+        args.push_back(getI16(adaptor.getQuantScaleshift()));
+    }
 
     // Generate Call
     auto module = op->getParentOfType<ModuleOp>();
@@ -554,9 +630,9 @@ public:
     SmallVector<Type> argTypes;
     for (auto v : args) argTypes.push_back(v.getType());
 
-    // Function name: npu_conv_run (matching C driver)
+    // Function name is dynamic now
     FlatSymbolRefAttr fnRef = getOrInsertExternFunc(
-        rewriter, module, "npu_conv_run", voidType, argTypes);
+        rewriter, module, funcName, voidType, argTypes);
 
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
 

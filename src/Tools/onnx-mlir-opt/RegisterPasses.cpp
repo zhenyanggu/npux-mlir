@@ -243,6 +243,10 @@ void registerNpuPasses() {
     return npux::createGemmPipelinePass();
   });
 
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createCustomBufferLoopHoistingPass();
+  });
+
   npux::registerBufferDeallocTest();
 }
 

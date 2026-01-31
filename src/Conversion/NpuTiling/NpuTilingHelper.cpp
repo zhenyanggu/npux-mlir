@@ -4,14 +4,15 @@
 //=======================================================
 
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h" // 核心 Tiling 工具
+#include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h" 
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
 
 #include "src/Compiler/NpuConfig.hpp"
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 
-#include <algorithm> // 必须添加
+#include <algorithm> 
 #include <cmath>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace mlir;
 
@@ -150,9 +151,12 @@ SmallVector<int64_t> getNpuTileSizes(linalg::GenericOp op) {
     
     // [LOGGING] Gelu
     if (!configSizes.empty()) {
-        llvm::errs() << "Tiling [Gelu] (" << (isAuto ? "Auto" : "Manual") << "): "
-                     << "Shape Rank=[" << sizes.size() << "] "
-                     << "-> Tile=[H:" << configSizes[0] << ", W:" << configSizes[1] << "]\n";
+        std::string msg;
+        llvm::raw_string_ostream os(msg);
+        os << "Tiling [Gelu] (" << (isAuto ? "Auto" : "Manual") << "): "
+           << "Shape Rank=[" << sizes.size() << "] "
+           << "-> Tile=[H:" << configSizes[0] << ", W:" << configSizes[1] << "]\n";
+        llvm::errs() << os.str(); 
     }
 
   } else if (opName == "npu_conv") {
@@ -172,10 +176,13 @@ SmallVector<int64_t> getNpuTileSizes(linalg::GenericOp op) {
         int64_t t_oc = configSizes[3];
 
         // [LOGGING] Conv (新增)
-        llvm::errs() << "Tiling [Conv]: "
-                     << "Shape Rank=[" << sizes.size() << "] "
-                     << "-> Tile=[OH:" << t_oh << ", OW:" << t_ow 
-                     << ", IC_blk:" << t_ic << ", OC_blk:" << t_oc << "]\n";
+        std::string msg;
+        llvm::raw_string_ostream os(msg);
+        os << "Tiling [Conv]: "
+           << "Shape Rank=[" << sizes.size() << "] "
+           << "-> Tile=[OH:" << t_oh << ", OW:" << t_ow 
+           << ", IC_blk:" << t_ic << ", OC_blk:" << t_oc << "]\n";
+        llvm::errs() << os.str();
 
         // Generic Loop Order for Conv: 
         // d0:N, d1:OC_chunk, d2:OH, d3:OW, d4:IC_chunk, ...
@@ -198,47 +205,84 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
     // 硬件对齐参数
     const int64_t arraySizeH = 32;
     const int64_t arraySizeW = 32;
-    const int64_t inputDtypeBytes = 1; // int8
-    const int64_t accDtypeBytes = 4;   // int32
+    const int64_t inputDtypeBytes = 1;  // int8 (输入)
+    const int64_t outputDtypeBytes = 1; // int8 (输出到SPM也是int8)
+    const int64_t accDtypeBytes = 4;    // int32 (ACC累加)
 
     // ---------------------------------------------------------
-    // Step 1: 确定 Tm 和 Tn (基于 ACC 容量 - Output Stationary)
+    // Step 1: 初始估计 Tm 和 Tn (基于 ACC 容量)
     // ---------------------------------------------------------
     int64_t maxAccElem = accSize / accDtypeBytes;
     
     int64_t targetDim = std::floor(std::sqrt(maxAccElem));
     
-    // M 维度分块
+    // M 维度初步分块
     int64_t t_m = std::min(M, targetDim);
     if (t_m >= arraySizeH) t_m = (t_m / arraySizeH) * arraySizeH;
     else t_m = arraySizeH;
 
-    // N 维度分块
+    // N 维度初步分块
     int64_t t_n = std::min(N, maxAccElem / t_m);
     if (t_n >= arraySizeW) t_n = (t_n / arraySizeW) * arraySizeW;
     else t_n = arraySizeW;
 
-    // ACC 溢出修正
-    while ((t_m * t_n * accDtypeBytes) > accSize) {
-        t_n -= arraySizeW;
-        if (t_n < arraySizeW) { t_n = arraySizeW; t_m -= arraySizeH; }
-        if (t_m < arraySizeH) break; 
-    }
-
     // ---------------------------------------------------------
-    // Step 2: 确定 Tk (基于 SPM 容量)
+    // Step 2: 联合调整 Tm, Tn, Tk (基于 ACC 和 SPM 容量)
     // ---------------------------------------------------------
-    int64_t bytesPerK = (t_m + t_n) * inputDtypeBytes;
-    int64_t t_k = K;
+    // 这里需要循环，因为如果 SPM 放不下 (Input + Output)，
+    // 我们需要缩小 Tm/Tn 来腾出空间。
+    int64_t t_k = arraySizeH; // 初始设为最小对齐单位
 
-    if (bytesPerK > 0) {
-        int64_t maxTk = spmSize / bytesPerK;
+    while (true) {
+        // 1. 检查 ACC 限制 (Accumulator overflow check)
+        // ---------------------------------------------
+        bool accFits = (t_m * t_n * accDtypeBytes) <= accSize;
+
+        // 2. 检查 SPM 限制 (SPM overflow check)
+        // ---------------------------------------------
+        // Output 占用: Tm * Tn * 1 byte
+        int64_t outputSpmBytes = t_m * t_n * outputDtypeBytes;
+        
+        // Input 单位 K 占用: (Tm + Tn) * 1 byte
+        int64_t inputBytesPerK = (t_m + t_n) * inputDtypeBytes;
+        
+        // 计算 SPM 中剩余给 Input 的空间
+        int64_t remainingSpmForInput = spmSize - outputSpmBytes;
+
+        // 至少要能放下一个最小单位的 Tk (arraySizeH)
+        bool spmFits = (remainingSpmForInput >= (inputBytesPerK * arraySizeH));
+
+        // 3. 如果 ACC 或 SPM 爆了，缩小 Tm/Tn
+        // ---------------------------------------------
+        if (!accFits || !spmFits) {
+            t_n -= arraySizeW; // 优先缩减 N
+            if (t_n < arraySizeW) {
+                t_n = arraySizeW;
+                t_m -= arraySizeH; // N 缩无可缩，缩 M
+            }
+            
+            // 保护机制：如果连最小块都放不下（极少见），强制退出
+            if (t_m < arraySizeH) {
+                t_m = arraySizeH;
+                t_n = arraySizeW;
+                break; 
+            }
+            continue; // 重新检查新的 Tm/Tn
+        }
+
+        // 4. 计算最终的 Tk
+        // ---------------------------------------------
+        // 到这里说明 Tm, Tn 既符合 ACC，也给 SPM 留出了至少 32*K 的空间
+        int64_t maxTk = remainingSpmForInput / inputBytesPerK;
         t_k = std::min(K, maxTk);
+        
+        // Tk 对齐
+        if (t_k >= arraySizeH) t_k = (t_k / arraySizeH) * arraySizeH;
+        else t_k = arraySizeH;
+        
+        // 成功找到合适的分块
+        break;
     }
-
-    // Tk 对齐
-    if (t_k >= arraySizeH) t_k = (t_k / arraySizeH) * arraySizeH;
-    else t_k = arraySizeH; 
 
     return {t_m, t_n, t_k};
 }
@@ -274,12 +318,14 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
         computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize);
     }
 
-    // [LOGGING] Gemm (新增)
-    llvm::errs() << "Tiling [Gemm] (" << (isManual ? "Manual" : "Auto") << "): "
-                 << "Problem=[M:" << M << ", N:" << N << ", K:" << K << "] "
-                 << "-> Tile=[Tm:" << computedSizes[0] 
-                 << ", Tn:" << computedSizes[1] 
-                 << ", Tk:" << computedSizes[2] << "]\n";
+    std::string msg;
+    llvm::raw_string_ostream os(msg);
+    os << "Tiling [Gemm] (" << (isManual ? "Manual" : "Auto") << "): "
+       << "Problem=[M:" << M << ", N:" << N << ", K:" << K << "] "
+       << "-> Tile=[Tm:" << computedSizes[0] 
+       << ", Tn:" << computedSizes[1] 
+       << ", Tk:" << computedSizes[2] << "]\n";
+    llvm::errs() << os.str();
 
     // 3. 构建最终的 Tile Sizes 数组
     SmallVector<int64_t> finalTileSizes(rank, 0);

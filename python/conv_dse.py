@@ -8,7 +8,7 @@ from dataclasses import dataclass, asdict
 from typing import List, Dict, Tuple, Optional
 
 # ==========================================
-# 1. 硬件定义 (保持不变)
+# 1. 硬件定义 (更新为 Manual VGG 版的参数)
 # ==========================================
 @dataclass
 class HardwareConfig:
@@ -18,15 +18,16 @@ class HardwareConfig:
     dtype_input: int = 1     # int8
     dtype_acc: int = 4       # int32
     
-    # 物理阵列参数 (不可变)
-    u_oh: int = 4
-    u_ow: int = 8
-    u_oc: int = 32
-    u_ic: int = 32
+    # 物理阵列参数
+    sys_array_size: int = 32 
 
-    measured_latency_us: float = 15.579
-    measured_bandwidth_mbps: float = 1133.40 
-    measured_conv_us = 27
+    measured_bandwidth_mbps: float = 1300.0 
+    
+    # 原子操作参数 (Manual VGG Algo)
+    # 原子操作定义：计算 32(OC) x 32(IC) x 32(Spatial Output) 的卷积
+    measured_conv_us: float = 5.0 
+    # 指令开销
+    instr_overhead_us: float = 1.54
 
 # ==========================================
 # 2. 层参数 (保持不变)
@@ -57,45 +58,33 @@ class OnnxModelParser:
         model = onnx.load(onnx_path)
         graph = model.graph
         
-        # --- 关键修改开始 ---
         # 1. 获取模型原始输入维度
         input_tensor = graph.input[0]
-        # 获取原始维度列表 (如果是动态的，dim_value 可能是 0 或 -1)
         orig_dims = [d.dim_value for d in input_tensor.type.tensor_type.shape.dim]
         
         # 2. 判断是否需要覆盖
         if input_shape_override:
             print(f"[Parser] Overriding input shape to: {input_shape_override}")
-            # 强制覆盖
             if input_tensor.type.tensor_type.shape.dim:
-                # 确保长度匹配，否则可能出错 (例如 NCHW)
                 if len(input_shape_override) != len(orig_dims):
                     print(f"[Warning] Override shape length {len(input_shape_override)} "
                           f"!= model input rank {len(orig_dims)}")
-                
-                # 清除旧维度并设置新维度
                 for i, dim_val in enumerate(input_shape_override):
                     if i < len(input_tensor.type.tensor_type.shape.dim):
                         input_tensor.type.tensor_type.shape.dim[i].dim_value = dim_val
         else:
-            # 如果没有提供 override，检查原始维度是否合法 (全为正整数)
             is_dynamic = any(d <= 0 for d in orig_dims)
             if is_dynamic:
-                raise ValueError(
-                    f"Model has dynamic input shape {orig_dims}. "
-                    "You MUST provide a static shape using --shape (e.g., --shape 1,3,224,224)"
-                )
+                raise ValueError(f"Model has dynamic input shape {orig_dims}. Please use --shape.")
             else:
                 print(f"[Parser] Using model static shape: {orig_dims}")
-        # --- 关键修改结束 ---
 
-        # 3. Shape Inference (推断中间层形状)
+        # 3. Shape Inference
         try:
             model = onnx.shape_inference.infer_shapes(model)
         except Exception as e:
             print(f"[Warning] Shape inference failed: {e}. Dimensions might be inaccurate.")
 
-        # 重新获取 graph (因为 infer_shapes 可能返回新对象)
         graph = model.graph
         value_info = {vi.name: vi for vi in graph.value_info}
         value_info.update({vi.name: vi for vi in graph.input})
@@ -112,22 +101,18 @@ class OnnxModelParser:
                 strides = attr['strides'].ints if 'strides' in attr else [1, 1]
                 s = strides[0]
                 pads = attr['pads'].ints if 'pads' in attr else [0, 0, 0, 0]
-                # 处理 asymmetric padding，这里简化处理，取 max 或者第一个
                 p = pads[0] 
                 
                 input_name = node.input[0]
                 if input_name in value_info:
                     input_shape = value_info[input_name].type.tensor_type.shape.dim
-                    # NCHW
                     if len(input_shape) >= 4:
                         ic = input_shape[1].dim_value
                         h = input_shape[2].dim_value
                         w = input_shape[3].dim_value
                     else:
-                        print(f"[Warning] Layer {node.name} input rank < 4. Skipping.")
                         continue
                 else:
-                    print(f"[Warning] Could not find shape for input {input_name}, skipping layer {node.name}")
                     continue
 
                 weight_name = node.input[1]
@@ -138,13 +123,9 @@ class OnnxModelParser:
                      weight_shape = value_info[weight_name].type.tensor_type.shape.dim
                      oc = weight_shape[0].dim_value
                 else:
-                    print(f"[Warning] Could not determine weights for {node.name}")
                     continue
 
-                # 再次检查 H/W 是否有效
                 if h <= 0 or w <= 0:
-                    print(f"[Warning] Shape inference returned invalid dims for {node.name} (H={h}, W={w}). "
-                          "Check if input shape is correct.")
                     continue
 
                 layer = LayerParams(name=node.name, H=h, W=w, IC=ic, OC=oc, K_h=k_h, K_w=k_w, S=s, P=p)
@@ -153,91 +134,129 @@ class OnnxModelParser:
         return layers
 
 # ==========================================
-# 4. Cost Model (保持不变)
+# 4. Cost Model 
 # ==========================================
 class AdvancedCostModel:
     def __init__(self, hw: HardwareConfig):
         self.hw = hw
 
     def get_raw_input_tile_dim(self, t_oh, t_ow, layer):
+        # 计算生成 t_oh * t_ow 输出所需的输入尺寸
         t_ih = (t_oh - 1) * layer.S + layer.K_h
         t_iw = (t_ow - 1) * layer.S + layer.K_w
         return t_ih, t_iw
 
     def evaluate(self, layer: LayerParams, t_oh, t_ow, t_oc, t_ic):
-        real_tile_ic = max(32,min(t_ic, layer.IC))
-        real_tile_oc = max(32,min(t_oc, layer.OC))
-
-        # 2. ACC 空间检查
-        acc_needed = t_oh * t_ow * real_tile_oc * self.hw.dtype_acc
-        
-        # 3. SPM 空间检查
+        # 1. 空间需求计算 (Space Constraints - Manual Logic)
         raw_t_ih, raw_t_iw = self.get_raw_input_tile_dim(t_oh, t_ow, layer)
-        input_needed = raw_t_ih * raw_t_iw * real_tile_ic * self.hw.dtype_input
-        weight_needed = layer.K_h * layer.K_w * real_tile_ic * real_tile_oc * self.hw.dtype_input
-        output_needed = t_oh * t_ow * real_tile_oc * self.hw.dtype_input
         
-        spm_needed = input_needed + weight_needed
-        if output_needed > spm_needed:
-            spm_needed = output_needed
+        size_ifm_tile = raw_t_ih * raw_t_iw * t_ic * self.hw.dtype_input
+        size_wgt_tile = layer.K_h * layer.K_w * t_ic * t_oc * self.hw.dtype_input
+        size_ofm_tile = t_oh * t_ow * t_oc * self.hw.dtype_input 
+        
+        # 严格共存策略: SPM 必须同时存下 IFM + Weight + OFM
+        total_spm_needed = size_ifm_tile + size_wgt_tile + size_ofm_tile
+        
+        # ACC 存 Partial Sum (Int32)
+        size_acc_needed = t_oh * t_ow * t_oc * self.hw.dtype_acc
 
-        # 4. 判定是否溢出
-        if acc_needed > self.hw.acc_size_bytes:
-            return None # ACC OOM
-        if spm_needed > self.hw.spm_size_bytes:
+        # 检查溢出
+        if total_spm_needed > self.hw.spm_size_bytes:
             return None # SPM OOM
+        if size_acc_needed > self.hw.acc_size_bytes:
+            return None # ACC OOM
 
-        # 5. 性能计算 (Latency)
-        n_h = math.ceil(layer.OH / t_oh)
-        n_w = math.ceil(layer.OW / t_ow)
-        n_spatial = n_h * n_w
-        n_oc = math.ceil(layer.OC / t_oc)
-        n_ic = math.ceil(layer.IC / t_ic)
+        # 2. 性能计算 (Latency Calculation - Manual Logic)
         
-        # Traffic Calculation
-        traffic_in = input_needed * n_spatial * n_oc * n_ic
-        traffic_wgt = weight_needed * n_spatial * n_oc * n_ic
-        traffic_out = layer.OH * layer.OW * layer.OC * self.hw.dtype_input
-        traffic_bias = layer.OC * self.hw.dtype_acc
+        # Global Loops Counts
+        n_cout = math.ceil(layer.OC / t_oc)
+        n_h    = math.ceil(layer.OH / t_oh)
+        n_w    = math.ceil(layer.OW / t_ow)
+        n_cin  = math.ceil(layer.IC / t_ic)
+
+        # 计算 conv_tile 被调用的总次数
+        total_global_tiles = n_cout * n_h * n_w * n_cin
         
-        total_traffic_mb = (traffic_in + traffic_wgt + traffic_out + traffic_bias) / 1024**2
-        time_transfer_ms = (total_traffic_mb / self.hw.measured_bandwidth_mbps) * 1000
+        # --- A. DMA Traffic Calculation ---
         
-        # Compute / Instruction Time
-        total_tiles = n_spatial * n_oc * n_ic
-        time_inst_ms = (total_tiles * self.hw.measured_latency_us) / 1000
+        # 假设 Worst Case: 每次 conv_tile 都搬运数据 (无复用)
+        total_dma_ifm_bytes = total_global_tiles * size_ifm_tile
+        total_dma_wgt_bytes = total_global_tiles * size_wgt_tile
         
-        est_latency_ms = time_transfer_ms + time_inst_ms
+        # Bias
+        bytes_bias_per_tile = t_oc * self.hw.dtype_acc
+        total_dma_bias_bytes = total_global_tiles * bytes_bias_per_tile
+
+        # OFM Store (Write Back)
+        # 搬出次数 = n_cout * n_h * n_w (不乘 n_cin)
+        total_dma_ofm_bytes = (n_cout * n_h * n_w) * size_ofm_tile
+
+        # --- B. Compute Latency Calculation ---
+        
+        # 这里的 32 是 sys_array_size
+        num_spatial_micro_ops = math.ceil((t_oh * t_ow) / 32.0)
+        num_cout_micro_ops = math.ceil(t_oc / 32.0)
+        num_cin_micro_ops = math.ceil(t_ic / 32.0)
+        
+        ops_per_conv_tile = num_cout_micro_ops * num_spatial_micro_ops * num_cin_micro_ops
+        total_atomic_ops = total_global_tiles * ops_per_conv_tile
+        
+        # --- C. Total Latency Summation ---
+        
+        bw_byte_per_us = self.hw.measured_bandwidth_mbps
+
+        total_traffic_bytes = total_dma_ifm_bytes + total_dma_wgt_bytes + total_dma_bias_bytes + total_dma_ofm_bytes
+
+        # 指令数计算
+        num_mvin_ifm = total_global_tiles
+        num_mvin_wgt = total_global_tiles
+        num_mvin_bias = total_global_tiles
+        num_mvout_ofm = n_cout * n_h * n_w
+        num_dma_instructions = num_mvin_ifm + num_mvin_wgt + num_mvin_bias + num_mvout_ofm
+
+        lat_dma_us = (num_dma_instructions * self.hw.instr_overhead_us) + (total_traffic_bytes / bw_byte_per_us)
+        lat_compute_us = total_atomic_ops * self.hw.measured_conv_us
+
+        total_latency_ms = (lat_dma_us + lat_compute_us) / 1000.0
 
         return {
-            'est_latency_ms': est_latency_ms,
-            'spm_util': spm_needed / self.hw.spm_size_bytes,
-            'acc_util': acc_needed / self.hw.acc_size_bytes,
+            'est_latency_ms': total_latency_ms,
+            'spm_util': total_spm_needed / self.hw.spm_size_bytes,
+            'acc_util': size_acc_needed / self.hw.acc_size_bytes,
             't_oh': t_oh, 't_ow': t_ow, 't_ic': t_ic, 't_oc': t_oc,
-            'config_str': f"{t_oh}x{t_ow}_{t_ic}x{t_oc}"
+            'config_str': f"{t_oh}x{t_ow}_{t_ic}x{t_oc}" # 保留给 debug 用
         }
 
 # ==========================================
-# 5. DSE 探索逻辑
+# 5. DSE 探索逻辑 (适配新 Cost Model)
 # ==========================================
 class DesignSpaceExplorer:
     def __init__(self, layers: List[LayerParams], total_mem_bytes: int):
         self.layers = layers
         self.total_mem_bytes = total_mem_bytes
-        self.base_hw = HardwareConfig(0, 0)
+        self.base_hw = HardwareConfig(0, 0) # 用于获取默认步长等
 
     def search_layer(self, layer: LayerParams, model: AdvancedCostModel):
         min_lat = float('inf')
         best_res = None
         
-        def safe_range(base_dim, max_dim, step):
-            limit = min(max_dim + step, 128) 
-            return range(step, limit, step)
+        # 采用 Manual VGG 的搜索步长策略 (更细致)
+        def safe_range(limit, step, max_val=224):
+            end = min(limit, max_val)
+            if end < step: return [end]
+            return range(step, end + 1, step)
 
-        r_oh = safe_range(self.base_hw.u_oh, layer.OH, self.base_hw.u_oh)
-        r_ow = safe_range(self.base_hw.u_ow, layer.OW, self.base_hw.u_ow)
-        r_ic = safe_range(self.base_hw.u_ic, layer.IC, self.base_hw.u_ic)
-        r_oc = safe_range(self.base_hw.u_oc, layer.OC, self.base_hw.u_oc)
+        # 搜索空间定义
+        # H/W: 步长为 4 (Manual VGG 逻辑)
+        r_oh = safe_range(layer.OH, step=4, max_val=64) 
+        r_ow = safe_range(layer.OW, step=4, max_val=64)
+        
+        # IC/OC: 步长为 32
+        start_ic = 32 if layer.IC >= 32 else layer.IC
+        start_oc = 32 if layer.OC >= 32 else layer.OC
+        
+        r_ic = range(start_ic, min(layer.IC, 256) + 1, 32)
+        r_oc = range(start_oc, min(layer.OC, 256) + 1, 32)
 
         for t_ic in r_ic:
             for t_oc in r_oc:
@@ -251,7 +270,7 @@ class DesignSpaceExplorer:
         return best_res
 
     def run(self):
-        print(f"Starting DSE (Total Mem: {self.total_mem_bytes/1024:.0f} KB)...")
+        print(f"Starting DSE [Algorithm: Manual VGG Logic] (Total Mem: {self.total_mem_bytes/1024:.0f} KB)...")
         best_global = None
         min_global_lat = float('inf')
 
@@ -271,7 +290,10 @@ class DesignSpaceExplorer:
                 if not res:
                     is_valid_config = False
                     break
+                
                 total_lat += res['est_latency_ms']
+                
+                # [关键] 保持原 ONNX 版 JSON 的字段结构
                 layer_data.append({
                     'layer_name': layer.name,
                     'input_shape': f"{layer.IC}x{layer.H}x{layer.W}",
@@ -296,12 +318,12 @@ class DesignSpaceExplorer:
                         'layers': layer_data
                     }
             else:
-                print(f"  Ratio {ratio:.1f} -> Failed")
+                print(f"  Ratio {ratio:.1f} -> Failed (OOM)")
 
         return best_global
 
 # ==========================================
-# 6. JSON 导出工具
+# 6. JSON 导出工具 (保持不变)
 # ==========================================
 def export_to_json(data, filename):
     try:
@@ -312,33 +334,30 @@ def export_to_json(data, filename):
         print(f"❌ Failed to export JSON: {e}")
 
 # ==========================================
-# 7. 主执行逻辑 (修改后)
+# 7. 主执行逻辑 (保持不变)
 # ==========================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="DSE Tool for ONNX Models")
+    parser = argparse.ArgumentParser(description="DSE Tool for ONNX Models (Manual VGG Algo)")
     parser.add_argument('-i', '--input', type=str, required=True, 
                         help='Path to the input ONNX model file')
     parser.add_argument('-o', '--output', type=str, required=False, 
                         help='Path to the output JSON file')
     parser.add_argument('--mem', type=int, default=512, 
                         help='Total memory size in KB (default: 512)')
-    # 新增 shape 参数
     parser.add_argument('--shape', type=str, default=None,
-                        help='Override input shape, format: N,C,H,W (e.g. 1,3,224,224). '
-                             'Required if model has dynamic input.')
+                        help='Override input shape, format: N,C,H,W (e.g. 1,3,224,224)')
     
     args = parser.parse_args()
 
     input_path = args.input
     total_mem_bytes = args.mem * 1024
 
-    # 处理 shape 参数字符串转列表
     shape_override = None
     if args.shape:
         try:
             shape_override = [int(x) for x in args.shape.split(',')]
         except ValueError:
-            print("❌ Error: Invalid format for --shape. Use comma separated numbers like 1,3,224,224")
+            print("❌ Error: Invalid format for --shape.")
             exit(1)
 
     if args.output:
@@ -349,11 +368,7 @@ if __name__ == "__main__":
 
     # 1. 解析 ONNX
     try:
-        # 这里不再把 override 写死，而是传 args 解析出来的结果 (None 或 List)
         layers = OnnxModelParser.parse(input_path, input_shape_override=shape_override)
-    except ValueError as e:
-        print(f"❌ Input Shape Error: {e}")
-        exit(1)
     except Exception as e:
         print(f"❌ Failed to parse ONNX model: {e}")
         exit(1)
@@ -363,6 +378,7 @@ if __name__ == "__main__":
         exit(1)
 
     print(f"\nModel: {input_path} ({len(layers)} Conv Layers detected)")
+    print(f"Algorithm: Manual VGG Style (Strict Memory + Atomic Ops)")
     print(f"Output: {output_path}")
     
     # 2. 运行 DSE
@@ -373,7 +389,7 @@ if __name__ == "__main__":
     if best:
         print("\n" + "="*60)
         print(f"✅ Best Configuration found")
-        print(f"   Total Latency: {best['total_latency_ms']:.2f} ms")
+        print(f"  Total Latency: {best['total_latency_ms']:.2f} ms")
         print("="*60)
         export_to_json(best, output_path)
     else:

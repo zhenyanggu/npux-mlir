@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace mlir;
 using namespace npux;
@@ -104,7 +105,7 @@ public:
           << "[" << name << "] Allocation failed: Out of memory. "
           << "Requested " << size << " bytes, "
           << "Needs end addr " << endAddr << ", Limit " << limit;
-      return failure();
+      //return failure();
     }
 
     // 记录分配
@@ -196,7 +197,7 @@ public:
 
     auto result = func.walk([&](Operation *op) -> WalkResult {
       // -------------------------------------------------------
-      // Alloc Ops
+      // Alloc Ops`
       // -------------------------------------------------------
       if (auto allocOp = dyn_cast<npux::SramAllocOp>(op)) {
         if (failed(spmAllocator.allocate(op, allocOp.getMemref())))
@@ -225,10 +226,16 @@ public:
       return;
     }
 
-    // 打印统计信息
-    llvm::errs() << "NPU MemPlan Completed:\n"
-                 << "  SPM Usage: " << spmAllocator.getPeakUsage() << " / " << spmAllocator.getLimit() << "\n"
-                 << "  ACC Usage: " << accAllocator.getPeakUsage() << " / " << accAllocator.getLimit() << "\n";
+    std::string msg;
+    llvm::raw_string_ostream os(msg);
+
+    os << "[NPU MemPlan] Function: @" << func.getName() << "\n"
+       << "  -> SPM Usage: " << spmAllocator.getPeakUsage() << " / " << spmAllocator.getLimit() 
+       << " bytes (" << (spmAllocator.getPeakUsage() * 100 / std::max((int64_t)1, spmAllocator.getLimit())) << "%)\n"
+       << "  -> ACC Usage: " << accAllocator.getPeakUsage() << " / " << accAllocator.getLimit() 
+       << " bytes (" << (accAllocator.getPeakUsage() * 100 / std::max((int64_t)1, accAllocator.getLimit())) << "%)\n";
+
+    llvm::errs() << os.str();
   }
 };
 

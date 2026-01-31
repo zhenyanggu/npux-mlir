@@ -14,6 +14,7 @@ add_onnx_mlir_library(NpuToLLVM
     NpuLowerSubview.cpp
     NpuxComputeFusion.cpp
     GemmPipeline.cpp
+    CustomBufferLoopHoist.cpp
 
     LINK_LIBS PUBLIC
     # --- 基础库 ---
@@ -32,6 +33,7 @@ add_onnx_mlir_library(NpuToLLVM
     MLIRArithDialect
     MLIRSCFDialect
     MLIRLLVMDialect
+    MLIRBufferizationTransforms
 
     # --- 转换 Pass 依赖 ---
     MLIRMemRefTransforms

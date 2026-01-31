@@ -87,7 +87,7 @@ echo ">>> Initial Input: $CURRENT_INPUT"
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg --npu-ops=Gemm,MatMul,Relu,Conv --npu-tiling-config=model.json" \
+         "--convert-npu-onnx-to-linalg --npu-ops=Gemm,MatMul,Conv --npu-tiling-config=model.json" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
@@ -119,7 +119,7 @@ enter_stage "NpuTiling"
 
 
 run_pass "Tiling " \
-         "--npu-tiling --canonicalize" \
+         "--npu-tiling --canonicalize --npu-tiling-config=model.json" \
          "NpuTiling.mlir"
 
 # ------------------------------------------------
@@ -160,9 +160,9 @@ run_pass "lower-krnl-region" \
         "--lower-krnl-region" \
         "lower-krnl-region.mlir"
 
-run_pass "buffer-loop-hoisting" \
-        "--buffer-loop-hoisting" \
-        "buffer-loop-hoisting.mlir"
+# run_pass "buffer-loop-hoisting" \
+#         "--buffer-loop-hoisting" \
+#         "buffer-loop-hoisting.mlir"
 
 
 run_pass "buffer-dealloc-test" \

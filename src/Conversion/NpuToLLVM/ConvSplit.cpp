@@ -220,7 +220,6 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
         ConvLoopAnalysis analysis = analyzeLoop(op);
         if (!analysis.isValid()) return failure();
         
-        // [Fix] 这里的检查放宽：只要找到 Mvin Op 即可，不需要必须有 Subview
         if (!analysis.inputChain.mvinOp) return rewriter.notifyMatchFailure(op, "Input mvin not found");
         
         auto newOuterLoop = rewriter.create<scf::ForOp>(
@@ -234,6 +233,38 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
         rewriter.setInsertionPointToStart(newOuterLoop.getBody());
         ImplicitLocOpBuilder b(op.getLoc(), rewriter);
         
+        // ====================================================================
+        // [FIX START] Map old buffers to new buffers inside the new loop
+        // ====================================================================
+        DenseMap<Value, Value> bufferMap;
+        auto mapBuffer = [&](Value oldBuffer) {
+            if (!oldBuffer || bufferMap.count(oldBuffer)) return;
+            // Check if defined inside the loop (AllocOp)
+            if (Operation* defOp = oldBuffer.getDefiningOp()) {
+                if (op->isAncestor(defOp)) {
+                    // Clone the alloc op to the new scope
+                    Operation* newAlloc = b.clone(*defOp);
+                    bufferMap[oldBuffer] = newAlloc->getResult(0);
+                    return;
+                }
+            }
+            // If defined outside, use as is
+            bufferMap[oldBuffer] = oldBuffer;
+        };
+
+        // Register all needed buffers
+        mapBuffer(analysis.inputChain.sramBuffer);
+        mapBuffer(analysis.weightChain.sramBuffer);
+        if (analysis.biasChain.mvinOp) mapBuffer(analysis.biasChain.sramBuffer);
+        mapBuffer(analysis.computeOp.getOutput());
+        if (analysis.accToSpmOp) mapBuffer(analysis.accToSpmOp.getSpmDst());
+
+        // Helper to get new buffer
+        auto getNewBuf = [&](Value v) { return bufferMap.count(v) ? bufferMap[v] : v; };
+        // ====================================================================
+        // [FIX END]
+        // ====================================================================
+
         Value c0 = b.create<arith::ConstantIndexOp>(0);
         Value c1 = b.create<arith::ConstantIndexOp>(1);
         Value loopSize = op.getStep(); 
@@ -252,15 +283,14 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
                 ImplicitLocOpBuilder nb(loc, ib);
                 
                 Value hostSlice;
-                // [Fix] 分情况处理 Input 来源
                 if (analysis.inputChain.dramSubview) {
                     hostSlice = createDramSliceOffset(nb, analysis.inputChain.dramSubview, outerIv, innerIv, oldIv, DIM_INPUT_C);
                 } else {
-                    // 兜底：直接切片原始 HostPtr (BlockArg 等)
                     hostSlice = createSramSlice(nb, analysis.inputChain.hostPtr, innerIv, DIM_INPUT_C);
                 }
 
-                Value sramSlice = createSramSlice(nb, analysis.inputChain.sramBuffer, innerIv, DIM_INPUT_C);
+                // [Fix] Use new buffer
+                Value sramSlice = createSramSlice(nb, getNewBuf(analysis.inputChain.sramBuffer), innerIv, DIM_INPUT_C);
                 
                 auto newMvin = cast<DmaMvinOp>(ib.clone(*analysis.inputChain.mvinOp));
                 newMvin.getHostPtrMutable().assign(hostSlice);
@@ -271,18 +301,17 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
         // -----------------------------------------------------------
         // 2. Block 2: Weight Mvin
         // -----------------------------------------------------------
-        Value weightBuffer = analysis.computeOp.getInputB(); 
-        // [Fix] 只要有 mvinOp 就生成，不需要强制有 Subview
+        Value weightBuffer = getNewBuf(analysis.computeOp.getInputB()); // [Fix] Use new buffer
         if (analysis.weightChain.mvinOp) {
              Value hostWeight;
              if (analysis.weightChain.dramSubview) {
                  hostWeight = createDramSliceFull(b, analysis.weightChain.dramSubview, outerIv, oldIv);
              } else {
-                 // 兜底：直接使用原始 HostPtr
                  hostWeight = analysis.weightChain.hostPtr;
              }
              
-             Value sramWeightFull = analysis.weightChain.sramBuffer;
+             // [Fix] Use new buffer
+             Value sramWeightFull = getNewBuf(analysis.weightChain.sramBuffer);
              auto mvin = cast<DmaMvinOp>(b.clone(*analysis.weightChain.mvinOp));
              mvin.getHostPtrMutable().assign(hostWeight);
              mvin.getDstMemrefMutable().assign(sramWeightFull);
@@ -302,19 +331,19 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
                 Value cFalse = nb.create<arith::ConstantIntOp>(0, 1);
 
                 Value weightSramSlice = createSramSlice(nb, weightBuffer, innerIv, DIM_WEGHIT_OC);
-                Value outputAccSlice = createSramSlice(nb, analysis.computeOp.getOutput(), innerIv, DIM_INPUT_C);
-                Value inputFull = analysis.computeOp.getInputA(); 
+                // [Fix] Use new buffer
+                Value outputAccSlice = createSramSlice(nb, getNewBuf(analysis.computeOp.getOutput()), innerIv, DIM_INPUT_C);
+                // [Fix] Use new buffer
+                Value inputFull = getNewBuf(analysis.computeOp.getInputA()); 
 
                 Value biasPsumOperand = Value();
                 
-                // 处理 Bias 搬运和 Psum 输入
                 if (isHead) {
                     if (analysis.computeOp.getBiaspsumMemref()) {
-                        Value biasBuffer = analysis.computeOp.getBiaspsumMemref();
+                        Value biasBuffer = getNewBuf(analysis.computeOp.getBiaspsumMemref()); // [Fix]
                         Value biasSramSlice = createSramSlice(nb, biasBuffer, innerIv, DIM_BIAS_C);
                         biasPsumOperand = biasSramSlice;
 
-                        // [Fix] 同样的逻辑，允许 Bias 源不是 Subview
                         if (analysis.biasChain.mvinOp) {
                              Value hostBiasSlice;
                              if (analysis.biasChain.dramSubview) {
@@ -351,11 +380,12 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
                     newComp.getAccBiasMutable().assign(hasBias ? cTrue : cFalse);
                 } else {
                     newComp.getIsAccumulateMutable().assign(cTrue); 
-                    newComp.getAccBiasMutable().assign(cFalse);     
+                    newComp.getAccBiasMutable().assign(cFalse);      
                 }
 
                 if (isTail && analysis.accToSpmOp) {
-                    Value spmDstSlice = createSramSlice(nb, analysis.accToSpmOp.getSpmDst(), innerIv, DIM_INPUT_C);
+                    // [Fix] Use new buffer
+                    Value spmDstSlice = createSramSlice(nb, getNewBuf(analysis.accToSpmOp.getSpmDst()), innerIv, DIM_INPUT_C);
                     auto newAcc = cast<MvAccToSpmOp>(ib.clone(*analysis.accToSpmOp));
                     newAcc.getAccSrcMutable().assign(outputAccSlice);
                     newAcc.getSpmDstMutable().assign(spmDstSlice);
@@ -372,15 +402,14 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
                 [&](OpBuilder &ib, Location loc, Value innerIv, ValueRange) {
                     ImplicitLocOpBuilder nb(loc, ib);
                     
-                    Value spmSlice = createSramSlice(nb, analysis.accToSpmOp.getSpmDst(), innerIv, DIM_INPUT_C);
+                    // [Fix] Use new buffer
+                    Value spmSlice = createSramSlice(nb, getNewBuf(analysis.accToSpmOp.getSpmDst()), innerIv, DIM_INPUT_C);
                     Value hostOut;
                     
-                    // [Fix] Output 也可能不是 subview (虽然少见)，加上兜底
                     if (analysis.outputDramSubview) {
                         hostOut = createDramSliceOffset(nb, analysis.outputDramSubview, 
                                                         outerIv, innerIv, oldIv, DIM_INPUT_C);
                     } else if (analysis.mvoutOp) {
-                        // 兜底
                         hostOut = createSramSlice(nb, analysis.mvoutOp.getHostPtr(), innerIv, DIM_INPUT_C);
                     }
                     
@@ -393,6 +422,17 @@ struct SplitConvIcPattern : public OpRewritePattern<scf::ForOp> {
                     ib.create<scf::YieldOp>(loc);
                 });
         }
+        
+        // [IMPORTANT] Clone Free Ops at the end of the new loop to prevent leaks/verifier errors
+        op.getBody()->walk([&](Operation *childOp) {
+             if (isa<SramFreeOp, AccFreeOp>(childOp)) {
+                 Value oldMem = childOp->getOperand(0);
+                 if (bufferMap.count(oldMem)) {
+                     auto newFree = b.clone(*childOp);
+                     newFree->setOperand(0, bufferMap[oldMem]);
+                 }
+             }
+        });
 
         rewriter.eraseOp(op);
         return success();
