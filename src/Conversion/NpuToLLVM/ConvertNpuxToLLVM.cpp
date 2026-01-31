@@ -15,6 +15,37 @@ using namespace npux;
 // 辅助函数
 // ==========================================
 
+static Value castToI8(Location loc, Value val, ConversionPatternRewriter &rewriter) {
+    return rewriter.create<LLVM::TruncOp>(loc, rewriter.getI8Type(), val);
+}
+
+// 2. 将 i32 等截断为 i16 (用于 stride, zeropoint 等)
+static Value castToI16(Location loc, Value val, ConversionPatternRewriter &rewriter) {
+    return rewriter.create<LLVM::TruncOp>(loc, rewriter.getI16Type(), val);
+}
+
+// 3. [关键] 将 i8 (来自旧ODS) 截断为 i1 (用于新CAPI bool)
+// 如果 ODS 定义是 I8，但 CAPI 改成了 bool，必须用这个转换
+static Value castI8ToBool(Location loc, Value val, ConversionPatternRewriter &rewriter) {
+    // 只有当 val 不是 i1 时才截断
+    if (val.getType().isInteger(1)) return val;
+    return rewriter.create<LLVM::TruncOp>(loc, rewriter.getI1Type(), val);
+}
+
+// 4. 将 Enum 属性转为 i1 (bool) 常量
+template <typename T>
+static Value getEnumBool(Location loc, T enumVal, ConversionPatternRewriter &rewriter) {
+    bool val = static_cast<bool>(enumVal);
+    return rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI1Type(), rewriter.getBoolAttr(val));
+}
+
+// 5. 将 Enum 属性转为 i8 常量
+template <typename T>
+static Value getEnumI8(Location loc, T enumVal, ConversionPatternRewriter &rewriter) {
+    uint8_t val = static_cast<uint8_t>(enumVal);
+    return rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(), rewriter.getI8IntegerAttr(val));
+}
+
 static FlatSymbolRefAttr getOrInsertExternFunc(PatternRewriter &rewriter, ModuleOp module,
                                                StringRef funcName, Type resultType,
                                                ArrayRef<Type> argTypes, bool isVarArg = false) {
@@ -284,87 +315,100 @@ public:
 
 class NpuxDmaMvinLowering : public ConvertOpToLLVMPattern<DmaMvinOp> {
 public:
-  using ConvertOpToLLVMPattern<DmaMvinOp>::ConvertOpToLLVMPattern;
+    using ConvertOpToLLVMPattern<DmaMvinOp>::ConvertOpToLLVMPattern;
 
-  LogicalResult matchAndRewrite(DmaMvinOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
+    LogicalResult matchAndRewrite(DmaMvinOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter &rewriter) const override {
+        Location loc = op.getLoc();
+        
+        // 1. 准备地址
+        auto dramMemRefType = cast<MemRefType>(op.getHostPtr().getType());
+        Value hostPtr = getFlatPtrFromMemRef(loc, adaptor.getHostPtr(), 
+                                             dramMemRefType.getElementType(), rewriter);
+        Value dstAddr = getNpuOffsetAddress(loc, op.getDstMemref(), rewriter);
+        if (!dstAddr) return failure();
 
-    auto dramMemRefType = cast<MemRefType>(op.getHostPtr().getType());
-    Value hostPtr = getFlatPtrFromMemRef(loc, adaptor.getHostPtr(), 
-                                     dramMemRefType.getElementType(), rewriter);
+        SmallVector<Value> args;
+        args.push_back(hostPtr);   
+        args.push_back(dstAddr); 
+        args.push_back(adaptor.getColNum());     // i16
+        args.push_back(adaptor.getRowNum());     // i16
+        args.push_back(adaptor.getSramStride()); // i16
+        args.push_back(adaptor.getDramStride()); // i16
+        args.push_back(adaptor.getPrecision());  // i8
+        args.push_back(adaptor.getInputType());  // i8
+        
+        // --- 修正重点 ---
+        // ODS 定义是 I8:$dest，Adaptor 返回 i8。CAPI 需要 bool (i1)。
+        // 动作：调用 castI8ToBool 进行截断。
+        args.push_back(castI8ToBool(loc, adaptor.getDest(), rewriter)); 
+        
+        // ODS 定义是 I1:$is_bias，Adaptor 返回 i1。CAPI 需要 bool (i1)。
+        // 动作：直接传。
+        args.push_back(adaptor.getIsBias());
+        
+        // ODS 定义是 I1:$is_quant，直接传。
+        args.push_back(adaptor.getIsQuant());
+        
+        args.push_back(adaptor.getQuantZero());  // i32
+        args.push_back(adaptor.getQuantScale()); // i16
+        args.push_back(adaptor.getQuantShift()); // i16
 
-    Value dstMemRef = op.getDstMemref();
-    Value dstAddr = getNpuOffsetAddress(loc, dstMemRef, rewriter);
-    
-    if (!dstAddr) return failure();
+        // 2. 生成调用
+        auto module = op->getParentOfType<ModuleOp>();
+        auto voidType = LLVM::LLVMVoidType::get(getContext());
+        // 自动推导类型：现在 args 里包含 i1，生成的函数签名就是 (..., i1, i1, ...)
+        SmallVector<Type> argTypes;
+        for(auto v : args) argTypes.push_back(v.getType());
 
-    SmallVector<Value> args;
-    args.push_back(hostPtr);   
-    args.push_back(dstAddr); 
-    args.push_back(adaptor.getColNum());
-    args.push_back(adaptor.getRowNum());
-    args.push_back(adaptor.getSramStride());
-    args.push_back(adaptor.getDramStride());
-    args.push_back(adaptor.getPrecision());
-    args.push_back(adaptor.getInputType());
-    args.push_back(adaptor.getDest());
-    args.push_back(adaptor.getIsBias()); // Pass IsBias
-
-    args.push_back(adaptor.getIsQuant());
-    args.push_back(adaptor.getQuantZero());
-    args.push_back(adaptor.getQuantScale());
-    args.push_back(adaptor.getQuantShift());
-
-    auto module = op->getParentOfType<ModuleOp>();
-    auto voidType = LLVM::LLVMVoidType::get(getContext());
-    SmallVector<Type> argTypes;
-    for(auto v : args) argTypes.push_back(v.getType());
-
-    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, "npu_dma_mvin", voidType, argTypes);
-    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
-    return success();
-  }
+        FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, "npu_dma_mvin", voidType, argTypes);
+        rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+        return success();
+    }
 };
 
 class NpuxDmaMvoutLowering : public ConvertOpToLLVMPattern<DmaMvoutOp> {
 public:
-  using ConvertOpToLLVMPattern<DmaMvoutOp>::ConvertOpToLLVMPattern;
-  LogicalResult matchAndRewrite(DmaMvoutOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-    auto dramMemRefType = cast<MemRefType>(op.getHostPtr().getType());
-    Value hostPtr = getFlatPtrFromMemRef(loc, adaptor.getHostPtr(), 
-                                     dramMemRefType.getElementType(), rewriter);
+    using ConvertOpToLLVMPattern<DmaMvoutOp>::ConvertOpToLLVMPattern;
+    LogicalResult matchAndRewrite(DmaMvoutOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter &rewriter) const override {
+        Location loc = op.getLoc();
+        auto dramMemRefType = cast<MemRefType>(op.getHostPtr().getType());
+        Value hostPtr = getFlatPtrFromMemRef(loc, adaptor.getHostPtr(), 
+                                             dramMemRefType.getElementType(), rewriter);
+        Value sramAddr = getNpuOffsetAddress(loc, op.getSramMemref(), rewriter);
+        if (!sramAddr) return failure();
 
-    Value sramMemRef = op.getSramMemref();
-    Value sramAddr = getNpuOffsetAddress(loc, sramMemRef, rewriter);
-    if (!sramAddr) return failure();
+        SmallVector<Value> args;
+        args.push_back(hostPtr);   
+        args.push_back(sramAddr);  
+        args.push_back(adaptor.getColNum());
+        args.push_back(adaptor.getRowNum());
+        args.push_back(adaptor.getSramStride());
+        args.push_back(adaptor.getDramStride());
+        args.push_back(adaptor.getPrecision());
+        args.push_back(adaptor.getOutputType()); 
+        
+        // --- 修正重点 ---
+        // ODS I8:$source -> CAPI bool source
+        args.push_back(castI8ToBool(loc, adaptor.getSource(), rewriter));     
+        
+        // ODS I1:$is_quant -> CAPI bool is_quant
+        args.push_back(adaptor.getIsQuant());
 
-    SmallVector<Value> args;
-    args.push_back(hostPtr);   
-    args.push_back(sramAddr);  
-    args.push_back(adaptor.getColNum());
-    args.push_back(adaptor.getRowNum());
-    args.push_back(adaptor.getSramStride());
-    args.push_back(adaptor.getDramStride());
-    args.push_back(adaptor.getPrecision());
-    args.push_back(adaptor.getOutputType()); 
-    args.push_back(adaptor.getSource());     
-    args.push_back(adaptor.getIsQuant());
-    args.push_back(adaptor.getQuantZero());
-    args.push_back(adaptor.getQuantScale());
-    args.push_back(adaptor.getQuantShift());
+        args.push_back(adaptor.getQuantZero());
+        args.push_back(adaptor.getQuantScale());
+        args.push_back(adaptor.getQuantShift());
 
-    auto module = op->getParentOfType<ModuleOp>();
-    auto voidType = LLVM::LLVMVoidType::get(getContext());
-    SmallVector<Type> argTypes;
-    for(auto v : args) argTypes.push_back(v.getType());
+        auto module = op->getParentOfType<ModuleOp>();
+        auto voidType = LLVM::LLVMVoidType::get(getContext());
+        SmallVector<Type> argTypes;
+        for(auto v : args) argTypes.push_back(v.getType());
 
-    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, "npu_dma_mvout", voidType, argTypes);
-    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
-    return success();
-  }
+        FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, "npu_dma_mvout", voidType, argTypes);
+        rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+        return success();
+    }
 };
 
 class NpuxMovAccToSpmLowering : public ConvertOpToLLVMPattern<MvAccToSpmOp> {
@@ -439,205 +483,152 @@ public:
 
 class NpuxComputeRunLowering : public ConvertOpToLLVMPattern<ComputeRunOp> {
 public:
-  using ConvertOpToLLVMPattern<ComputeRunOp>::ConvertOpToLLVMPattern;
+    using ConvertOpToLLVMPattern<ComputeRunOp>::ConvertOpToLLVMPattern;
 
-  LogicalResult matchAndRewrite(ComputeRunOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
-    Location loc = op.getLoc();
-    
-    // Types
-    auto i8Type  = rewriter.getI8Type();
-    auto i16Type = rewriter.getI16Type();
-    auto i32Type = rewriter.getI32Type();
+    LogicalResult matchAndRewrite(ComputeRunOp op, OpAdaptor adaptor,
+                                  ConversionPatternRewriter &rewriter) const override {
+        Location loc = op.getLoc();
+        auto i32Type = rewriter.getI32Type();
 
-    // 1. Resolve Addresses (Common for both)
-    Value addrA = getNpuOffsetAddress(loc, op.getInputA(), rewriter);
-    Value addrB = getNpuOffsetAddress(loc, op.getInputB(), rewriter);
-    Value addrOut = getNpuOffsetAddress(loc, op.getOutput(), rewriter);
+        // 地址解析
+        Value addrA = getNpuOffsetAddress(loc, op.getInputA(), rewriter);
+        Value addrB = getNpuOffsetAddress(loc, op.getInputB(), rewriter);
+        Value addrOut = getNpuOffsetAddress(loc, op.getOutput(), rewriter);
+        Value addrBias;
+        if (op.getBiaspsumMemref()) {
+            addrBias = getNpuOffsetAddress(loc, op.getBiaspsumMemref(), rewriter);
+            if (!addrBias) return failure();
+        } else {
+            addrBias = rewriter.create<LLVM::ConstantOp>(loc, i32Type, rewriter.getI32IntegerAttr(0));
+        }
+        if (!addrA || !addrB || !addrOut) return failure();
 
-    // BiasPsum Addr (Optional)
-    Value addrBias;
-    if (op.getBiaspsumMemref()) {
-        addrBias = getNpuOffsetAddress(loc, op.getBiaspsumMemref(), rewriter);
-        if (!addrBias) return failure();
-    } else {
-        addrBias = rewriter.create<LLVM::ConstantOp>(loc, i32Type, rewriter.getI32IntegerAttr(0));
+        SmallVector<Value> args;
+        std::string funcName;
+
+        if (op.getOpType() == npux::ComputeOpType::gemm) {
+            funcName = "npu_gemm_run";
+
+            // Enum -> Bool (i1)
+            args.push_back(getEnumBool(loc, op.getDataflowMode(), rewriter)); 
+            
+            // i8 (ODS) -> i8 (CAPI) Direct
+            args.push_back(castToI8(loc, adaptor.getIntType(), rewriter));
+            
+            // Enum -> i8
+            args.push_back(getEnumI8(loc, op.getOpType(), rewriter));
+            
+            // Enum -> Bool (i1)
+            args.push_back(getEnumBool(loc, op.getAccoutDest(), rewriter));
+
+            // ZP (i32) -> i16
+            args.push_back(castToI16(loc, adaptor.getInputAZeropoint(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getInputBZeropoint(), rewriter));
+            args.push_back(adaptor.getOutputZeropoint()); // i32
+            
+            // Scale/Shift (i32) -> i16
+            args.push_back(castToI16(loc, adaptor.getQuantScale(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getQuantScaleshift(), rewriter));
+
+            // Bias/Psum
+            args.push_back(addrBias);
+            args.push_back(castToI16(loc, adaptor.getBiaspsumStride(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getBiaspsumWidth(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getBiaspsumHeight(), rewriter));
+
+            // Out
+            args.push_back(addrOut);
+            args.push_back(castToI16(loc, adaptor.getOutputStride(), rewriter));
+
+            // Flags (ODS I1 -> CAPI Bool) - 直接传
+            args.push_back(adaptor.getIsAccumulate()); 
+            args.push_back(adaptor.getReluEnable());   
+            args.push_back(getEnumI8(loc, op.getReluType(), rewriter)); // ReluType是3bit，用i8
+            args.push_back(adaptor.getAccBias());      
+
+            // Inputs
+            args.push_back(addrA);
+            args.push_back(castToI8(loc, adaptor.getInputAColNumM1(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getInputARowNumM1(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getInputAStride(), rewriter));
+
+            args.push_back(addrB);
+            args.push_back(castToI8(loc, adaptor.getInputBColNumM1(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getInputBRowNumM1(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getInputBStride(), rewriter));
+
+        } else {
+            funcName = "npu_conv_run";
+
+            // Padding (i32 -> i8)
+            args.push_back(castToI8(loc, adaptor.getPadTop(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getPadBottom(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getPadLeft(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getPadRight(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getPadMode(), rewriter)); 
+
+            // Weight (i32 -> i8)
+            args.push_back(castToI8(loc, adaptor.getWeightShapeM1(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getWeightStrideM1(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getWeightDilationM1(), rewriter));
+            
+            // I1 -> Bool Direct
+            args.push_back(adaptor.getIsGroupConv()); 
+
+            // Control
+            args.push_back(castToI8(loc, adaptor.getIntType(), rewriter));
+            args.push_back(getEnumI8(loc, op.getOpType(), rewriter));
+            args.push_back(getEnumBool(loc, op.getDataflowMode(), rewriter)); // Enum -> Bool
+            args.push_back(getEnumBool(loc, op.getAccoutDest(), rewriter));   // Enum -> Bool
+
+            // Quant
+            args.push_back(castToI16(loc, adaptor.getInputAZeropoint(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getInputBZeropoint(), rewriter));
+
+            // Input A
+            args.push_back(addrA);
+            args.push_back(castToI8(loc, adaptor.getInputAColNumM1(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getInputARowNumM1(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getInputAStride(), rewriter));
+
+            // Input B
+            args.push_back(addrB);
+            args.push_back(castToI8(loc, adaptor.getInputBColNumM1(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getInputBRowNumM1(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getInputBStride(), rewriter));
+
+            // Bias/Psum
+            args.push_back(castToI8(loc, adaptor.getBiaspsumWidth(), rewriter));
+            args.push_back(castToI8(loc, adaptor.getBiaspsumHeight(), rewriter));
+            args.push_back(addrBias);
+            args.push_back(castToI16(loc, adaptor.getBiaspsumStride(), rewriter));
+
+            // Output
+            args.push_back(addrOut);
+            args.push_back(castToI16(loc, adaptor.getOutputStride(), rewriter));
+
+            // Flags
+            args.push_back(adaptor.getIsAccumulate());
+            args.push_back(adaptor.getReluEnable());
+            args.push_back(getEnumI8(loc, op.getReluType(), rewriter));
+            args.push_back(adaptor.getAccBias());
+
+            // Quant Out
+            args.push_back(adaptor.getOutputZeropoint());
+            args.push_back(castToI16(loc, adaptor.getQuantScale(), rewriter));
+            args.push_back(castToI16(loc, adaptor.getQuantScaleshift(), rewriter));
+        }
+
+        auto module = op->getParentOfType<ModuleOp>();
+        auto voidType = LLVM::LLVMVoidType::get(getContext());
+        SmallVector<Type> argTypes;
+        for (auto v : args) argTypes.push_back(v.getType());
+
+        FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module, funcName, voidType, argTypes);
+        rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+
+        return success();
     }
-
-    if (!addrA || !addrB || !addrOut) {
-      return rewriter.notifyMatchFailure(op, "Failed to resolve NPU addresses");
-    }
-
-    // Helpers for casting to correct C-API type width
-    auto getI8  = [&](Value v) { return rewriter.create<LLVM::TruncOp>(loc, i8Type, v); };
-    auto getI16 = [&](Value v) { return rewriter.create<LLVM::TruncOp>(loc, i16Type, v); };
-    
-    // Enum converters
-    auto getEnumI8 = [&](auto enumAttr) -> Value {
-      uint8_t val = static_cast<uint8_t>(enumAttr);
-      return rewriter.create<LLVM::ConstantOp>(loc, i8Type, rewriter.getI8IntegerAttr(val));
-    };
-
-    SmallVector<Value> args;
-    std::string funcName;
-
-    // Check OpType
-    // 假设 ODS 生成的 namespace 是 npux
-    if (op.getOpType() == npux::ComputeOpType::gemm) {
-        // ==========================================
-        // Branch 1: GEMM Logic
-        // ==========================================
-        funcName = "npu_gemm_run";
-
-        // 1. Dataflow & Control
-        // void npu_gemm_run(
-        //    uint8_t  dataflow,
-        //    uint8_t  int_type,
-        //    uint8_t  optype,
-        //    uint8_t  accout_dest,
-        args.push_back(getEnumI8(op.getDataflowMode()));
-        args.push_back(getI8(adaptor.getIntType()));
-        args.push_back(getEnumI8(op.getOpType()));
-        args.push_back(getEnumI8(op.getAccoutDest()));
-
-        // 2. Quantization Inputs
-        //    uint16_t input_a_zeropoint,
-        //    uint16_t input_b_zeropoint,
-        args.push_back(getI16(adaptor.getInputAZeropoint()));
-        args.push_back(getI16(adaptor.getInputBZeropoint()));
-
-        // 3. Quantization Outputs (Gemm API puts these earlier than Conv)
-        //    uint32_t output_zeropoint,
-        //    uint16_t output_scale,
-        //    uint16_t output_scaleshift,
-        args.push_back(adaptor.getOutputZeropoint()); // i32
-        args.push_back(getI16(adaptor.getQuantScale()));
-        args.push_back(getI16(adaptor.getQuantScaleshift()));
-
-        // 4. Bias/Psum Geometry
-        //    uint32_t biaspsum_addr,
-        //    uint16_t biaspsum_stride,
-        //    uint8_t  biaspsum_width,
-        //    uint8_t  biaspsum_height,
-        args.push_back(addrBias);
-        args.push_back(getI16(adaptor.getBiaspsumStride()));
-        args.push_back(getI8(adaptor.getBiaspsumWidth()));
-        args.push_back(getI8(adaptor.getBiaspsumHeight()));
-
-        // 5. Output Geometry
-        //    uint32_t output_addr,
-        //    uint16_t output_stride,
-        args.push_back(addrOut);
-        args.push_back(getI16(adaptor.getOutputStride()));
-
-        // 6. Post-Process
-        //    uint8_t  isaccu,
-        //    uint8_t  relu,
-        //    uint8_t  relu_type,
-        //    uint8_t  is_bias,
-        args.push_back(getI8(adaptor.getIsAccumulate()));
-        args.push_back(getI8(adaptor.getReluEnable()));
-        args.push_back(getEnumI8(op.getReluType()));
-        args.push_back(getI8(adaptor.getAccBias()));
-
-        // 7. Input A Geometry
-        //    uint32_t input_a_addr,
-        //    uint8_t  input_a_col_num,
-        //    uint8_t  input_a_row_num,
-        //    uint16_t input_a_stride,
-        args.push_back(addrA);
-        args.push_back(getI8(adaptor.getInputAColNumM1())); // Assuming API expects m1 or Op provides correct val
-        args.push_back(getI8(adaptor.getInputARowNumM1()));
-        args.push_back(getI16(adaptor.getInputAStride()));
-
-        // 8. Input B Geometry
-        //    uint32_t input_b_addr,
-        //    uint8_t  input_b_col_num,
-        //    uint8_t  input_b_row_num,
-        //    uint16_t input_b_stride
-        args.push_back(addrB);
-        args.push_back(getI8(adaptor.getInputBColNumM1()));
-        args.push_back(getI8(adaptor.getInputBRowNumM1()));
-        args.push_back(getI16(adaptor.getInputBStride()));
-
-    } else {
-        // ==========================================
-        // Branch 2: CONV Logic (and GEMV)
-        // ==========================================
-        funcName = "npu_conv_run";
-
-        // --- 1. Padding (Top, Bottom, Left, Right, Mode) ---
-        args.push_back(getI8(adaptor.getPadTop()));
-        args.push_back(getI8(adaptor.getPadBottom()));
-        args.push_back(getI8(adaptor.getPadLeft()));
-        args.push_back(getI8(adaptor.getPadRight()));
-        args.push_back(getI8(adaptor.getPadMode())); 
-
-        // --- 2. Weight (Shape_m1, Stride_m1, Dil_m1, IsGroup) ---
-        args.push_back(getI8(adaptor.getWeightShapeM1()));
-        args.push_back(getI8(adaptor.getWeightStrideM1()));
-        args.push_back(getI8(adaptor.getWeightDilationM1()));
-        args.push_back(getI8(adaptor.getIsGroupConv()));
-
-        // --- 3. Control (IntType, OpType, Dataflow, Dest) ---
-        args.push_back(getI8(adaptor.getIntType()));
-        args.push_back(getEnumI8(op.getOpType()));
-        args.push_back(getEnumI8(op.getDataflowMode()));
-        args.push_back(getEnumI8(op.getAccoutDest()));
-
-        // --- 4. Quant Input (InA_ZP, InB_ZP) ---
-        args.push_back(getI16(adaptor.getInputAZeropoint()));
-        args.push_back(getI16(adaptor.getInputBZeropoint()));
-
-        // --- 5. Input A Geometry (Addr, ColM1, RowM1, Stride) ---
-        args.push_back(addrA);
-        args.push_back(getI8(adaptor.getInputAColNumM1()));
-        args.push_back(getI8(adaptor.getInputARowNumM1()));
-        args.push_back(getI16(adaptor.getInputAStride()));
-
-        // --- 6. Input B Geometry (Addr, ColM1, RowM1, Stride) ---
-        args.push_back(addrB);
-        args.push_back(getI8(adaptor.getInputBColNumM1()));
-        args.push_back(getI8(adaptor.getInputBRowNumM1()));
-        args.push_back(getI16(adaptor.getInputBStride()));
-
-        // --- 7. Bias/Psum Geometry (Width, Height, Addr, Stride) ---
-        args.push_back(getI8(adaptor.getBiaspsumWidth()));
-        args.push_back(getI8(adaptor.getBiaspsumHeight()));
-        args.push_back(addrBias);
-        args.push_back(getI16(adaptor.getBiaspsumStride()));
-
-        // --- 8. Output Geometry (Addr, Stride) ---
-        args.push_back(addrOut);
-        args.push_back(getI16(adaptor.getOutputStride()));
-
-        // --- 9. Post-Process (Accum, Relu, ReluType, AccBias) ---
-        args.push_back(getI8(adaptor.getIsAccumulate()));
-        args.push_back(getI8(adaptor.getReluEnable()));
-        args.push_back(getEnumI8(op.getReluType()));
-        args.push_back(getI8(adaptor.getAccBias()));
-
-        // --- 10. Quant Output (OutZP, Scale, Shift) ---
-        args.push_back(adaptor.getOutputZeropoint()); // i32
-        args.push_back(getI16(adaptor.getQuantScale()));
-        args.push_back(getI16(adaptor.getQuantScaleshift()));
-    }
-
-    // Generate Call
-    auto module = op->getParentOfType<ModuleOp>();
-    auto voidType = LLVM::LLVMVoidType::get(getContext());
-    
-    SmallVector<Type> argTypes;
-    for (auto v : args) argTypes.push_back(v.getType());
-
-    // Function name is dynamic now
-    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(
-        rewriter, module, funcName, voidType, argTypes);
-
-    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
-
-    return success();
-  }
 };
 
 void npux::populateNpuxToLLVMConversionPatterns(RewritePatternSet &patterns, 

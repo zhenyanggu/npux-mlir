@@ -87,7 +87,7 @@ echo ">>> Initial Input: $CURRENT_INPUT"
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg --npu-ops=Gemm,MatMul,Conv --npu-tiling-config=model.json" \
+         "--convert-npu-onnx-to-linalg --npu-ops=LayerNorm,Conv,Gemm,Gelu,Softmax --npu-tiling-config=model.json" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
@@ -160,9 +160,9 @@ run_pass "lower-krnl-region" \
         "--lower-krnl-region" \
         "lower-krnl-region.mlir"
 
-# run_pass "buffer-loop-hoisting" \
-#         "--buffer-loop-hoisting" \
-#         "buffer-loop-hoisting.mlir"
+run_pass "buffer-loop-hoisting" \
+        "--custom-buffer-loop-hoisting" \
+        "buffer-loop-hoisting.mlir"
 
 
 run_pass "buffer-dealloc-test" \
@@ -184,6 +184,10 @@ run_pass "fold-memref-alias-ops" \
 run_pass "Npux Conversion" \
          "--convert-linalg-to-npux --canonicalize" \
          "ConvertLinalgToNpux.mlir"
+
+run_pass "Npux SFU 5D Shape Patch" \
+         "--npux-sfu-reshape" \
+         "NpuxSfu5DShapePatch.mlir"
 
 run_pass "Split Loop" \
          "--npu-split-loop" \

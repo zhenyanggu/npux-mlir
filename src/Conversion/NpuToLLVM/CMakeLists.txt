@@ -15,6 +15,7 @@ add_onnx_mlir_library(NpuToLLVM
     NpuxComputeFusion.cpp
     GemmPipeline.cpp
     CustomBufferLoopHoist.cpp
+    NpuxSfu5DShapePatch.cpp
 
     LINK_LIBS PUBLIC
     # --- 基础库 ---

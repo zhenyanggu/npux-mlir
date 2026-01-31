@@ -178,6 +178,8 @@ std::unique_ptr<mlir::Pass> createGemmPipelinePass();
 
 std::unique_ptr<mlir::Pass> createCustomBufferLoopHoistingPass();
 
+std::unique_ptr<mlir::Pass> createNpuxSfu5DShapePatchPass();
+
 void registerBufferDeallocTest();
 }// namespace npux
 

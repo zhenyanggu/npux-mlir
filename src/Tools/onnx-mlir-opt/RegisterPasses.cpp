@@ -247,6 +247,10 @@ void registerNpuPasses() {
     return npux::createCustomBufferLoopHoistingPass();
   });
 
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuxSfu5DShapePatchPass();
+  });
+
   npux::registerBufferDeallocTest();
 }
 
