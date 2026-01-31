@@ -96,12 +96,16 @@ class OnnxModelParser:
         for node in graph.node:
             if node.op_type == 'Conv':
                 attr = {a.name: a for a in node.attribute}
-                kernel_shape = attr['kernel_shape'].ints
-                k_h, k_w = kernel_shape[0], kernel_shape[1]
+                # kernel_shape 可能缺失，优先从权重推断
+                k_h = k_w = None
+                if 'kernel_shape' in attr and len(attr['kernel_shape'].ints) >= 2:
+                    kernel_shape = attr['kernel_shape'].ints
+                    k_h, k_w = kernel_shape[0], kernel_shape[1]
+
                 strides = attr['strides'].ints if 'strides' in attr else [1, 1]
-                s = strides[0]
+                s = strides[0] if len(strides) > 0 else 1
                 pads = attr['pads'].ints if 'pads' in attr else [0, 0, 0, 0]
-                p = pads[0] 
+                p = pads[0] if len(pads) > 0 else 0 
                 
                 input_name = node.input[0]
                 if input_name in value_info:
@@ -119,10 +123,20 @@ class OnnxModelParser:
                 if weight_name in initializers:
                     weight_tensor = initializers[weight_name]
                     oc = weight_tensor.dims[0]
+                    if k_h is None or k_w is None:
+                        # weight dims: [OC, IC, K_h, K_w]
+                        if len(weight_tensor.dims) >= 4:
+                            k_h, k_w = weight_tensor.dims[2], weight_tensor.dims[3]
                 elif weight_name in value_info:
                      weight_shape = value_info[weight_name].type.tensor_type.shape.dim
                      oc = weight_shape[0].dim_value
+                     if k_h is None or k_w is None:
+                         if len(weight_shape) >= 4:
+                             k_h, k_w = weight_shape[2].dim_value, weight_shape[3].dim_value
                 else:
+                    continue
+
+                if k_h is None or k_w is None:
                     continue
 
                 if h <= 0 or w <= 0:

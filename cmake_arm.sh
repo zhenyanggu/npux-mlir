@@ -1,6 +1,5 @@
 # 1. 设置环境变量 (保持不变)
 export TOOLCHAIN=$(ls -d $HOME/opt/arm-gnu-toolchain-*-x86_64-arm-none-linux-gnueabihf | head -n1)
-
 # 2. 进入构建目录
 mkdir -p build-arm
 cd build-arm

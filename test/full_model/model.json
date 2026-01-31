@@ -1,0 +1,192 @@
+{
+    "best_ratio": 0.5,
+    "hw_config": {
+        "spm_bytes": 262144,
+        "acc_bytes": 262144
+    },
+    "total_latency_ms": 354.4305230769231,
+    "layers": [
+        {
+            "layer_name": "node_Conv_4",
+            "input_shape": "3x224x224",
+            "output_shape": "64x224x224",
+            "tile_params": {
+                "t_oh": 32,
+                "t_ow": 32,
+                "t_ic": 3,
+                "t_oc": 64
+            },
+            "latency_ms": 18.657541538461537,
+            "spm_util": 0.2698211669921875,
+            "acc_util": 1.0
+        },
+        {
+            "layer_name": "node_Conv_5",
+            "input_shape": "64x224x224",
+            "output_shape": "64x224x224",
+            "tile_params": {
+                "t_oh": 32,
+                "t_ow": 32,
+                "t_ic": 64,
+                "t_oc": 64
+            },
+            "latency_ms": 38.31980923076923,
+            "spm_util": 0.6728515625,
+            "acc_util": 1.0
+        },
+        {
+            "layer_name": "node_Conv_6",
+            "input_shape": "64x112x112",
+            "output_shape": "128x112x112",
+            "tile_params": {
+                "t_oh": 16,
+                "t_ow": 56,
+                "t_ic": 64,
+                "t_oc": 64
+            },
+            "latency_ms": 19.326203076923075,
+            "spm_util": 0.6142578125,
+            "acc_util": 0.875
+        },
+        {
+            "layer_name": "node_Conv_7",
+            "input_shape": "128x112x112",
+            "output_shape": "128x112x112",
+            "tile_params": {
+                "t_oh": 16,
+                "t_ow": 56,
+                "t_ic": 64,
+                "t_oc": 64
+            },
+            "latency_ms": 37.374184615384614,
+            "spm_util": 0.6142578125,
+            "acc_util": 0.875
+        },
+        {
+            "layer_name": "node_Conv_8",
+            "input_shape": "128x56x56",
+            "output_shape": "256x56x56",
+            "tile_params": {
+                "t_oh": 8,
+                "t_ow": 56,
+                "t_ic": 64,
+                "t_oc": 128
+            },
+            "latency_ms": 18.846993846153847,
+            "spm_util": 0.6416015625,
+            "acc_util": 0.875
+        },
+        {
+            "layer_name": "node_Conv_9",
+            "input_shape": "256x56x56",
+            "output_shape": "256x56x56",
+            "tile_params": {
+                "t_oh": 8,
+                "t_ow": 56,
+                "t_ic": 64,
+                "t_oc": 128
+            },
+            "latency_ms": 37.054876923076925,
+            "spm_util": 0.6416015625,
+            "acc_util": 0.875
+        },
+        {
+            "layer_name": "node_Conv_10",
+            "input_shape": "256x56x56",
+            "output_shape": "256x56x56",
+            "tile_params": {
+                "t_oh": 8,
+                "t_ow": 56,
+                "t_ic": 64,
+                "t_oc": 128
+            },
+            "latency_ms": 37.054876923076925,
+            "spm_util": 0.6416015625,
+            "acc_util": 0.875
+        },
+        {
+            "layer_name": "node_Conv_11",
+            "input_shape": "256x28x28",
+            "output_shape": "512x28x28",
+            "tile_params": {
+                "t_oh": 28,
+                "t_ow": 28,
+                "t_ic": 128,
+                "t_oc": 64
+            },
+            "latency_ms": 18.723433846153846,
+            "spm_util": 0.912109375,
+            "acc_util": 0.765625
+        },
+        {
+            "layer_name": "node_Conv_12",
+            "input_shape": "512x28x28",
+            "output_shape": "512x28x28",
+            "tile_params": {
+                "t_oh": 28,
+                "t_ow": 28,
+                "t_ic": 128,
+                "t_oc": 64
+            },
+            "latency_ms": 37.12577230769231,
+            "spm_util": 0.912109375,
+            "acc_util": 0.765625
+        },
+        {
+            "layer_name": "node_Conv_13",
+            "input_shape": "512x28x28",
+            "output_shape": "512x28x28",
+            "tile_params": {
+                "t_oh": 28,
+                "t_ow": 28,
+                "t_ic": 128,
+                "t_oc": 64
+            },
+            "latency_ms": 37.12577230769231,
+            "spm_util": 0.912109375,
+            "acc_util": 0.765625
+        },
+        {
+            "layer_name": "node_Conv_14",
+            "input_shape": "512x14x14",
+            "output_shape": "512x14x14",
+            "tile_params": {
+                "t_oh": 8,
+                "t_ow": 8,
+                "t_ic": 64,
+                "t_oc": 256
+            },
+            "latency_ms": 18.273686153846153,
+            "spm_util": 0.6494140625,
+            "acc_util": 0.25
+        },
+        {
+            "layer_name": "node_Conv_15",
+            "input_shape": "512x14x14",
+            "output_shape": "512x14x14",
+            "tile_params": {
+                "t_oh": 8,
+                "t_ow": 8,
+                "t_ic": 64,
+                "t_oc": 256
+            },
+            "latency_ms": 18.273686153846153,
+            "spm_util": 0.6494140625,
+            "acc_util": 0.25
+        },
+        {
+            "layer_name": "node_Conv_16",
+            "input_shape": "512x14x14",
+            "output_shape": "512x14x14",
+            "tile_params": {
+                "t_oh": 8,
+                "t_ow": 8,
+                "t_ic": 64,
+                "t_oc": 256
+            },
+            "latency_ms": 18.273686153846153,
+            "spm_util": 0.6494140625,
+            "acc_util": 0.25
+        }
+    ]
+}
