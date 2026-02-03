@@ -379,6 +379,7 @@ def Npux_ComputeRunOp : Npux_Op<"compute_run"> {
     `:` type($input_a) `,` type($input_b) `,` type($output) (`,` type($biaspsum_memref)^)?
   }];
 }
+
 def Npux_SubviewOp : Npux_Op<"subview", [Pure]> {
   let summary = "Simple NPU SRAM/ACC slicing";
   let description = [{
@@ -395,5 +396,82 @@ def Npux_SubviewOp : Npux_Op<"subview", [Pure]> {
   
   let assemblyFormat = [{
     $source `[` $offsets `]` attr-dict `:` type($source) `to` type($result)
+  }];
+}
+
+def Npux_TransposeOp : Npux_Op<"transpose_run"> {
+  let summary = "Run Transpose Operation via SFU";
+  let description = [{
+    Maps to `npu_transpose_run`.
+    Performs matrix transposition on data residing in NPU SRAM.
+  }];
+
+  let arguments = (ins
+      NpuSramMemRef:$input_sram,  
+      NpuSramMemRef:$output_sram, 
+      
+      I16:$col_num,               
+      I16:$row_num                
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $input_sram `->` $output_sram
+    `shape` `(` $col_num `x` $row_num `)`
+    attr-dict `:` type($input_sram) `,` type($output_sram)
+  }];
+}
+
+
+def RESAMPLE_TYPE_DOWNSAMPLE : I32EnumAttrCase<"downsample", 0>;
+def RESAMPLE_TYPE_UPSAMPLE   : I32EnumAttrCase<"upsample",   1>;
+def RESAMPLE_TYPE_POOLING    : I32EnumAttrCase<"pooling",    2>;
+
+def ResampleTypeAttr
+    : I32EnumAttr<"ResampleType", "Resample Operation Type",
+          [RESAMPLE_TYPE_DOWNSAMPLE, RESAMPLE_TYPE_UPSAMPLE, RESAMPLE_TYPE_POOLING]> {
+  let cppNamespace = "::npux";
+}
+
+
+def RESAMPLE_OP_MAX_NEAREST  : I32EnumAttrCase<"max_nearest",  0>;
+def RESAMPLE_OP_AVG_BILINEAR : I32EnumAttrCase<"avg_bilinear", 1>;
+
+def ResampleModeAttr
+    : I32EnumAttr<"ResampleMode", "Resample Calculation Mode",
+          [RESAMPLE_OP_MAX_NEAREST, RESAMPLE_OP_AVG_BILINEAR]> {
+  let cppNamespace = "::npux";
+}
+
+def Npux_ResampleOp : Npux_Op<"resample_run"> {
+  let summary = "Run Resample Operation via SFU";
+  let description = [{
+    Maps to `npu_resample_run`.
+    Supports Downsample, Upsample, and Pooling operations.
+    
+    Arguments mapping:
+    - input_col_num: Input Width - 1
+    - input_row_num: Input Height - 1
+  }];
+
+  let arguments = (ins
+      ResampleTypeAttr:$resample_type, 
+      ResampleModeAttr:$resample_mode,     
+      
+      NpuSramMemRef:$input_sram,       
+      NpuSramMemRef:$output_sram,      
+      
+      I16:$input_col_num,              
+      I16:$input_row_num               
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $resample_type $resample_mode
+    $input_sram `->` $output_sram
+    `shape` `(` $input_col_num `x` $input_row_num `)`
+    attr-dict `:` type($input_sram) `,` type($output_sram)
   }];
 }

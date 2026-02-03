@@ -59,10 +59,6 @@ struct ConvertLinalgToNpuPass
         [](linalg::GenericOp op) { 
             // 如果 Op 标记为 npu.target (Conv/Elewise)，则非法，需转换
             if (op->hasAttr("npu.target")) return false;
-            
-            // 如果 Op 标记为 npu.pp_stage (我们新加的量化节点)，也非法，需转换
-            if (op->hasAttr("npu.pp_stage")) return false;
-
             return true; 
         });
 

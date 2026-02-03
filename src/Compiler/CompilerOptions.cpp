@@ -147,6 +147,10 @@ static llvm::cl::list<NpuOp, std::vector<NpuOp>> npuOpOpt(
         clEnumValN(NpuOp::Gelu, "Gelu", "Accelerate Gelu operation"),
         clEnumValN(NpuOp::Gemm, "Gemm", "Accelerate Gemm operation"),
         clEnumValN(NpuOp::Relu, "Relu", "Accelerate Relu operation"),
+        clEnumValN(NpuOp::MaxPool, "MaxPool", "Accelerate MaxPool operation"),
+        clEnumValN(NpuOp::AveragePool, "AveragePool", "Accelerate AveragePool operation"),
+        clEnumValN(NpuOp::Resize, "Resize", "Accelerate Resize operation"),
+        clEnumValN(NpuOp::Transpose, "Transpose", "Accelerate Transpose operation"),
         clEnumValN(NpuOp::None, "None", "No NPU operation acceleration")
     ),
     llvm::cl::CommaSeparated,

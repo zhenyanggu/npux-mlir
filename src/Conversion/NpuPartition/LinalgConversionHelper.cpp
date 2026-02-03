@@ -50,6 +50,8 @@ void populateLinalgConversionPatterns(RewritePatternSet &patterns)
   populateLinalgConvPattern(patterns);
   populateLinalgUnaryPatterns(patterns);
   populateLinalgGemmPattern(patterns);
+  populateLinalgResamplePatterns(patterns);
+  populateLinalgTransposePattern(patterns);
 }
 
 } // namespace npux

@@ -66,6 +66,10 @@ void populateLinalgUnaryPatterns(mlir::RewritePatternSet &patterns);
 
 void populateLinalgGemmPattern(mlir::RewritePatternSet &patterns);
 
+void populateLinalgResamplePatterns(mlir::RewritePatternSet &patterns);
+
+void populateLinalgTransposePattern(mlir::RewritePatternSet &patterns);
+
 }// namespace npux
 
 

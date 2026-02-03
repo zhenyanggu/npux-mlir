@@ -77,7 +77,11 @@ enum class NpuOp {
     Softmax,
     Gelu,
     Gemm,
-    Relu
+    Relu,
+    MaxPool,
+    AveragePool,
+    Resize,
+    Transpose
 };
 
 extern const std::string modelSizeStr[];

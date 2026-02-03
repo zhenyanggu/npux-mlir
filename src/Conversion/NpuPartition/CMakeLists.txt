@@ -10,6 +10,7 @@ add_onnx_mlir_library(NpuPatition
     Linalg/Conv.cpp
     Linalg/Unary.cpp
     Linalg/Gemm.cpp
+    Linalg/UnaryUnquant.cpp
 
     LINK_LIBS PUBLIC
     OMONNXOps

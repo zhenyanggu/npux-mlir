@@ -21,6 +21,56 @@
 using namespace mlir;
 
 namespace {
+
+static bool isSupportedPooling(Operation *op) {
+  // 获取属性
+  ArrayAttr kernelShape, strides;
+  if (auto maxPool = dyn_cast<ONNXMaxPoolSingleOutOp>(op)) {
+    kernelShape = maxPool.getKernelShapeAttr();
+    strides = maxPool.getStridesAttr();
+  } else if (auto avgPool = dyn_cast<ONNXAveragePoolOp>(op)) {
+    kernelShape = avgPool.getKernelShapeAttr();
+    strides = avgPool.getStridesAttr();
+  } else {
+    return false;
+  }
+
+  if (!kernelShape || !strides) return false;
+
+  // 1. 检查维度是否为 2D
+  if (kernelShape.size() != 2 || strides.size() != 2) return false;
+
+  // 2. 检查数值是否全为 2
+  auto checkAttr = [](ArrayAttr attr) {
+    for (auto val : attr) {
+      if (cast<IntegerAttr>(val).getInt() != 2) return false;
+    }
+    return true;
+  };
+
+  return checkAttr(kernelShape) && checkAttr(strides);
+}
+
+static bool isSupportedResize(ONNXResizeOp op) {
+  // 1. Check Mode
+  if (op.getMode() != "nearest") return false;
+
+  // 2. Check Scales
+  Value scales = op.getScales();
+  auto constOp = scales.getDefiningOp<ONNXConstantOp>();
+  if (!constOp) return false;
+
+  ElementsAttr valueAttr = dyn_cast<ElementsAttr>(constOp.getValueAttr());
+  if (!valueAttr) return false;
+  bool hasScale2 = false;
+  for (auto val : valueAttr.getValues<float>()) {
+    float s = std::abs(val);
+    if (std::abs(s - 2.0f) < 1e-5) hasScale2 = true;
+    else if (std::abs(s - 1.0f) > 1e-5) return false; 
+  }
+  return hasScale2;
+}
+
 struct ONNXToLinalgNpuPass
     : public PassWrapper<ONNXToLinalgNpuPass, OperationPass<ModuleOp>> {
 
@@ -48,32 +98,53 @@ struct ONNXToLinalgNpuPass
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<ONNXDialect>();
 
-    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv)) {
+    bool isEmpty=onnx_mlir::NpuOps.empty();
+
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv)) {
       target.addIllegalOp<ONNXConvOp>();
     }
-    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
       target.addIllegalOp<ONNXQLinearMatMulOp>();
     }
-    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm)) {
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm)) {
       target.addIllegalOp<ONNXLayerNormalizationOp>();
     }
-    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax)) {
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax)) {
       target.addIllegalOp<ONNXSoftmaxOp>();
     }
-    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu)) {
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu)) {
       target.addIllegalOp<ONNXGeluOp>();
     }
-    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm)) {
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm)) {
       target.addIllegalOp<ONNXGemmOp>();
     }
-    if (onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Relu)) {
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Relu)) {
       target.addIllegalOp<ONNXReluOp, ONNXLeakyReluOp>();
     }
-    if (onnx_mlir::NpuOps.empty()) {
-      target.addIllegalOp<ONNXConvOp, ONNXLayerNormalizationOp, ONNXSoftmaxOp,
-          ONNXGeluOp, ONNXQLinearMatMulOp, ONNXGemmOp, ONNXReluOp,
-          ONNXLeakyReluOp>();
+    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Transpose)) {
+      target.addIllegalOp<ONNXTransposeOp>();
     }
+
+
+    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MaxPool)) {
+      target.addDynamicallyLegalOp<ONNXMaxPoolSingleOutOp>(
+          [](ONNXMaxPoolSingleOutOp op) {
+            return !isSupportedPooling(op);
+          });
+    }
+    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::AveragePool)) {
+      target.addDynamicallyLegalOp<ONNXAveragePoolOp>(
+          [](ONNXAveragePoolOp op) {
+            return !isSupportedPooling(op);
+          });
+    }
+    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Resize)) {
+      target.addDynamicallyLegalOp<ONNXResizeOp>(
+          [](ONNXResizeOp op) {
+            return !isSupportedResize(op);
+          });
+    }
+
 
     RewritePatternSet patterns(context);
 
