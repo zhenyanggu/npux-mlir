@@ -17,7 +17,7 @@ using namespace mlir;
 namespace npux {
 void populateNpuInnerTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
-  populateElemWiseInnerTilingPatterns(patterns, context);
+  //populateElemWiseInnerTilingPatterns(patterns, context);
   populateConvInnerTilingPatterns(patterns, context);
 };
 } // namespace npux

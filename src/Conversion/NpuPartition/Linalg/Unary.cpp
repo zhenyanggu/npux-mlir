@@ -46,8 +46,10 @@ static Value createPackedUnaryOp(
     std::function<void(Operation *)> attrHook = nullptr
 ) {
   int64_t rank = inputType.getRank();
-  bool isSpatial = (rank == 4);
+  //bool isSpatial = (rank == 4);
 
+  bool isSpatial = false;
+  
   // ==========================================================
   // 路径 A: 非 4D 数据 (Flat/Vector)
   // 不需要 Pack/Unpack，但仍需包裹在 scf.execute_region 中

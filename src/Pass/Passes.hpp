@@ -180,6 +180,16 @@ std::unique_ptr<mlir::Pass> createCustomBufferLoopHoistingPass();
 
 std::unique_ptr<mlir::Pass> createNpuxSfu5DShapePatchPass();
 
+std::unique_ptr<mlir::Pass> createNpuInsertDmaPass();
+
+std::unique_ptr<mlir::Pass> createNpuOpSplittingPass();
+
+std::unique_ptr<mlir::Pass> createNpuSpatialPeelingPass();
+
+std::unique_ptr<mlir::Pass> createRestoreAllocSpacePass();
+
+std::unique_ptr<mlir::Pass> createNpuRemoveRedundantDmaPass();
+
 void registerBufferDeallocTest();
 }// namespace npux
 

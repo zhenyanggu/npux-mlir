@@ -12,6 +12,9 @@ namespace npux{
 void applyTileConfigNCHWc32(llvm::SmallVectorImpl<int64_t> &sizes, const std::vector<int64_t> &configSizes);
 llvm::SmallVector<int64_t> getNpuTileSizes(mlir::linalg::GenericOp op);
 llvm::SmallVector<int64_t> getGemmTileSizes(mlir::linalg::GenericOp op);
+mlir::SmallVector<int64_t> getLayoutTileSizes(
+    mlir::linalg::GenericOp op, llvm::StringRef opName);
+    
 bool isTilingNecessary(llvm::ArrayRef<int64_t> tileSizes, llvm::ArrayRef<int64_t> loopRanges);
 void populateElemWiseTilingPatterns(
     mlir::RewritePatternSet &patterns, mlir::MLIRContext *context);
@@ -25,6 +28,9 @@ void populateElemWiseInnerTilingPatterns(
 );
 void populateGemmTilingPatterns(
     mlir::RewritePatternSet &patterns, mlir::MLIRContext *context 
+);
+void populateLayoutTilingPatterns(
+    mlir::RewritePatternSet &patterns, mlir::MLIRContext *context
 );
 
 }

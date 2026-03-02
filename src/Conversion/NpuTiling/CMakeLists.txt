@@ -3,10 +3,17 @@ add_onnx_mlir_library(NpuTiling
     NpuTiling.cpp
     Conv.cpp
     Gemm.cpp
+    Layout.cpp
     NpuTilingHelper.cpp
     NpuInnerTiling.cpp
     ElemWiseInnerTiling.cpp
     ConvInnerTiling.cpp
+    NpuInsertDma.cpp
+    NpuOpSplitting.cpp
+    ConvSpatialTiling.cpp
+    RestoreAllocSpace.cpp
+    RemoveRedundantDma.cpp
+
 
     LINK_LIBS PUBLIC
     # === 基础 MLIR 库 ===
@@ -25,5 +32,6 @@ add_onnx_mlir_library(NpuTiling
     MLIRTilingInterface     # fix: cast<TilingInterface>
     MLIRSCFTransforms       # fix: scf::tileUsingSCF
     MLIRDialectUtils        # fix: getAsOpFoldResult
+    #MLIRLinalgTransforms
     OMCompilerOptions
 )

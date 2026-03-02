@@ -87,7 +87,7 @@ echo ">>> Initial Input: $CURRENT_INPUT"
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg --npu-ops=LayerNorm,Conv,Gemm,Gelu,Softmax --npu-tiling-config=model.json" \
+         "--convert-npu-onnx-to-linalg --npu-ops=Gemm,MatMul,Conv --npu-tiling-config=model.json" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
@@ -106,47 +106,60 @@ run_pass "Outline" \
 # NpuFuse
 # ------------------------------------------------
 
-enter_stage "NpuFuse"
+# enter_stage "NpuFuse"
 
-run_pass "Fusing" \
-         "--npu-fuse" \
-         "NpuFuse.mlir"
+# run_pass "Fusing" \
+#          "--npu-fuse" \
+#          "NpuFuse.mlir"
 
-# ------------------------------------------------
-#  NpuTiling
-# ------------------------------------------------
+# # ------------------------------------------------
+# #  NpuTiling
+# # ------------------------------------------------
 enter_stage "NpuTiling"
 
 
 run_pass "Tiling " \
-         "--npu-tiling --canonicalize --npu-tiling-config=model.json" \
+         "--npu-tiling --canonicalize --restore-alloc-space --npu-tiling-config=model.json" \
          "NpuTiling.mlir"
 
-# ------------------------------------------------
-#  NpuBufferization
-# ------------------------------------------------
+# run_pass "Spatial Peeling " \
+#          "--npu-spatial-peeling --canonicalize" \
+#          "NpuSpatialPeeling.mlir"
+
+# run_pass "Inner Tiling " \
+#          "--npu-inner-tiling" \
+#          "NpuInnerTiling.mlir"
+
+run_pass "Insert Dma " \
+         "--npu-insert-dma" \
+         "NpuInsertDma.mlir"
+
+run_pass "Op Splitting " \
+         "--npu-op-splitting" \
+         "NpuOpSplitting.mlir"
+
+# # ------------------------------------------------
+# #  NpuBufferization
+# # ------------------------------------------------
 enter_stage "NpuBufferization"
 
-run_pass "Pack&UnPack Lower" \
-         "--npu-lower-pack" \
-         "NpuLowerPack.mlir"
+# run_pass "Pack&UnPack Lower" \
+#          "--npu-lower-pack" \
+#          "NpuLowerPack.mlir"
 
-# 这是一个很长的命令，现在写起来很清爽
 run_pass "Bufferize" \
          "--convert-onnx-to-krnl --target=npu --canonicalize --convert-krnl-to-affine --npu-dps-convert --cse --canonicalize" \
          "NpuBufferization.mlir"
 
 
-# ------------------------------------------------
-#  NpuToLLVM
-# ------------------------------------------------
+# # ------------------------------------------------
+# #  NpuToLLVM
+# # ------------------------------------------------
 enter_stage "NpuToLLVM"
 
-run_pass "Npu Sram Promotion" \
-        "--npu-sram-promotion" \
-        "NpuSramPromotion.mlir"
-
-
+# run_pass "Npu Sram Promotion" \
+#         "--npu-sram-promotion" \
+#         "NpuSramPromotion.mlir"
 
 run_pass "convert-vector-to-scf" \
         "--convert-vector-to-scf" \
@@ -163,7 +176,6 @@ run_pass "lower-krnl-region" \
 run_pass "buffer-loop-hoisting" \
         "--custom-buffer-loop-hoisting" \
         "buffer-loop-hoisting.mlir"
-
 
 run_pass "buffer-dealloc-test" \
         "--buffer-dealloc-test " \
@@ -185,21 +197,21 @@ run_pass "Npux Conversion" \
          "--convert-linalg-to-npux --canonicalize" \
          "ConvertLinalgToNpux.mlir"
 
-run_pass "Npux SFU 5D Shape Patch" \
-         "--npux-sfu-reshape" \
-         "NpuxSfu5DShapePatch.mlir"
+# run_pass "Npux SFU 5D Shape Patch" \
+#          "--npux-sfu-reshape" \
+#          "NpuxSfu5DShapePatch.mlir"
 
-run_pass "Split Loop" \
-         "--npu-split-loop" \
-         "LoopSplit.mlir"
+# run_pass "Split Loop" \
+#          "--npu-split-loop" \
+#          "LoopSplit.mlir"
 
-run_pass "Split Conv" \
-         "--split-conv-ic" \
-         "ConvSplit.mlir"
+# run_pass "Split Conv" \
+#          "--split-conv-ic" \
+#          "ConvSplit.mlir"
 
-run_pass "Gemm Pipeline" \
-         "--npu-gemm-pipeline" \
-         "GemmPipeline.mlir"
+# run_pass "Gemm Pipeline" \
+#          "--npu-gemm-pipeline" \
+#          "GemmPipeline.mlir"
 
 run_pass "Lower Subview" \
          "--npu-lower-subview" \
@@ -218,7 +230,7 @@ run_pass "Npu Memory Plan" \
         "NpuMemoryPlan.mlir"
 
 run_pass "Npu Inline" \
-        "--npu-inline --expand-strided-metadata" \
+        "--npu-inline --expand-strided-metadata " \
         "NpuInline.mlir"
 
 run_pass "LLVM Lowering" \

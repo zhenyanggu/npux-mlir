@@ -25,7 +25,7 @@ DenseElementsAttr getConstAttrFromOperand(Operation *op, int operandIndex) {
   }
 
   Operation *defOp = val.getDefiningOp();
-  if (auto constOp = llvm::dyn_cast_or_null<ONNXConstantOp>(defOp)) {
+  if (auto constOp = dyn_cast_or_null<ONNXConstantOp>(defOp)) {
     if (auto valueAttr = dyn_cast<DenseElementsAttr>(constOp.getValueAttr())) {
       return valueAttr;
     }

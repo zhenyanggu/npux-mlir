@@ -1,5 +1,3 @@
-
-
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
@@ -14,6 +12,87 @@ using namespace npux;
 
 namespace {
 
+// 辅助函数：计算 NPU DMA 需要的 2D 维度 (Row, Col)
+// 逻辑：
+// Row = N * C - 1
+// Col = H * W * (InnerC if packed) - 1
+struct Npu2DShape {
+  int64_t rowVal;
+  int64_t colVal;
+  int64_t strideVal;
+  bool isValid;
+};
+
+Npu2DShape calculateNpu2DShape(MemRefType type) {
+  if (!type || !type.hasStaticShape()) return {0, 0, 0, false};
+  
+  ArrayRef<int64_t> shape = type.getShape();
+  int rank = type.getRank();
+  
+  int64_t n = 1, c = 1, h = 1, w = 1, c_inner = 1;
+
+  // 针对 NCHW (Rank 4)
+  if (rank == 4) {
+    n = shape[0];
+    c = shape[1];
+    h = shape[2];
+    w = shape[3];
+  } 
+  // 针对 NCHWc32 (Rank 5: N, C_outer, H, W, C_inner)
+  else if (rank == 5) {
+    n = shape[0];
+    c = shape[1]; // C_outer
+    h = shape[2];
+    w = shape[3];
+    c_inner = shape[4]; // 32
+  } else {
+    // 其他 Rank 暂不支持自动计算
+    return {0, 0, 0, false};
+  }
+
+  // 核心逻辑：
+  // Row = N * C (如果是 Packed，C 就是 C_outer)
+  int64_t totalRow = n * c;
+  
+  // Col = H * W * C_inner (如果是 Packed，要把 C_inner 算进 Col)
+  // 如果是 NCHW，C_inner 是 1
+  int64_t totalCol = h * w * c_inner;
+
+  // 寄存器值需要 -1
+  int64_t rowReg = totalRow - 1;
+  int64_t colReg = totalCol - 1;
+  
+  // 根据你的描述：stride 使用 col 的值
+  int64_t strideReg = colReg; 
+
+  return {rowReg, colReg, strideReg, true};
+}
+
+// 辅助函数：更新 DMA Op 的 Shape 参数
+void updateDmaOp(Operation* op, Value memref, const Npu2DShape& shapeCfg, OpBuilder& builder) {
+  builder.setInsertionPoint(op);
+  auto cCol = builder.create<arith::ConstantIntOp>(op->getLoc(), shapeCfg.colVal, 16);
+  auto cRow = builder.create<arith::ConstantIntOp>(op->getLoc(), shapeCfg.rowVal, 16);
+  auto cStride = builder.create<arith::ConstantIntOp>(op->getLoc(), shapeCfg.strideVal, 16);
+
+  if (auto mvinOp = dyn_cast<DmaMvinOp>(op)) {
+    // 确保我们修改的是对应 memref 的 DMA
+    if (mvinOp.getDstMemref() == memref) {
+      mvinOp.getColNumMutable().assign(cCol);
+      mvinOp.getRowNumMutable().assign(cRow);
+      mvinOp.getSramStrideMutable().assign(cStride);
+      mvinOp.getDramStrideMutable().assign(cStride);
+    }
+  } else if (auto mvoutOp = dyn_cast<DmaMvoutOp>(op)) {
+    if (mvoutOp.getSramMemref() == memref) {
+      mvoutOp.getColNumMutable().assign(cCol);
+      mvoutOp.getRowNumMutable().assign(cRow);
+      mvoutOp.getSramStrideMutable().assign(cStride);
+      mvoutOp.getDramStrideMutable().assign(cStride);
+    }
+  }
+}
+
 // 定义 Pass 类
 struct NpuxSfu5DShapePatchPass : public PassWrapper<NpuxSfu5DShapePatchPass, OperationPass<func::FuncOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(NpuxSfu5DShapePatchPass)
@@ -25,92 +104,106 @@ struct NpuxSfu5DShapePatchPass : public PassWrapper<NpuxSfu5DShapePatchPass, Ope
     OpBuilder builder(&getContext());
 
     // 遍历函数中的所有操作
-    func.walk([&](SfuRunOp sfuOp) {
-      // 1. 获取输入 MemRef 类型
-      Value input = sfuOp.getInputSramMemref();
-      auto memRefType = dyn_cast<MemRefType>(input.getType());
+    func.walk([&](Operation *op) {
+      
+      // ==========================================================
+      // Case 1: SFU Run (Elementwise)
+      // ==========================================================
+      if (auto sfuOp = dyn_cast<SfuRunOp>(op)) {
+        Value input = sfuOp.getInputSramMemref();
+        Value output = sfuOp.getOutputSramMemref();
+        auto memRefType = dyn_cast<MemRefType>(input.getType());
+        
+        Npu2DShape cfg = calculateNpu2DShape(memRefType);
+        if (!cfg.isValid) return;
 
-      if (!memRefType) return;
+        // 1. 更新 SFU Op 自身参数 (input_col/row)
+        builder.setInsertionPoint(sfuOp);
+        auto cCol = builder.create<arith::ConstantIntOp>(sfuOp.getLoc(), cfg.colVal, 16);
+        auto cRow = builder.create<arith::ConstantIntOp>(sfuOp.getLoc(), cfg.rowVal, 16);
+        sfuOp.getInputColNumMutable().assign(cCol);
+        sfuOp.getInputRowNumMutable().assign(cRow);
 
-      // 2. 检查是否为 5 维 (NCHWc32)
-      if (memRefType.getRank() != 5) return;
+        // 2. 更新关联的 Input DMA (Mvin)
+        for (Operation *user : input.getUsers()) {
+            updateDmaOp(user, input, cfg, builder);
+        }
 
-      ArrayRef<int64_t> shape = memRefType.getShape();
-      // shape 索引: 0:N, 1:C, 2:H, 3:W, 4:c
-      // 确保维度是静态的
-      for (auto dim : shape) {
-        if (dim == ShapedType::kDynamic) return; // 暂不处理动态形状
+        // 3. 更新关联的 Output DMA (Mvout)
+        // SFU 输出维度通常与输入一致
+        for (Operation *user : output.getUsers()) {
+            updateDmaOp(user, output, cfg, builder);
+        }
+      } 
+      // ==========================================================
+      // Case 2: Resample Run (Resize)
+      // ==========================================================
+      else if (auto resampleOp = dyn_cast<ResampleOp>(op)) {
+        // Resample 输入和输出维度不一样，需要分别计算
+        
+        // --- Input Side ---
+        Value input = resampleOp.getInputSram();
+        Npu2DShape inCfg = calculateNpu2DShape(dyn_cast<MemRefType>(input.getType()));
+        
+        if (inCfg.isValid) {
+            builder.setInsertionPoint(resampleOp);
+            auto cCol = builder.create<arith::ConstantIntOp>(resampleOp.getLoc(), inCfg.colVal, 16);
+            auto cRow = builder.create<arith::ConstantIntOp>(resampleOp.getLoc(), inCfg.rowVal, 16);
+            
+            // 更新 Op 自身参数
+            resampleOp.getInputColNumMutable().assign(cCol);
+            resampleOp.getInputRowNumMutable().assign(cRow);
+
+            // 更新 Input DMA
+            for (Operation *user : input.getUsers()) {
+                updateDmaOp(user, input, inCfg, builder);
+            }
+        }
+
+        // --- Output Side ---
+        Value output = resampleOp.getOutputSram();
+        Npu2DShape outCfg = calculateNpu2DShape(dyn_cast<MemRefType>(output.getType()));
+        
+        if (outCfg.isValid) {
+            // 更新 Output DMA
+            for (Operation *user : output.getUsers()) {
+                updateDmaOp(user, output, outCfg, builder);
+            }
+        }
       }
+      // ==========================================================
+      // Case 3: Layout Conversion (NCHW <-> NCHWc32)
+      // ==========================================================
+      // 对于 Layout Op，我们不修改 Op 本身的 n,c,h,w 参数（因为 CAPI 可能需要逻辑形状来计算地址转换），
+      // 我们只修改 负责搬运数据进出的 DMA 配置，欺骗 DMA 以为在搬运 2D 数据。
+      else if (isa<LayoutNchwToNchwc32Op>(op) || isa<LayoutNchwc32ToNchwOp>(op)) {
+        Value input, output;
+        
+        if (auto packOp = dyn_cast<LayoutNchwToNchwc32Op>(op)) {
+            input = packOp.getInputSram();
+            output = packOp.getOutputSram();
+        } else if (auto unpackOp = dyn_cast<LayoutNchwc32ToNchwOp>(op)) {
+            input = unpackOp.getInputSram();
+            output = unpackOp.getOutputSram();
+        }
 
-      // 3. 计算新的参数值
-      // "col改成后三维相乘-1" -> dim[2] * dim[3] * dim[4] - 1
-      int64_t dim2 = shape[2];
-      int64_t dim3 = shape[3];
-      int64_t dim4 = shape[4];
+        // 更新 Input DMA
+        Npu2DShape inCfg = calculateNpu2DShape(dyn_cast<MemRefType>(input.getType()));
+        if (inCfg.isValid) {
+            for (Operation *user : input.getUsers()) {
+                updateDmaOp(user, input, inCfg, builder);
+            }
+        }
 
-      int64_t newColVal = (dim2 * dim3 * dim4) - 1;
-      
-      // "row改成第四维-1" -> dim[3] - 1 (索引从0开始，第四维是index 3)
-      int64_t newRowVal = shape[1] - 1;
-
-      // "stride改成col" -> 使用 newColVal
-      int64_t newStrideVal = newColVal;
-
-      // 准备常量 Value (i16)
-      // 注意：builder 的插入点需要设置在合适的位置，这里为了简单，
-      // 我们在 sfuOp 之前插入常量，如果常量已存在 MLIR 会自动折叠(CSE)但不保证位置，
-      // 最稳妥的是在 sfuOp 之前插入。
-      builder.setInsertionPoint(sfuOp);
-      
-      auto cCol = builder.create<arith::ConstantIntOp>(sfuOp.getLoc(), newColVal, 16);
-      auto cRow = builder.create<arith::ConstantIntOp>(sfuOp.getLoc(), newRowVal, 16);
-      auto cStride = builder.create<arith::ConstantIntOp>(sfuOp.getLoc(), newStrideVal, 16);
-
-      // 4. 更新 SFU_RUN 自身的参数 (如果有参数要改也改一下)
-      // 保持一致性，更新 SFU 的 input_col_num 和 input_row_num
-      sfuOp.getInputColNumMutable().assign(cCol);
-      sfuOp.getInputRowNumMutable().assign(cRow);
-
-      // 5. 更新输入 DMA (dma_mvin)
-      // 查找定义 input 的 Op
-      for (Operation *user : input.getUsers()) {
-        if (auto mvinOp = dyn_cast<DmaMvinOp>(user)) {
-          // 额外的安全检查：确保 input 是作为 dma_mvin 的 dst_memref 使用的
-          if (mvinOp.getDstMemref() != input) continue;
-
-          builder.setInsertionPoint(mvinOp);
-          
-          auto mvinCol = builder.create<arith::ConstantIntOp>(mvinOp.getLoc(), newColVal, 16);
-          auto mvinRow = builder.create<arith::ConstantIntOp>(mvinOp.getLoc(), newRowVal, 16);
-          auto mvinStride = builder.create<arith::ConstantIntOp>(mvinOp.getLoc(), newStrideVal, 16);
-
-          mvinOp.getColNumMutable().assign(mvinCol);
-          mvinOp.getRowNumMutable().assign(mvinRow);
-          
-          // 更新 stride
-          mvinOp.getSramStrideMutable().assign(mvinStride);
-          mvinOp.getDramStrideMutable().assign(mvinStride);
+        // 更新 Output DMA
+        Npu2DShape outCfg = calculateNpu2DShape(dyn_cast<MemRefType>(output.getType()));
+        if (outCfg.isValid) {
+            for (Operation *user : output.getUsers()) {
+                updateDmaOp(user, output, outCfg, builder);
+            }
         }
       }
 
-      // 6. 更新输出 DMA (dma_mvout)
-      // 查找使用 output 的 Op
-      Value output = sfuOp.getOutputSramMemref();
-      for (Operation *user : output.getUsers()) {
-        if (auto mvoutOp = dyn_cast<DmaMvoutOp>(user)) {
-          builder.setInsertionPoint(mvoutOp);
-          
-          auto mvoutCol = builder.create<arith::ConstantIntOp>(mvoutOp.getLoc(), newColVal, 16);
-          auto mvoutRow = builder.create<arith::ConstantIntOp>(mvoutOp.getLoc(), newRowVal, 16);
-          auto mvoutStride = builder.create<arith::ConstantIntOp>(mvoutOp.getLoc(), newStrideVal, 16);
-
-          mvoutOp.getColNumMutable().assign(mvoutCol);
-          mvoutOp.getRowNumMutable().assign(mvoutRow);
-          // 同理更新 stride
-          mvoutOp.getSramStrideMutable().assign(mvoutStride);
-          mvoutOp.getDramStrideMutable().assign(mvoutStride);
-        }
-      }
     });
   }
 };

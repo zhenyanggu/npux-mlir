@@ -3,12 +3,12 @@
 // This file implements convert linalg generic op (conv/gemm/matmul)
 // to custom npux compute_run op
 //=======================================
-#include "mlir/IR/PatternMatch.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "src/Dialect/Npux/NpuxOps.hpp"
+#include "mlir/IR/PatternMatch.h"
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
+#include "src/Dialect/Npux/NpuxOps.hpp"
 
 #include <cmath>
 
@@ -25,7 +25,8 @@ struct FixedPointParams {
 };
 
 FixedPointParams getFixedPointParams(double scale) {
-  if (std::abs(scale) < 1e-8) return {0, 0};
+  if (std::abs(scale) < 1e-8)
+    return {0, 0};
   int exponent;
   double mantissa = std::frexp(scale, &exponent);
   double mantissa_scaled = std::round(mantissa * 32768.0);
@@ -33,10 +34,8 @@ FixedPointParams getFixedPointParams(double scale) {
     mantissa_scaled /= 2.0;
     exponent += 1;
   }
-  return {
-    static_cast<int16_t>(mantissa_scaled),
-    static_cast<int16_t>(exponent - 15)
-  };
+  return {static_cast<int16_t>(mantissa_scaled),
+      static_cast<int16_t>(exponent - 15)};
 }
 
 int64_t getIntAttr(Operation *op, StringRef name, int64_t defaultVal) {
@@ -53,7 +52,8 @@ double getFloatAttr(Operation *op, StringRef name, double defaultVal) {
   return defaultVal;
 }
 
-int64_t getArrayAttr(Operation *op, StringRef name, int idx, int64_t defaultVal = 1) {
+int64_t getArrayAttr(
+    Operation *op, StringRef name, int idx, int64_t defaultVal = 1) {
   if (auto attr = op->getAttrOfType<ArrayAttr>(name)) {
     if (idx < (int)attr.size()) {
       if (auto intAttr = mlir::dyn_cast<IntegerAttr>(attr[idx])) {
@@ -70,11 +70,13 @@ class LinalgComputeToNpuxPattern : public OpRewritePattern<linalg::GenericOp> {
 public:
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(linalg::GenericOp op, PatternRewriter &rewriter) const override {
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
     // 1. Check Library Call Name
     auto libCallAttr = op.getLibraryCallAttr();
-    if (!libCallAttr) return failure();
-    
+    if (!libCallAttr)
+      return failure();
+
     StringRef libName = libCallAttr.getValue();
     ComputeOpType opType;
 
@@ -88,248 +90,242 @@ public:
 
     Location loc = op.getLoc();
 
-    // 2. Get Operands (Buffers)
+    // 2. Get Operands & Logic Selection
+    // ---------------------------------------------------------
+    // Case 1: 3 Inputs (Input, Weight, Bias)
+    //    -> Action: Emit MvinBiasOp, ComputeOp(Input, Weight), acc_bias=True,
+    //    accum=False
+    // Case 2: 2 Inputs (Input, Weight)
+    //    -> Action: ComputeOp(Input, Weight, Psum=Output), acc_bias=False,
+    //    accum=True
+
     if (op.getInputs().size() < 2 || op.getOutputs().size() != 1) {
-       return failure();
+      return failure();
     }
 
     Value inputAMemRef = op.getInputs()[0];
     Value inputBMemRef = op.getInputs()[1]; // Weight / RHS
     Value outputMemRef = op.getOutputs()[0];
 
-    // 3. Handle Optional Bias Input
-    // Strategy: Pass the 3rd input if it exists. 
-    // Flags (doAccum/accBias) are initialized to false and will be set by a later pass.
-    Value biasMemRef; 
+    // Variables to be determined by logic path
+    Value psumMemRefForOp = nullptr; // Passed to ComputeRunOp
+    bool flagAccBias = false;
+    bool flagDoAccum = false;
+
+    // 获取 loop_stage 标签，如果没有打标签，默认作为 single 处理以保证安全
+    StringRef loopStage = "single";
+    if (auto attr = op->getAttrOfType<StringAttr>("npu.loop_stage")) {
+      loopStage = attr.getValue();
+    }
+
     if (op.getInputs().size() >= 3) {
-        biasMemRef = op.getInputs()[2];
+      Value thirdInput = op.getInputs()[2];
+
+      if (loopStage == "head" || loopStage == "single") {
+        // === Case 1: Head / Single (Bias Logic) ===
+        // 1. Create the dedicated MvinBiasOp
+        rewriter.create<MvinBiasOp>(loc, thirdInput);
+
+        // 2. Configure ComputeOp Flags
+        psumMemRefForOp =
+            nullptr;         // Bias 已经在寄存器里了，不需要传入 psum buffer
+        flagAccBias = true;  // 启用加偏置
+        flagDoAccum = false; // 不做 Psum 累加
+      } else if (loopStage == "body" || loopStage == "tail") {
+        // === Case 2: Body / Tail (Accumulation Logic) ===
+        // 第三个输入是上一个阶段传过来的 Psum
+        psumMemRefForOp = outputMemRef;
+        flagAccBias = false; // 偏置已经在 head 阶段加过了
+        flagDoAccum = true;  // 开启 Psum 累加模式
+      } else {
+        return failure(); // 遇到了未知的 loop_stage
+      }
     }
 
     // 4. Memory Space Validation & Destination Inference
     auto checkSpace = [&](Value v, int expectedSpace) {
-        if (!v) return true; // Skip null values
-        auto type = mlir::dyn_cast<MemRefType>(v.getType());
-        return type && type.getMemorySpaceAsInt() == expectedSpace;
+      if (!v)
+        return true; // Skip null values
+      auto type = mlir::dyn_cast<MemRefType>(v.getType());
+      return type && type.getMemorySpaceAsInt() == expectedSpace;
     };
 
-    if (!checkSpace(inputAMemRef, 2)) return failure(); // Input A -> SRAM
-    if (!checkSpace(inputBMemRef, 2)) return failure(); // Input B -> SRAM
-    if (!checkSpace(biasMemRef, 3)) return failure();   // Bias -> ACC (Space 3)
-    
+    if (!checkSpace(inputAMemRef, 2))
+      return failure(); // Input A -> SRAM
+    if (!checkSpace(inputBMemRef, 2))
+      return failure(); // Input B -> SRAM
+
+    // Note: We don't check space for psumMemRefForOp strictly here
+    // because if it is outputMemRef, it follows output's rules.
+
     // Determine accout_dest based on Output Memory Space
     // Space 2 = SRAM (SPM), Space 3 = ACC
     auto outType = mlir::cast<MemRefType>(outputMemRef.getType());
     int outSpace = outType.getMemorySpaceAsInt();
-    
+
     AccoutDest accDest;
     if (outSpace == 3) {
-        accDest = AccoutDest::acc;
+      accDest = AccoutDest::acc;
     } else if (outSpace == 2) {
-        accDest = AccoutDest::spm;
+      accDest = AccoutDest::spm;
     } else {
-        return failure(); // Output must be in SRAM or ACC
+      return failure(); // Output must be in SRAM or ACC
     }
 
     // 5. Parse Geometry (Shapes & Strides)
-    // ---------------------------------------------------------
+    // ... (这部分代码保持不变，负责解析 shape) ...
     auto inAType = mlir::cast<MemRefType>(inputAMemRef.getType());
     auto inBType = mlir::cast<MemRefType>(inputBMemRef.getType());
-
     ArrayRef<int64_t> inAShape = inAType.getShape();
     ArrayRef<int64_t> inBShape = inBType.getShape();
     ArrayRef<int64_t> outShape = outType.getShape();
 
-    // Initialize defaults
     int64_t a_col = 1, a_row = 1, a_stride = 0;
     int64_t b_col = 1, b_row = 1, b_stride = 0;
-    int64_t out_width = 1, out_height = 1, out_stride = 0; // Will be reused for biaspsum
-
-    // Conv specific defaults
+    int64_t out_width = 1, out_height = 1, out_stride = 0;
     int64_t kernel_sz = 1, stride_val = 1, dilation_val = 1;
     int64_t pad_t = 0, pad_b = 0, pad_l = 0, pad_r = 0;
     int64_t pad_mode_val = 0;
     bool is_group = false;
 
     if (opType == ComputeOpType::conv) {
-        // === CONV Shape Parsing ===
-        // Mapping depends on your layout (NCHW vs NHWC). 
-        // Assuming Logic: [N, C, H, W] or [N, H, W, C] -> extracting H/W
-        // Based on previous context: inAShape[2]=H, inAShape[3]=W
-        
-        a_row = inAShape[2]; // H
-        a_col = inAShape[3]; // W
-        
-        // Weight Geometry (Input B)
-        b_row = inBShape[2]; 
-        b_col = inBShape[3];
+      a_row = inAShape[2];
+      a_col = inAShape[3];
+      b_row = inBShape[2];
+      b_col = inBShape[3];
+      out_height = outShape[2];
+      out_width = outShape[3];
 
-        // Output Geometry (reused for Loop Control)
-        out_height = outShape[2];
-        out_width = outShape[3];
+      kernel_sz = getArrayAttr(op, "kernel_shape", 0, 1);
+      stride_val = getArrayAttr(op, "strides", 0, 1);
+      dilation_val = getArrayAttr(op, "dilations", 0, 1);
 
-        // Attributes
-        kernel_sz = getArrayAttr(op, "kernel_shape", 0, 1);
-        stride_val = getArrayAttr(op, "strides", 0, 1);
-        dilation_val = getArrayAttr(op, "dilations", 0, 1);
-        
-        if (auto attr = op->getAttrOfType<ArrayAttr>("pads")) {
-            if (attr.size() == 4) {
-                // pad_t = mlir::cast<IntegerAttr>(attr[0]).getValue().getSExtValue();
-                // pad_l = mlir::cast<IntegerAttr>(attr[1]).getValue().getSExtValue();
-                // pad_b = mlir::cast<IntegerAttr>(attr[2]).getValue().getSExtValue();
-                // pad_r = mlir::cast<IntegerAttr>(attr[3]).getValue().getSExtValue();
-            }
-        }
-        pad_mode_val = getIntAttr(op, "pad_mode", 0);
-        is_group = (getIntAttr(op, "group", 1) > 1);
-
+      // Fix: get pads array properly if needed
+      // ... (pads logic same as before)
+      pad_mode_val = getIntAttr(op, "pad_mode", 0);
+      is_group = (getIntAttr(op, "group", 1) > 1);
     } else {
-        // === GEMM / MATMUL Shape Parsing ===
-        // M, K, N logic
-        if (inAShape.size() >= 2 && outShape.size() >= 2) {
-            int64_t M = inAShape[0];
-            int64_t K = inAShape[1]; // Or inBShape[0]
-            int64_t N = outShape[1];
-
-            // Input A: [M, K]
-            a_row = M; a_col = K;
-            
-            // Input B: [K, N] (assuming RHS is transposed or standard depending on impl)
-            b_row = K; b_col = N;
-
-            // Output: [M, N]
-            out_height = M; out_width = N;
-        }
+      // GEMM Logic
+      if (inAShape.size() >= 2 && outShape.size() >= 2) {
+        a_row = inAShape[0];
+        a_col = inAShape[1];
+        b_row = inAShape[1];
+        b_col = outShape[1];
+        out_height = a_row;
+        out_width = b_col;
+      }
     }
 
     // 6. Create Constants
-    // ---------------------------------------------------------
-    auto c32 = [&](int64_t v) { return rewriter.create<arith::ConstantIntOp>(loc, v, 32); };
-    auto c8 = [&](int64_t v) { return rewriter.create<arith::ConstantIntOp>(loc, v, 8); };
-    auto c1  = [&](bool v)    { return rewriter.create<arith::ConstantIntOp>(loc, v, 1); };
+    auto c32 = [&](int64_t v) {
+      return rewriter.create<arith::ConstantIntOp>(loc, v, 32);
+    };
+    auto c8 = [&](int64_t v) {
+      return rewriter.create<arith::ConstantIntOp>(loc, v, 8);
+    };
+    auto c1 = [&](bool v) {
+      return rewriter.create<arith::ConstantIntOp>(loc, v, 1);
+    };
 
     // --- Operation Control ---
     auto opTypeAttr = ComputeOpTypeAttr::get(rewriter.getContext(), opType);
-    auto dataflowModeAttr = DataflowModeAttr::get(rewriter.getContext(), DataflowMode::ws); // Default WS
+    auto dataflowModeAttr =
+        DataflowModeAttr::get(rewriter.getContext(), DataflowMode::ws);
     auto accoutDestAttr = AccoutDestAttr::get(rewriter.getContext(), accDest);
-    
-    Value vIntType = c8(0); // Default to INT8 (0)
+    Value vIntType = c8(0);
 
-    // --- Padding ---
-    Value vPadT = c32(pad_t); Value vPadB = c32(pad_b);
-    Value vPadL = c32(pad_l); Value vPadR = c32(pad_r);
+    Value vPadT = c32(pad_t);
+    Value vPadB = c32(pad_b);
+    Value vPadL = c32(pad_l);
+    Value vPadR = c32(pad_r);
     Value vPadMode = c32(pad_mode_val);
 
-    // --- Weights & Inputs (Minus 1 Logic) ---
-    // Note: Hardware registers for sizes usually expect Value-1.
     auto safe_m1 = [](int64_t v) { return v > 0 ? v - 1 : 0; };
-
-    Value vWeightShapeM1    = c32(safe_m1(kernel_sz));
-    Value vWeightStrideM1   = c32(safe_m1(stride_val));
+    Value vWeightShapeM1 = c32(safe_m1(kernel_sz));
+    Value vWeightStrideM1 = c32(safe_m1(stride_val));
     Value vWeightDilationM1 = c32(safe_m1(dilation_val));
-    Value vIsGroup          = c1(is_group);
+    Value vIsGroup = c1(is_group);
 
-    Value vInAColM1  = c32(safe_m1(a_col));
-    Value vInARowM1  = c32(safe_m1(a_row));
-    Value vInAStride = c32(a_stride); // Stride usually raw
+    Value vInAColM1 = c32(safe_m1(a_col));
+    Value vInARowM1 = c32(safe_m1(a_row));
+    Value vInAStride = c32(a_stride);
 
-    Value vInBColM1  = c32(safe_m1(b_col));
-    Value vInBRowM1  = c32(safe_m1(b_row));
+    Value vInBColM1 = c32(safe_m1(b_col));
+    Value vInBRowM1 = c32(safe_m1(b_row));
     Value vInBStride = c32(b_stride);
 
-    // --- Loop Control / Output (Reused Geometry) ---
-    // Note: These define the execution loop limits. 
-    // Usually raw width/height are passed here if API expects count, or -1 if 0-based index.
-    // Based on API "biaspsum_width", assume raw value.
-    Value vBiasPsumWidth  = c32(out_width);
+    Value vBiasPsumWidth = c32(out_width);
     Value vBiasPsumHeight = c32(out_height);
-    Value vBiasPsumStride = c32(0); // Placeholder for bias stride
+    Value vBiasPsumStride = c32(0);
 
     Value vOutputStride = c32(out_stride);
 
     // 7. Quantization Params
-    // ---------------------------------------------------------
+    // ... (Quantization Logic 保持不变) ...
     double realMultiplier = 1.0;
-    int64_t inZp = 0; int64_t wZp = 0; int64_t outZp = 0;
-
+    int64_t inZp = 0;
+    int64_t wZp = 0;
+    int64_t outZp = 0;
     double outScaleTarget = getFloatAttr(op, "out_scale", 1.0);
     outZp = getIntAttr(op, "out_zp", 0);
-
     if (opType == ComputeOpType::conv) {
-        double inScale = getFloatAttr(op, "in_scale", 1.0);
-        inZp = getIntAttr(op, "in_zp", 0);
-        realMultiplier = inScale / outScaleTarget;
+      double inScale = getFloatAttr(op, "in_scale", 1.0);
+      inZp = getIntAttr(op, "in_zp", 0);
+      realMultiplier = inScale / outScaleTarget;
     } else {
-        // GEMM / Matmul params
-        inZp = getIntAttr(op, "lhs_zp", 0);
-        wZp  = getIntAttr(op, "rhs_zp", 0);
-        
-        double lhsScale = getFloatAttr(op, "lhs_scale", 1.0);
-        double rhsScale = getFloatAttr(op, "rhs_scale", 1.0);
-        realMultiplier = (lhsScale * rhsScale) / outScaleTarget;
+      inZp = getIntAttr(op, "lhs_zp", 0);
+      wZp = getIntAttr(op, "rhs_zp", 0);
+      double lhsScale = getFloatAttr(op, "lhs_scale", 1.0);
+      double rhsScale = getFloatAttr(op, "rhs_scale", 1.0);
+      realMultiplier = (lhsScale * rhsScale) / outScaleTarget;
     }
-
     auto quantParams = getFixedPointParams(realMultiplier);
     Value vQuantScale = c32(quantParams.multiplier);
     Value vQuantShift = c32(quantParams.shift);
-    
     Value vInAZp = c32(inZp);
-    Value vInBZp = c32(wZp); 
+    Value vInBZp = c32(wZp);
     Value vOutZp = c32(outZp);
 
     // 8. Flags (Accumulate, ReLU, Bias)
     // ---------------------------------------------------------
-    // Initialize Accumulate/Bias flags to False.
-    // A subsequent compiler pass will analyze the graph and set these correctly.
-    Value vDoAccum = c1(false);
-    Value vAccBias = c1(false);
+    // Use the flags determined in Step 2
+    Value vDoAccum = c1(flagDoAccum);
+    Value vAccBias = c1(flagAccBias);
 
     // Activation
     bool doRelu = (getIntAttr(op, "do_relu", 0) != 0);
     int64_t reluTypeVal = getIntAttr(op, "relu_type", 0);
     ActivationType actType = static_cast<ActivationType>(reluTypeVal);
-    if (reluTypeVal > 4) actType = ActivationType::relu;
-    
+    if (reluTypeVal > 4)
+      actType = ActivationType::relu;
+
     Value vReluEnable = c1(doRelu);
     auto reluTypeAttr = ActivationTypeAttr::get(rewriter.getContext(), actType);
 
     // 9. Create ComputeRunOp
     // ---------------------------------------------------------
-    // Order MUST match the latest .td definition
-    rewriter.replaceOpWithNewOp<ComputeRunOp>(op,
-        opTypeAttr,
-        dataflowModeAttr,
-        accoutDestAttr,
-        vIntType,
-        
-        inputAMemRef,
-        inputBMemRef,
-        biasMemRef,      // Optional Buffer (passed if exists)
+    rewriter.replaceOpWithNewOp<ComputeRunOp>(op, opTypeAttr, dataflowModeAttr,
+        accoutDestAttr, vIntType,
+
+        inputAMemRef, inputBMemRef,
+        psumMemRefForOp, // Passed Logic-based Psum (Null or Output)
         outputMemRef,
 
-        vPadT, vPadB, vPadL, vPadR,
-        vPadMode,
+        vPadT, vPadB, vPadL, vPadR, vPadMode,
 
         vWeightShapeM1, vWeightStrideM1, vWeightDilationM1, vIsGroup,
 
-        vInAColM1, vInARowM1, vInAStride,
-        vInBColM1, vInBRowM1, vInBStride,
+        vInAColM1, vInARowM1, vInAStride, vInBColM1, vInBRowM1, vInBStride,
 
-        vBiasPsumWidth, vBiasPsumHeight, vBiasPsumStride, // Reused Geometry
+        vBiasPsumWidth, vBiasPsumHeight, vBiasPsumStride,
 
         vOutputStride,
 
-        vDoAccum,        // Default False
-        vReluEnable,
-        reluTypeAttr,
-        vAccBias,        // Default False
+        vDoAccum, // Controlled by logic
+        vReluEnable, reluTypeAttr,
+        vAccBias, // Controlled by logic
 
-        vOutZp,          // Note: Output ZP first
-        vQuantScale,
-        vQuantShift,
-        vInAZp,
-        vInBZp
-    );
+        vOutZp, vQuantScale, vQuantShift, vInAZp, vInBZp);
 
     return success();
   }

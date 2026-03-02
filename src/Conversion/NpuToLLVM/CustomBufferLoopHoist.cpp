@@ -339,7 +339,7 @@ struct CustomBufferAllocationLoopHoistingState
 
     if (!isLegal)
       return false;
-    if (op->hasAttr("npu.computeop")) {
+    if (op->hasAttr("npu.target") && op->getAttrOfType<StringAttr>("npu.target").getValue() == "npu") {
       return false;
     }
 

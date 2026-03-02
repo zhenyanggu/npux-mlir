@@ -84,9 +84,9 @@ static Value createExplicitTranspose(OpBuilder &b, Location loc, Value input) {
   return transOp.getResult();
 }
 
-// MatMul Body 构建器
-// 确保使用 Integer 运算 (因为输入是 i8/u8/i32)
-static void createMatMulBody(OpBuilder &b, Location loc, ValueRange args) {
+// MatMul i32 Body 构建器
+// 确保使用 Integer 运算并且仅输出 i32 的累加结果，精度转换留给 SPM 阶段
+static void createI32MatMulBody(OpBuilder &b, Location loc, ValueRange args) {
   // args: [A, B, (Optional C), OutAcc]
   Value lhs = args[0];
   Value rhs = args[1];
@@ -100,7 +100,7 @@ static void createMatMulBody(OpBuilder &b, Location loc, ValueRange args) {
     if (t.isInteger(8) || t.isInteger(1) || t.isInteger(16)) {
       return b.create<arith::ExtSIOp>(loc, b.getI32Type(), v);
     }
-    // Fallback for float (should not happen in quantized path usually, but safe to handle)
+    // Fallback for float
     if (mlir::isa<FloatType>(t)) {
         return b.create<arith::FPToSIOp>(loc, b.getI32Type(), v);
     }
@@ -109,7 +109,7 @@ static void createMatMulBody(OpBuilder &b, Location loc, ValueRange args) {
 
   Value lhsI32 = castToI32(lhs);
   Value rhsI32 = castToI32(rhs);
-  Value outI32 = castToI32(outAcc);
+  Value outI32 = castToI32(outAcc); // i32 accum
 
   // 1. Mul: i32 = i32 * i32
   Value mul = b.create<arith::MulIOp>(loc, lhsI32, rhsI32);
@@ -123,30 +123,15 @@ static void createMatMulBody(OpBuilder &b, Location loc, ValueRange args) {
   // 3. Accumulate: i32 = i32 + i32
   Value resI32 = b.create<arith::AddIOp>(loc, outI32, mul);
 
-  // 4. Cast back to Output Type (usually i8 for quantized output)
-  Type outType = outAcc.getType();
-  Value res;
-  if (outType.isInteger(32)) {
-    res = resI32;
-  } else if (outType.isInteger(8)) {
-    // I32 -> I8 (Truncate)
-    // 注意：实际硬件会有 Scale/ZP 处理，这里作为 Body 占位，Trunc 是合法的 IR
-    res = b.create<arith::TruncIOp>(loc, outType, resI32);
-  } else if (mlir::isa<FloatType>(outType)) {
-     res = b.create<arith::SIToFPOp>(loc, outType, resI32);
-  } else {
-     // Fallback
-     res = resI32;
-  }
-
-  b.create<linalg::YieldOp>(loc, res);
+  // 4. Yield pure i32 (no truncation here!)
+  b.create<linalg::YieldOp>(loc, resI32);
 }
 
 // 通用的 MatMul 构建器
 static Value createGenericMatMulOp(
     ConversionPatternRewriter &rewriter, Location loc,
-    SmallVector<Value> inputs,           // [A, B] 或 [A, B, C]
-    RankedTensorType outType,            // Output Type
+    SmallVector<Value> inputs,          // [A, B] 或 [A, B, C]
+    RankedTensorType outType,            // Final Output Type (e.g., i8)
     // Quant Params
     float lhsScale, int64_t lhsZp,
     float rhsScale, int64_t rhsZp,
@@ -162,22 +147,22 @@ static Value createGenericMatMulOp(
     OpBuilder::InsertionGuard guard(rewriter);
     rewriter.createBlock(&executeRegion.getRegion());
 
-    // 1. Alloc Output Buffer
+    // 1. 提取动态尺寸，供内存分配使用
     SmallVector<Value> dynamicSizes =
         getDynamicSizes(rewriter, loc, inputs[0], outType.getShape());
-    Value regionAlloc = rewriter.create<bufferization::AllocTensorOp>(
-        loc, outType, dynamicSizes);
 
-    // 2. 构建 Indexing Maps
-    // 假设 A, B 已经转置好，形状语义: A(..., M, K), B(..., K, N), Out(..., M, N)
+    // 2. 分配中间 i32 累加器 Buffer (NPU Accumulator)
+    auto i32Type = RankedTensorType::get(outType.getShape(), rewriter.getI32Type());
+    Value i32Alloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, i32Type, dynamicSizes);
+
+    // 3. 构建 GEMM Indexing Maps
     SmallVector<utils::IteratorType> iteratorTypes(outRank + 1, utils::IteratorType::parallel);
     iteratorTypes[outRank] = utils::IteratorType::reduction; 
     
     // Map 构建 Helper
     auto getMap = [&](bool isA, bool isB, bool isC, Value val = Value()) -> AffineMap {
       SmallVector<AffineExpr> exprs;
-      
-      // Batch dims: d0 ... d(R-3)
       for (int i = 0; i < outRank - 2; ++i) 
         exprs.push_back(rewriter.getAffineDimExpr(i));
         
@@ -185,68 +170,95 @@ static Value createGenericMatMulOp(
       AffineExpr n = rewriter.getAffineDimExpr(outRank - 1);
       AffineExpr k = rewriter.getAffineDimExpr(outRank);
       
-      if (isA) { // (..., M, K)
+      if (isA) { 
         exprs.push_back(m);
         exprs.push_back(k);
-      } else if (isB) { // (..., K, N)
+      } else if (isB) { 
         exprs.push_back(k);
         exprs.push_back(n);
       } else if (isC) {
-        // Bias Handling (Broadcasting)
-        // Check actual rank of Bias tensor
         int64_t biasRank = mlir::cast<RankedTensorType>(val.getType()).getRank();
-        
         if (biasRank == 1) {
-             // 1D Bias usually broadcasts over the inner dimension (N)
-             // Map: (n)
-             exprs.clear(); // Clear batch dims for 1D
+             exprs.clear(); 
              exprs.push_back(n);
-             // Note: map domain must still have all dimensions (Rank+1)
              return AffineMap::get(outRank + 1, 0, exprs, rewriter.getContext());
         } else {
-             // Assume full broadcasting (..., M, N) matches Output
              exprs.push_back(m);
              exprs.push_back(n);
         }
-      } else { // Out: (..., M, N)
+      } else { 
         exprs.push_back(m);
         exprs.push_back(n);
       }
       return AffineMap::get(outRank + 1, 0, exprs, rewriter.getContext());
     };
 
-    SmallVector<AffineMap> indexingMaps;
-    indexingMaps.push_back(getMap(true, false, false));  // A
-    indexingMaps.push_back(getMap(false, true, false));  // B
+    SmallVector<AffineMap> gemmIndexingMaps;
+    gemmIndexingMaps.push_back(getMap(true, false, false));  // A
+    gemmIndexingMaps.push_back(getMap(false, true, false));  // B
     
     if (hasBias) {
-      indexingMaps.push_back(getMap(false, false, true, inputs[2])); // C (pass Value to check rank)
+      gemmIndexingMaps.push_back(getMap(false, false, true, inputs[2])); // C
     }
     
-    indexingMaps.push_back(getMap(false, false, false)); // Out
+    gemmIndexingMaps.push_back(getMap(false, false, false)); // Out (i32)
 
-    // 3. Create GenericOp
-    auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
-        /*resultTypes=*/outType,
+    // 4. 创建 GenericOp (GEMM -> i32)
+    auto gemmOp = rewriter.create<linalg::GenericOp>(loc,
+        /*resultTypes=*/i32Type,
         /*inputs=*/inputs,
-        /*outputs=*/regionAlloc,
-        indexingMaps, iteratorTypes,
-        /*bodyBuilder=*/createMatMulBody);
+        /*outputs=*/i32Alloc,
+        gemmIndexingMaps, iteratorTypes,
+        /*bodyBuilder=*/createI32MatMulBody);
 
-    // 4. 设置属性
-    linalgOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
-    linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-    
-    linalgOp->setAttr("lhs_scale", rewriter.getF32FloatAttr(lhsScale));
-    linalgOp->setAttr("lhs_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), lhsZp));
-    linalgOp->setAttr("rhs_scale", rewriter.getF32FloatAttr(rhsScale));
-    linalgOp->setAttr("rhs_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), rhsZp));
-    linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
-    linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), outZp));
-    
-    linalgOp->setAttr("with_bias", rewriter.getI32IntegerAttr(withBiasAttr));
+    gemmOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
+    gemmOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    gemmOp->setAttr("lhs_scale", rewriter.getF32FloatAttr(lhsScale));
+    gemmOp->setAttr("lhs_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), lhsZp));
+    gemmOp->setAttr("rhs_scale", rewriter.getF32FloatAttr(rhsScale));
+    gemmOp->setAttr("rhs_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), rhsZp));
+    gemmOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
+    gemmOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), outZp));
+    gemmOp->setAttr("with_bias", rewriter.getI32IntegerAttr(withBiasAttr));
 
-    rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
+    // ==========================================
+    // 5. SPM 阶段：i32 -> 最终类型 (通常为 i8)
+    // ==========================================
+
+    // 分配最终类型的 Output Buffer (SPM)
+    Value finalAlloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, outType, dynamicSizes);
+
+    SmallVector<AffineMap> identityMaps(2, rewriter.getMultiDimIdentityMap(outRank));
+    SmallVector<utils::IteratorType> parallelIters(outRank, utils::IteratorType::parallel);
+
+    auto quantOp = rewriter.create<linalg::GenericOp>(loc, 
+        /*resultTypes=*/outType,
+        /*inputs=*/ValueRange{gemmOp.getResult(0)}, 
+        /*outputs=*/ValueRange{finalAlloc},
+        identityMaps, parallelIters,
+        [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
+          Value inI32 = args[0];
+          Type targetType = outType.getElementType();
+          Value res;
+
+          if (targetType.isInteger(32)) {
+            res = inI32;
+          } else if (targetType.isInteger(8)) {
+            // i32 -> i8 截断
+            res = nestedB.create<arith::TruncIOp>(nestedLoc, targetType, inI32);
+          } else if (mlir::isa<FloatType>(targetType)) {
+            res = nestedB.create<arith::SIToFPOp>(nestedLoc, targetType, inI32);
+          } else {
+            res = inI32;
+          }
+          nestedB.create<linalg::YieldOp>(nestedLoc, res);
+        });
+
+    quantOp->setAttr("library_call", rewriter.getStringAttr("mv_acc_to_spm"));
+    quantOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+
+    rewriter.create<scf::YieldOp>(loc, quantOp.getResults());
   }
   return executeRegion.getResults()[0];
 }
@@ -298,14 +310,9 @@ struct GemmToLinalg : public OpConversionPattern<ONNXGemmOp> {
     // Handle Bias Type Backtracking
     bool hasBias = !mlir::isa<NoneType>(inputC.getType());
     if (hasBias) {
-      // 这里的关键：Gemm 的 Bias 输入通常是 float (经过 Dequant)。
-      // 我们需要找到它背后的 Quantized Source (i32)。
       if (auto dequantC = inputC.getDefiningOp<ONNXDequantizeLinearOp>()) {
           inputs.push_back(dequantC.getX()); // Use the i32 input
       } else {
-          // 如果没有 Dequant，直接使用 C (可能是 Constant)
-          // 注意：如果 C 是 float 常量，这里可能需要手动量化或报错，
-          // 但既然是 qdq 模型，通常都是 Dequant 的结果。
           inputs.push_back(inputC);
       }
     }

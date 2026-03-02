@@ -42,8 +42,10 @@ static Value createPackedLayerNormOp(
     int64_t axis, float epsilon) {
 
   int64_t rank = inputType.getRank();
-  bool isSpatial = (rank == 4);
+  //bool isSpatial = (rank == 4);
 
+  bool isSpatial = false;
+  
   // ==========================================================
   // 路径 A: 非 4D 数据 (Flat/Seq) -> 仅 Region 包裹，不 Pack
   // ==========================================================

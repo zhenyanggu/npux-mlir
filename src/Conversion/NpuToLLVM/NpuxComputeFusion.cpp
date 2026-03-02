@@ -69,23 +69,6 @@ struct FuseComputeAndMvAccToSpm
     // [关键点 A] 切换 Destination 为 SPM
     AccoutDest newDest = AccoutDest::spm;
 
-    // [关键点 B] 处理 Stride 类型不匹配问题
-    rewriter.setInsertionPoint(mvOp); 
-    
-    Value spmStrideI16 = mvOp.getSpmStride();
-    Value newOutputStride;
-
-    if (spmStrideI16.getType().isInteger(32)) {
-        newOutputStride = spmStrideI16;
-    } else {
-        // 插入 i16 -> i32 的转换指令
-        newOutputStride = rewriter.create<arith::ExtUIOp>(
-            mvOp.getLoc(), 
-            rewriter.getI32Type(), 
-            spmStrideI16
-        );
-    }
-
     // 5. 创建新的 ComputeRunOp (输出直接写 SPM)
     rewriter.create<ComputeRunOp>(
         computeOp.getLoc(),
@@ -98,7 +81,7 @@ struct FuseComputeAndMvAccToSpm
         // --- 2. Buffers ---
         computeOp.getInputA(),
         computeOp.getInputB(),
-        computeOp.getBiaspsumMemref(), 
+        computeOp.getPsumMemref(), 
         spmDst,                        // <--- Changed: Output is now SPM Buffer
 
         // --- 3. Padding ---
@@ -119,7 +102,7 @@ struct FuseComputeAndMvAccToSpm
         computeOp.getBiaspsumStride(),
 
         // --- 7. Output Stride ---
-        newOutputStride,            // <--- Changed: Use SPM stride
+        computeOp.getOutputStride(),            
 
         // --- 8. Post-Processing & Quantization ---
         computeOp.getIsAccumulate(),

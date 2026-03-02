@@ -189,8 +189,9 @@ static Value createPackedResampleOp(
     std::function<void(Operation *)> attrHook = nullptr 
 ) {
   int64_t rank = inputType.getRank();
-  bool isSpatial = (rank == 4);
+  //bool isSpatial = (rank == 4);
 
+  bool isSpatial = false;
   // --- Path A: Non-Spatial ---
   if (!isSpatial) {
     auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outputType);

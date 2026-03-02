@@ -223,13 +223,13 @@ void registerNpuPasses() {
   });
 
 
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuICLoopSplitPass();
-  });
+  // mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+  //   return npux::createNpuICLoopSplitPass();
+  // });
 
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createSplitConvIcPass();
-  });
+  // mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+  //   return npux::createSplitConvIcPass();
+  // });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createLowerNpuSubviewPass();
@@ -239,16 +239,36 @@ void registerNpuPasses() {
     return npux::createNpuxComputeFusionPass();
   });
 
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createGemmPipelinePass();
-  });
+  // mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+  //   return npux::createGemmPipelinePass();
+  // });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createCustomBufferLoopHoistingPass();
   });
 
+  // mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+  //   return npux::createNpuxSfu5DShapePatchPass();
+  // });
+
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuxSfu5DShapePatchPass();
+    return npux::createNpuInsertDmaPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuOpSplittingPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuSpatialPeelingPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createRestoreAllocSpacePass();
+  });
+
+  mlir::registerPass([]()->std::unique_ptr<mlir::Pass>{
+    return npux::createNpuRemoveRedundantDmaPass();
   });
 
   npux::registerBufferDeallocTest();

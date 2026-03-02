@@ -9,7 +9,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h" 
 #include "src/Pass/Passes.hpp"
-
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 
 using namespace mlir;
@@ -20,6 +20,7 @@ void populateNpuTilingPatterns(
   populateElemWiseTilingPatterns(patterns, context);
   populateConvTilingPatterns(patterns, context);
   populateGemmTilingPatterns(patterns, context);
+  populateLayoutTilingPatterns(patterns, context);
 };
 } // namespace npux
 
@@ -46,6 +47,7 @@ struct NpuTilingPass
 
     // 添加 Tiling Patterns
     npux::populateNpuTilingPatterns(patterns, context);
+    //patterns.add<linalg::ExtractSliceOfPadTensorSwapPattern>(context);
 
     // 修改：配置 GreedyRewriteConfig (参考你的例子)
     GreedyRewriteConfig config;

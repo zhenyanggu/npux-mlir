@@ -260,6 +260,67 @@ public:
 
 }// namespace
 
+class LinalgLayoutToNpuxPattern : public OpRewritePattern<linalg::GenericOp> {
+public:
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(linalg::GenericOp op, PatternRewriter &rewriter) const override {
+    auto libCallAttr = op.getLibraryCallAttr();
+    if (!libCallAttr) return failure();
+    StringRef opName = libCallAttr.getValue();
+
+    bool isPack = (opName == "npu_layout_nchw_to_nchwc32");
+    bool isUnpack = (opName == "npu_layout_nchwc32_to_nchw");
+
+    if (!isPack && !isUnpack) return failure();
+
+    Location loc = op.getLoc();
+    if (op.getInputs().size() != 1 || op.getOutputs().size() != 1) return failure();
+
+    // 此时已经是 Bufferization 之后，操作数应为 MemRef
+    Value inputMemRef = op.getInputs()[0];
+    Value outputMemRef = op.getOutputs()[0];
+
+    // 检查 Memory Space (SRAM=2)
+    // 确保数据已经在 SRAM 中，符合 npu_layout_* 的要求
+    auto inType = mlir::dyn_cast<MemRefType>(inputMemRef.getType());
+    auto outType = mlir::dyn_cast<MemRefType>(outputMemRef.getType());
+
+    // 从属性中提取 N, C, H, W 参数
+    // 这些属性是在 Conv.cpp 中 setAttr 的
+    auto getIntParam = [&](StringRef name) -> int64_t {
+        if (auto attr = op->getAttrOfType<IntegerAttr>(name)) {
+            return attr.getInt();
+        }
+        // 如果没有找到参数，这是一个错误，但在 Pattern 中通常返回 failure
+        // 为了安全起见这里返回 1
+        return 1; 
+    };
+
+    int64_t n = getIntParam("params_n");
+    int64_t c = getIntParam("params_c");
+    int64_t h = getIntParam("params_h");
+    int64_t w = getIntParam("params_w");
+
+    // 创建 i16 常量作为参数传递给 Op
+    Value vN = rewriter.create<arith::ConstantIntOp>(loc, n, 16);
+    Value vC = rewriter.create<arith::ConstantIntOp>(loc, c, 16);
+    Value vH = rewriter.create<arith::ConstantIntOp>(loc, h, 16);
+    Value vW = rewriter.create<arith::ConstantIntOp>(loc, w, 16);
+
+    // 替换为具体的 Npux Op
+    if (isPack) {
+        rewriter.replaceOpWithNewOp<npux::LayoutNchwToNchwc32Op>(op,
+            inputMemRef, outputMemRef, vN, vC, vH, vW);
+    } else {
+        rewriter.replaceOpWithNewOp<npux::LayoutNchwc32ToNchwOp>(op,
+            inputMemRef, outputMemRef, vN, vC, vH, vW);
+    }
+
+    return success();
+  }
+};
+
 // ============================================================================
 // Registration
 // ============================================================================
@@ -267,4 +328,5 @@ void npux::populateLinalgSfuToNpuxPattern(RewritePatternSet &patterns) {
   patterns.add<LinalgSfuToNpuxPattern>(patterns.getContext());
   patterns.add<LinalgTransposeToNpuxPattern>(patterns.getContext());
   patterns.add<LinalgResampleToNpuxPattern>(patterns.getContext());
+  patterns.add<LinalgLayoutToNpuxPattern>(patterns.getContext());
 }

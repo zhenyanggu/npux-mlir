@@ -124,28 +124,18 @@ def Npux_MvAccToSpmOp : Npux_Op<"mv_acc_to_spm"> {
   let summary = "Logical move from ACC to SPM";
   let description = [{
     Represents a logical data transfer from Accumulator (Space 3) to SRAM (Space 2).
-    
-    Hardware Note: 
-    This op might not correspond to a standalone hardware instruction. 
-    It is typically fused into the compute operation (e.g., GEMM/CONV) 
-    during lowering, where the quantization parameters will be applied.
+    Hardware handles the shape implicitly or it is configured elsewhere.
   }];
 
   let arguments = (ins 
       NpuAccMemRef:$acc_src, 
-      NpuSramMemRef:$spm_dst,
-
-      // 仅保留数据搬运所需的维度和步长信息
-      I16:$col_num, I16:$row_num, 
-      I16:$acc_stride, I16:$spm_stride
+      NpuSramMemRef:$spm_dst
   );
 
   let results = (outs);
 
   let assemblyFormat = [{
     $acc_src `->` $spm_dst
-    `shape` `(` $col_num `x` $row_num `)`
-    `stride` `(` $acc_stride `,` $spm_stride `)`
     attr-dict `:` type($acc_src) `,` type($spm_dst)
   }];
 }
@@ -187,6 +177,24 @@ def Npux_DmaMvinOp : Npux_Op<"dma_mvin"> {
     `cfg` `(` $precision `,` $input_type `,` $dest `,` $is_bias `)` 
     `quant` `(` $is_quant `,` $quant_zero `,` $quant_scale `,` $quant_shift `)`
     attr-dict `:` type($host_ptr) `,` type($dst_memref)
+  }];
+}
+
+def Npux_MvinBiasOp : Npux_Op<"mvin_bias"> {
+  let summary = "Move bias data to dedicated hardware register";
+  let description = [{
+    Loads bias data from a source buffer (SRAM/DRAM) into the NPU's internal bias register.
+    This operation produces no SSA results as it affects implicit hardware state.
+  }];
+
+  let arguments = (ins
+      AnyMemRef:$source 
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $source attr-dict `:` type($source)
   }];
 }
 
@@ -295,10 +303,7 @@ def Npux_ComputeRunOp : Npux_Op<"compute_run"> {
       NpuSramMemRef:$input_a, 
       NpuSramMemRef:$input_b, 
       
-      // [你的疑问在这里]
-      // 这个参数是为了提供 API 里的 `biaspsum_addr`。
-      // 如果没有它，Lowering 时不知道该填什么地址作为 bias/psum 的读基地址。
-      Optional<NpuAccMemRef>:$biaspsum_memref, 
+      Optional<NpuAccMemRef>:$psum_memref, 
 
       // 输出 Buffer (提供 output_addr) - 支持 Sram 或 Acc
       NpuSramOrAccMemRef:$output,
@@ -350,7 +355,7 @@ def Npux_ComputeRunOp : Npux_Op<"compute_run"> {
     `buffers` `(` 
         `a` `:` $input_a `,` 
         `b` `:` $input_b 
-        (`,` `bias` `:` $biaspsum_memref^)? 
+        (`,` `bias` `:` $psum_memref^)? 
     `)` `->` $output
 
     `shape_a` `(` $input_a_col_num_m1 `x` $input_a_row_num_m1 `)` `stride` $input_a_stride
@@ -376,7 +381,7 @@ def Npux_ComputeRunOp : Npux_Op<"compute_run"> {
     `)`
 
     attr-dict 
-    `:` type($input_a) `,` type($input_b) `,` type($output) (`,` type($biaspsum_memref)^)?
+    `:` type($input_a) `,` type($input_b) `,` type($output) (`,` type($psum_memref)^)?
   }];
 }
 
@@ -472,6 +477,60 @@ def Npux_ResampleOp : Npux_Op<"resample_run"> {
     $resample_type $resample_mode
     $input_sram `->` $output_sram
     `shape` `(` $input_col_num `x` $input_row_num `)`
+    attr-dict `:` type($input_sram) `,` type($output_sram)
+  }];
+}
+
+def Npux_LayoutNchwToNchwc32Op : Npux_Op<"layout_nchw_to_nchwc32"> {
+  let summary = "Convert layout from NCHW to NCHWc32 in SRAM";
+  let description = [{
+    Maps to C-API `npu_layout_nchw_to_nchwc32`.
+    Performs data repacking from planar NCHW format to blocked NCHWc32 format.
+    Both input and output buffers must reside in NPU SRAM.
+  }];
+
+  let arguments = (ins
+      NpuSramMemRef:$input_sram,   
+      NpuSramMemRef:$output_sram,  
+
+      I16:$n,
+      I16:$c,
+      I16:$h,
+      I16:$w
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $input_sram `->` $output_sram
+    `shape` `(` $n `,` $c `,` $h `,` $w `)`
+    attr-dict `:` type($input_sram) `,` type($output_sram)
+  }];
+}
+
+def Npux_LayoutNchwc32ToNchwOp : Npux_Op<"layout_nchwc32_to_nchw"> {
+  let summary = "Convert layout from NCHWc32 to NCHW in SRAM";
+  let description = [{
+    Maps to C-API `npu_layout_nchwc32_to_nchw`.
+    Performs data unpacking from blocked NCHWc32 format to planar NCHW format.
+    Both input and output buffers must reside in NPU SRAM.
+  }];
+
+  let arguments = (ins
+      NpuSramMemRef:$input_sram,   
+      NpuSramMemRef:$output_sram,  
+
+      I16:$n,
+      I16:$c,
+      I16:$h,
+      I16:$w
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $input_sram `->` $output_sram
+    `shape` `(` $n `,` $c `,` $h `,` $w `)`
     attr-dict `:` type($input_sram) `,` type($output_sram)
   }];
 }
