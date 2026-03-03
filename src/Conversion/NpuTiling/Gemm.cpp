@@ -336,6 +336,19 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
         }
       }
     }
+    // =================================================================
+    // Phase 6: 链接数据流并替换原 Op
+    // =================================================================
+    // 1. 替换融合内部计算的产物
+    rewriter.replaceOp(fusedGemmOp, finalKResults);
+
+    // 2. 将外层原始的 mv_acc_to_spm 替换为 Tile & Fuse 流程的最终产物
+    Value originalResult = op->getResult(0);
+    if (fuseResult->replacements.count(originalResult)) {
+      rewriter.replaceOp(op, fuseResult->replacements[originalResult]);
+    } else {
+      return failure();
+    }
 
     // =================================================================
     // Phase 5: 空间循环维度的常规尾部剥离 (Tail Peeling)
@@ -350,19 +363,7 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       }
     }
 
-    // =================================================================
-    // Phase 6: 链接数据流并替换原 Op
-    // =================================================================
-    // 1. 替换融合内部计算的产物
-    rewriter.replaceOp(fusedGemmOp, finalKResults);
-
-    // 2. 将外层原始的 mv_acc_to_spm 替换为 Tile & Fuse 流程的最终产物
-    Value originalResult = op->getResult(0);
-    if (fuseResult->replacements.count(originalResult)) {
-      rewriter.replaceOp(op, fuseResult->replacements[originalResult]);
-    } else {
-      return failure();
-    }
+    
 
     return success();
   }

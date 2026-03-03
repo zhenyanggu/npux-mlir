@@ -350,21 +350,6 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       }
     }
 
-    for (int i = (int)spatialLoops.size() - 1; i >= 0; --i) {
-      // 1. 获取底层 Operation 并转换为 scf::ForOp
-      auto loopOp = cast<scf::ForOp>(spatialLoops[i].getOperation());
-
-      // 2. 声明用于接收尾部循环的局部变量
-      scf::ForOp partialLoop;
-
-      // 3. 调用 MLIR 的标准 Peel 接口
-      if (succeeded(scf::peelForLoopAndSimplifyBounds(
-              rewriter, loopOp, partialLoop))) {
-        // 获取成功剥离出的尾部循环
-        scf::ForOp tailLoop = partialLoop;
-      }
-    }
-
     // =================================================================
     // Phase 5: 链接数据流并替换原 Op
     // =================================================================
@@ -380,6 +365,23 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       // 防御性编程：如果没有找到替换值，说明 Tiling 过程发生异常
       return failure();
     }
+
+    for (int i = (int)spatialLoops.size() - 1; i >= 0; --i) {
+      // 1. 获取底层 Operation 并转换为 scf::ForOp
+      auto loopOp = cast<scf::ForOp>(spatialLoops[i].getOperation());
+
+      // 2. 声明用于接收尾部循环的局部变量
+      scf::ForOp partialLoop;
+
+      // 3. 调用 MLIR 的标准 Peel 接口
+      if (succeeded(scf::peelForLoopAndSimplifyBounds(
+              rewriter, loopOp, partialLoop))) {
+        // 获取成功剥离出的尾部循环
+        scf::ForOp tailLoop = partialLoop;
+      }
+    }
+
+    
 
     return success();
   }
