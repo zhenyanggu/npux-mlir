@@ -102,7 +102,7 @@ echo ">>> Tiling Config: $TILING_CONFIG"
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg --npu-ops=Conv,MatMul,LayerNorm,Softmax,Gelu,Gemm,MaxPool,AveragePool,Resize,Transpose --npu-tiling-config=$TILING_CONFIG" \
+         "--convert-npu-onnx-to-linalg --npu-ops=all --npu-tiling-config=$TILING_CONFIG" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
@@ -121,11 +121,11 @@ run_pass "Outline" \
 # NpuFuse
 # ------------------------------------------------
 
-enter_stage "NpuFuse"
+# enter_stage "NpuFuse"
 
-run_pass "Fusing" \
-         "--npu-fuse" \
-         "NpuFuse.mlir"
+# run_pass "Fusing" \
+#          "--npu-fuse" \
+#          "NpuFuse.mlir"
 
 # ------------------------------------------------
 #  NpuTiling
@@ -134,17 +134,25 @@ enter_stage "NpuTiling"
 
 
 run_pass "Tiling " \
-         "--npu-tiling --canonicalize --npu-tiling-config=$TILING_CONFIG" \
+         "--npu-tiling --canonicalize --restore-alloc-space --npu-tiling-config=$TILING_CONFIG" \
          "NpuTiling.mlir"
+
+run_pass "Insert Dma " \
+         "--npu-insert-dma" \
+         "NpuInsertDma.mlir"
+
+run_pass "Op Splitting " \
+         "--npu-op-splitting" \
+         "NpuOpSplitting.mlir"
 
 # ------------------------------------------------
 #  NpuBufferization
 # ------------------------------------------------
 enter_stage "NpuBufferization"
 
-run_pass "Pack&UnPack Lower" \
-         "--npu-lower-pack" \
-         "NpuLowerPack.mlir"
+# run_pass "Pack&UnPack Lower" \
+#          "--npu-lower-pack" \
+#          "NpuLowerPack.mlir"
 
 # 这是一个很长的命令，现在写起来很清爽
 run_pass "Bufferize" \
@@ -157,9 +165,9 @@ run_pass "Bufferize" \
 # ------------------------------------------------
 enter_stage "NpuToLLVM"
 
-run_pass "Npu Sram Promotion" \
-        "--npu-sram-promotion" \
-        "NpuSramPromotion.mlir"
+# run_pass "Npu Sram Promotion" \
+#         "--npu-sram-promotion" \
+#         "NpuSramPromotion.mlir"
 
 
 
@@ -200,21 +208,21 @@ run_pass "Npux Conversion" \
          "--convert-linalg-to-npux --canonicalize" \
          "ConvertLinalgToNpux.mlir"
 
-run_pass "Npux SFU 5D Shape Patch" \
-         "--npux-sfu-reshape" \
-         "NpuxSfu5DShapePatch.mlir"
+# run_pass "Npux SFU 5D Shape Patch" \
+#          "--npux-sfu-reshape" \
+#          "NpuxSfu5DShapePatch.mlir"
 
-run_pass "Split Loop" \
-         "--npu-split-loop" \
-         "LoopSplit.mlir"
+# run_pass "Split Loop" \
+#          "--npu-split-loop" \
+#          "LoopSplit.mlir"
 
-run_pass "Split Conv" \
-         "--split-conv-ic" \
-         "ConvSplit.mlir"
+# run_pass "Split Conv" \
+#          "--split-conv-ic" \
+#          "ConvSplit.mlir"
 
-run_pass "Gemm Pipeline" \
-         "--npu-gemm-pipeline" \
-         "GemmPipeline.mlir"
+# run_pass "Gemm Pipeline" \
+#          "--npu-gemm-pipeline" \
+#          "GemmPipeline.mlir"
 
 run_pass "Lower Subview" \
          "--npu-lower-subview" \

@@ -550,6 +550,180 @@ void NpuRuntime::run_conv(const ConvConfig& cfg) {
     NPU_TIMER_SECTION_END()
 }
 
+int NpuRuntime::run_conv_tile(const NpuConvTileConfig& cfg) {
+    if (!g_npu_runtime) return -1;
+
+    constexpr int SA_SIZE = 32;
+    constexpr int ACC_ELEM_SIZE = 4;
+
+    auto is_mult32 = [](int32_t v) { return (v % SA_SIZE) == 0; };
+    auto fits_u16 = [](int32_t v) { return (v >= 0) && (v <= 0xFFFF); };
+
+    // --- 参数校验 ---
+    if (cfg.c_in <= 0) return -1;
+    if (cfg.k_h <= 0 || cfg.k_w <= 0 || cfg.stride <= 0 || cfg.dilation <= 0) return -1;
+    if (cfg.t_h_out <= 0 || cfg.t_w_out <= 0 || cfg.t_cin <= 0 || cfg.t_cout <= 0) return -1;
+    if (cfg.t_cout > SA_SIZE) return -1;
+    if (cfg.i_cin < 0) return -1;
+    if (cfg.i_cin + cfg.t_cin > cfg.c_in) return -1;
+    if (!fits_u16(cfg.t_w_out)) return -1;
+
+    if (cfg.c_in < SA_SIZE) {
+        // 允许 cin < 32：仅支持单个 cin block
+        if (cfg.i_cin != 0) return -1;
+        if (cfg.t_cin != cfg.c_in) return -1;
+    } else {
+        if (!is_mult32(cfg.c_in) || !is_mult32(cfg.t_cin) || !is_mult32(cfg.t_cout)) return -1;
+        if ((cfg.i_cin % SA_SIZE) != 0) return -1;
+    }
+
+    // --- IFM 感受野计算（无 padding，编译器已处理好） ---
+    int32_t t_h_in = (cfg.t_h_out - 1) * cfg.stride +
+                     (cfg.k_h - 1) * cfg.dilation + 1;
+    int32_t t_w_in = (cfg.t_w_out - 1) * cfg.stride +
+                     (cfg.k_w - 1) * cfg.dilation + 1;
+    if (t_h_in <= 0 || t_w_in <= 0) return -1;
+
+    const int32_t cin_block_size = (cfg.c_in < SA_SIZE) ? cfg.c_in : SA_SIZE;
+    const int32_t weight_block_stride = cfg.k_h * cfg.k_w * cfg.t_cout * cin_block_size;
+    if (weight_block_stride <= 0) return -1;
+
+    // ---------------------------------------------------
+    // Micro-Tile Compute
+    // ---------------------------------------------------
+    // IFM / Weight / Bias 均由调用者预先 MVIN 到 SPM/ACC。
+    // 本函数处理单个 cout block 的 j_h × j_w × j_cin 三层循环。
+    // Padding 已由编译器在 IFM 数据中完成，此处全部为 0。
+    int32_t t_hm_out = (cfg.t_h_out <= SA_SIZE) ? cfg.t_h_out : SA_SIZE;
+    int32_t t_wm_out = (cfg.t_w_out * t_hm_out <= SA_SIZE) ?
+                       cfg.t_w_out : (SA_SIZE / t_hm_out);
+    if (t_hm_out <= 0 || t_wm_out <= 0) return -1;
+
+    for (int32_t j_h = 0; j_h < cfg.t_h_out; j_h += t_hm_out) {
+        int32_t h_this_block = ((j_h + t_hm_out) <= cfg.t_h_out) ?
+                               t_hm_out : (cfg.t_h_out - j_h);
+
+        for (int32_t j_w = 0; j_w < cfg.t_w_out; j_w += t_wm_out) {
+            int32_t w_this_block = ((j_w + t_wm_out) <= cfg.t_w_out) ?
+                                   t_wm_out : (cfg.t_w_out - j_w);
+
+            for (int32_t j_cin = 0; j_cin < cfg.t_cin; j_cin += SA_SIZE) {
+                bool is_first_cin_global = (cfg.i_cin == 0) && (j_cin == 0);
+                bool is_last_cin_global = (cfg.i_cin + cfg.t_cin >= cfg.c_in) &&
+                                          (j_cin + SA_SIZE >= cfg.t_cin);
+                bool is_only_cin_global = is_first_cin_global && is_last_cin_global;
+                
+                ConvConfig conv_cfg = {};
+
+                // Padding 由编译器完成，硬件侧全部置 0
+                conv_cfg.pad_top = 0;
+                conv_cfg.pad_bottom = 0;
+                conv_cfg.pad_left = 0;
+                conv_cfg.pad_right = 0;
+                conv_cfg.pad_mode = 0;
+
+                conv_cfg.weight_shape_m1 = static_cast<uint8_t>(cfg.k_h - 1);
+                conv_cfg.weight_stride_m1 = static_cast<uint8_t>(cfg.stride - 1);
+                conv_cfg.weight_dilation_m1 = static_cast<uint8_t>(cfg.dilation - 1);
+                conv_cfg.is_group_conv = cfg.is_group_conv;
+
+                conv_cfg.int_type = 0;
+                conv_cfg.op_type = 1;
+                conv_cfg.dataflow_mode = 0;
+
+                // 根据 cin 在全局维度的位置决定累加/输出策略
+                if (is_only_cin_global) {
+                    // 只有一轮 cin：按需加 bias → 量化输出到 SPM
+                    conv_cfg.is_accumulate =  (cfg.bias_enable == false) ? 0 : 1;//第一轮cin如果不加bias就取消累加
+                    conv_cfg.accout_dest = 0;
+                    conv_cfg.is_bias = cfg.bias_enable ? 1 : 0;
+                } else if (is_first_cin_global) {
+                    // 第一轮 cin：按需加 bias → 暂存到 ACC
+                    conv_cfg.is_accumulate = 1;
+                    conv_cfg.accout_dest = 1;
+                    conv_cfg.is_bias = cfg.bias_enable ? 1 : 0;
+                } else if (is_last_cin_global) {
+                    // 最后一轮 cin：累加 psum → 量化输出到 SPM
+                    conv_cfg.is_accumulate = 1;
+                    conv_cfg.accout_dest = 0;
+                    conv_cfg.is_bias = 0;
+                } else {
+                    // 中间轮 cin：累加 psum → 暂存到 ACC
+                    conv_cfg.is_accumulate = 1;
+                    conv_cfg.accout_dest = 1;
+                    conv_cfg.is_bias = 0;
+                }
+
+                // 对称量化，zeropoint 全 0
+                conv_cfg.input_a_zeropoint = 0;
+                conv_cfg.input_b_zeropoint = 0;
+
+                int32_t cin_blk_idx = j_cin / SA_SIZE;
+                int32_t cin_this_block = cfg.t_cin - j_cin;
+                if (cin_this_block > SA_SIZE) cin_this_block = SA_SIZE;
+
+                // 无 padding，micro-tile 的 IFM 感受野直接由 h/w_this_block 推导
+                int32_t in_h_block = (h_this_block - 1) * cfg.stride +
+                                     (cfg.k_h - 1) * cfg.dilation + 1;
+                int32_t in_w_block = (w_this_block - 1) * cfg.stride +
+                                     (cfg.k_w - 1) * cfg.dilation + 1;
+                if (in_h_block <= 0 || in_w_block <= 0) return -1;
+                if (!fits_u16(in_w_block - 1) || (in_h_block - 1) > 0xFF) return -1;
+                if (!fits_u16(t_w_in)) return -1;
+
+                // 无 padding，IFM 起始位置直接由 j_h/j_w 和 stride 确定
+                int32_t in_h_start = j_h * cfg.stride;
+                int32_t in_w_start = j_w * cfg.stride;
+
+                int32_t ifm_spm_offset = (cin_blk_idx * t_h_in * t_w_in +
+                                          in_h_start * t_w_in +
+                                          in_w_start) * cin_block_size;
+                conv_cfg.input_a_addr = cfg.sram_addr_ifm + static_cast<uint32_t>(ifm_spm_offset);
+                conv_cfg.input_a_col_num_m1 = static_cast<uint16_t>(in_w_block - 1);
+                conv_cfg.input_a_row_num_m1 = static_cast<uint8_t>(in_h_block - 1);//这个位宽是5bit，所以input的行数不能大于32,也就是oh不能太大
+                conv_cfg.input_a_stride = static_cast<uint16_t>(t_w_in);
+
+                int32_t wgt_spm_offset = cin_blk_idx * weight_block_stride;
+                conv_cfg.input_b_addr = cfg.sram_addr_weight + static_cast<uint32_t>(wgt_spm_offset);
+                conv_cfg.input_b_col_num_m1 = static_cast<uint8_t>(cfg.t_cout - 1);
+                conv_cfg.input_b_row_num_m1 = static_cast<uint16_t>(cin_this_block - 1);
+                conv_cfg.input_b_stride = static_cast<uint16_t>(cfg.t_cout);
+
+                // psum / bias 地址：bias 由调用者 MVIN 到 ACC bias 寄存器，
+                // is_bias=1 时硬件自动读 bias 寄存器，biaspsum_addr 不影响；
+                // is_bias=0 时从 acc_addr_psum 读取已有部分和。
+                int32_t psum_offset = (j_h * cfg.t_w_out + j_w) * SA_SIZE;
+                conv_cfg.biaspsum_addr = conv_cfg.is_bias ?
+                    0 :
+                    (cfg.acc_addr_psum + psum_offset * ACC_ELEM_SIZE);
+                conv_cfg.biaspsum_stride = static_cast<uint16_t>(cfg.t_w_out);
+                conv_cfg.biaspsum_width = static_cast<uint8_t>(w_this_block);
+                conv_cfg.biaspsum_height = static_cast<uint8_t>(h_this_block);
+
+                int32_t ofm_spm_offset = (j_h * cfg.t_w_out + j_w) * SA_SIZE;
+                if (is_last_cin_global) {
+                    conv_cfg.output_addr = cfg.sram_addr_ofm + static_cast<uint32_t>(ofm_spm_offset);
+                } else {
+                    conv_cfg.output_addr = cfg.acc_addr_psum + psum_offset * ACC_ELEM_SIZE;
+                }
+                conv_cfg.output_stride = static_cast<uint16_t>(cfg.t_w_out);
+
+                conv_cfg.relu_enable = is_last_cin_global ? cfg.relu_enable : 0;
+                conv_cfg.relu_type = cfg.relu_type;
+
+                // 对称量化，output_zeropoint = 0
+                conv_cfg.output_zeropoint = 0;
+                conv_cfg.quant_scale = cfg.quant_scale;
+                conv_cfg.quant_scaleshift = cfg.quant_scaleshift;
+
+                g_npu_runtime->run_conv(conv_cfg);
+            }
+        }
+    }
+
+    return 0;
+}
+
 void NpuRuntime::run_gemm(const GemmConfig& cfg) {
     NPU_TIMER_TOTAL("run_gemm");
     
@@ -665,6 +839,8 @@ void NpuRuntime::run_transpose(const TransposeConfig& cfg) {
     uint64_t val_cfg1 = REG_FIELD(CFG_SFU0, OP, SFU_OP_TRANSPOSE) |
                         REG_FIELD(CFG_SFU0, INT_TYPE, 0) |  // int8
                         REG_FIELD(CFG_SFU0, IS_QUANT, 0) |  // 不量化
+                        REG_FIELD(CFG_SFU0, TRANSPOSE_OUT_IS_PADDING_ROW, cfg.out_padding_row) |
+                        REG_FIELD(CFG_SFU0, TRANSPOSE_OUT_IS_PADDING_COL, cfg.out_padding_col) |
                         REG_FIELD(CFG_SFU0, OUT_ZP, 0) |
                         REG_FIELD(CFG_SFU0, IN_ZP, 0);
     reg_write64_cached(RegOffset::CFG_SFU_1, val_cfg1, &shadow.sfu_cfg1);
@@ -757,6 +933,129 @@ void NpuRuntime::run_resample(const ResampleConfig& cfg) {
     NPU_TIMER_SECTION_BEGIN("run_resample(wait_irq)")
     wait_irq();
     NPU_TIMER_SECTION_END()
+}
+
+// ==========================================
+// Layout Convert Implementation
+// ==========================================
+
+void NpuRuntime::run_nchw_to_nchwc32(const LayoutConvertConfig& cfg) {
+    NPU_TIMER_TOTAL("run_nchw_to_nchwc32");
+
+    if (cfg.sram_addr == cfg.output_addr) {
+        NPU_ERR("Layout convert does not support in-place operation.");
+        return;
+    }
+    if (cfg.n == 0 || cfg.c == 0 || cfg.h == 0 || cfg.w == 0) {
+        NPU_ERR("Layout convert: invalid dimensions.");
+        return;
+    }
+
+    uint32_t hw = static_cast<uint32_t>(cfg.h) * static_cast<uint32_t>(cfg.w);
+    if (hw == 0 || hw > 4096) {
+        NPU_ERR("Layout convert: H*W=%u exceeds max 4096.", hw);
+        return;
+    }
+
+    if (cfg.c < 32) {
+        // NCHW -> NHWC by transpose (C, HW) -> (HW, C)
+        for (uint16_t n = 0; n < cfg.n; ++n) {
+            uint32_t batch_offset = n * cfg.c * hw;
+            TransposeConfig tcfg = {
+                cfg.sram_addr + batch_offset,
+                cfg.output_addr + batch_offset,
+                static_cast<uint16_t>(hw - 1),
+                static_cast<uint16_t>(cfg.c - 1),
+                false,
+                false
+            };
+            run_transpose(tcfg);
+        }
+        return;
+    }
+
+    uint16_t group_count = static_cast<uint16_t>((cfg.c + 31) / 32);
+    for (uint16_t n = 0; n < cfg.n; ++n) {
+        uint32_t batch_offset = n * cfg.c * hw;
+        for (uint16_t g = 0; g < group_count; ++g) {
+            uint32_t src_offset = batch_offset + g * 32u * hw;
+            uint32_t dst_offset = batch_offset + g * hw * 32u;
+            uint16_t rem = (cfg.c > g * 32u) ? static_cast<uint16_t>(cfg.c - g * 32u) : 0;
+            if (rem == 0) {
+                continue;
+            }
+            bool pad_col = rem < 32;
+            uint16_t row_num = pad_col ? static_cast<uint16_t>(rem - 1) : static_cast<uint16_t>(32 - 1);
+            TransposeConfig tcfg = {
+                cfg.sram_addr + src_offset,
+                cfg.output_addr + dst_offset,
+                static_cast<uint16_t>(hw - 1),
+                row_num,
+                false,
+                pad_col
+            };
+            run_transpose(tcfg);
+        }
+    }
+}
+
+void NpuRuntime::run_nchwc32_to_nchw(const LayoutConvertConfig& cfg) {
+    NPU_TIMER_TOTAL("run_nchwc32_to_nchw");
+
+    if (cfg.sram_addr == cfg.output_addr) {
+        NPU_ERR("Layout convert does not support in-place operation.");
+        return;
+    }
+    if (cfg.n == 0 || cfg.c == 0 || cfg.h == 0 || cfg.w == 0) {
+        NPU_ERR("Layout convert: invalid dimensions.");
+        return;
+    }
+
+    uint32_t hw = static_cast<uint32_t>(cfg.h) * static_cast<uint32_t>(cfg.w);
+    if (hw == 0 || hw > 4096) {
+        NPU_ERR("Layout convert: H*W=%u exceeds max 4096.", hw);
+        return;
+    }
+
+    if (cfg.c < 32) {
+        // NHWC -> NCHW by transpose (HW, C) -> (C, HW)
+        for (uint16_t n = 0; n < cfg.n; ++n) {
+            uint32_t batch_offset = n * cfg.c * hw;
+            TransposeConfig tcfg = {
+                cfg.sram_addr + batch_offset,
+                cfg.output_addr + batch_offset,
+                static_cast<uint16_t>(cfg.c - 1),
+                static_cast<uint16_t>(hw - 1),
+                false,
+                false
+            };
+            run_transpose(tcfg);
+        }
+        return;
+    }
+
+    if (cfg.c % 32 != 0) {
+        NPU_ERR("Layout convert: C=%u must be a multiple of 32 when C>=32.", cfg.c);
+        return;
+    }
+
+    uint16_t group_count = cfg.c / 32;
+    for (uint16_t n = 0; n < cfg.n; ++n) {
+        uint32_t batch_offset = n * cfg.c * hw;
+        for (uint16_t g = 0; g < group_count; ++g) {
+            uint32_t src_offset = batch_offset + g * hw * 32u;
+            uint32_t dst_offset = batch_offset + g * 32u * hw;
+            TransposeConfig tcfg = {
+                cfg.sram_addr + src_offset,
+                cfg.output_addr + dst_offset,
+                static_cast<uint16_t>(32 - 1),
+                static_cast<uint16_t>(hw - 1),
+                false,
+                false
+            };
+            run_transpose(tcfg);
+        }
+    }
 }
 
 // ==========================================
@@ -924,6 +1223,57 @@ void npu_conv_run(
     }
 }
 
+void npu_conv_tile_run(
+    uint32_t sram_addr_ifm,
+    uint32_t sram_addr_weight,
+    uint32_t sram_addr_ofm,
+    uint32_t acc_addr_psum,
+    int32_t  c_in,
+    int32_t  k_h,
+    int32_t  k_w,
+    int32_t  stride,
+    int32_t  dilation,
+    int32_t  i_cin,
+    int32_t  t_cout,
+    int32_t  t_h_out,
+    int32_t  t_w_out,
+    int32_t  t_cin,
+    uint16_t quant_scale,
+    uint16_t quant_scaleshift,
+    bool     relu_enable,
+    uint8_t  relu_type,
+    bool     bias_enable,
+    bool     is_group_conv
+
+) {
+    if (g_npu_runtime) {
+        NpuConvTileConfig cfg = {
+            sram_addr_ifm,
+            sram_addr_weight,
+            sram_addr_ofm,
+            acc_addr_psum,
+            c_in,
+            k_h,
+            k_w,
+            stride,
+            dilation,
+            i_cin,
+            t_cout,
+            t_h_out,
+            t_w_out,
+            t_cin,
+            quant_scale,
+            quant_scaleshift,
+            relu_enable,
+            relu_type,
+            bias_enable,
+            is_group_conv
+        };
+        g_npu_runtime->run_conv_tile(cfg);
+    }
+}
+
+
 void npu_gemm_run(
     bool dataflow, uint8_t int_type, uint8_t optype, bool accout_dest,
     uint16_t input_a_zeropoint, uint16_t input_b_zeropoint,
@@ -977,14 +1327,18 @@ void npu_transpose_run(
     uint32_t input_sram_addr,
     uint32_t output_sram_addr,
     uint16_t col_num,
-    uint16_t row_num
+    uint16_t row_num,
+    bool     out_padding_row,
+    bool     out_padding_col
 ) {
     if (g_npu_runtime) {
         TransposeConfig cfg = {
             input_sram_addr,
             output_sram_addr,
             col_num,
-            row_num
+            row_num,
+            out_padding_row,
+            out_padding_col
         };
         g_npu_runtime->run_transpose(cfg);
     }
@@ -1008,6 +1362,34 @@ void npu_resample_run(
             input_row_num
         };
         g_npu_runtime->run_resample(cfg);
+    }
+}
+
+void npu_layout_nchw_to_nchwc32(
+    uint32_t sram_addr,
+    uint32_t output_addr,
+    uint16_t n,
+    uint16_t c,
+    uint16_t h,
+    uint16_t w
+) {
+    if (g_npu_runtime) {
+        LayoutConvertConfig cfg = {sram_addr, output_addr, n, c, h, w};
+        g_npu_runtime->run_nchw_to_nchwc32(cfg);
+    }
+}
+
+void npu_layout_nchwc32_to_nchw(
+    uint32_t sram_addr,
+    uint32_t output_addr,
+    uint16_t n,
+    uint16_t c,
+    uint16_t h,
+    uint16_t w
+) {
+    if (g_npu_runtime) {
+        LayoutConvertConfig cfg = {sram_addr, output_addr, n, c, h, w};
+        g_npu_runtime->run_nchwc32_to_nchw(cfg);
     }
 }
 

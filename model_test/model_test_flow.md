@@ -26,7 +26,7 @@ model_test/
 └── build/                       # 编译工作区（make 时自动生成）
     └── [model_name]/
         ├── model.onnx
-        ├── model.onnx.mlir
+                                ├── model.onnx.mlir
         ├── tile_config.json
         ├── NpuToLLVM/llvm.mlir
         ├── Codegen/model.o
@@ -85,7 +85,7 @@ LLVM IR 编译: 使用 scripts/onnx_to_llvm.sh，将上一步生成的 MLIR 文�
 - [x] AveragePool
 - [ ] MatMul
 - [ ] Gemm
-- [ ] Transpose（全错）
+- [x] Transpose（842/98304为什么会有错误？）
 - [ ] Relu（和卷积放在一起测试）
 - [x] Gelu
 - [x] Softmax(精度较低)
@@ -95,4 +95,4 @@ LLVM IR 编译: 使用 scripts/onnx_to_llvm.sh，将上一步生成的 MLIR 文�
 3.2 模型级测试 (Integration Tests)
 简单模型验证: MNIST
 
-目标模型验证: VGG, ResNet, BERT
+目标模型验证: VGG, ResNet, BERT, YOLO

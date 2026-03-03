@@ -129,10 +129,19 @@ static llvm::cl::list<TargetKind, std::vector<TargetKind>> targetOpt(
 
 std::vector<NpuOp> NpuOps;
 bool hasNpuOp(NpuOp npuOp) {
+  bool hasNone = false;
+  bool hasAll = false;
+  bool hasSpecific = false;
+
     for (auto op : NpuOps) {
-        if (op == npuOp) return true;
+    if (op == NpuOp::None) hasNone = true;
+    if (op == NpuOp::All) hasAll = true;
+    if (op == npuOp) hasSpecific = true;
     }
-    return false;
+
+  if (npuOp == NpuOp::None) return hasNone;
+  if (hasNone) return false;
+  return hasAll || hasSpecific;
 }
 
 static llvm::cl::list<NpuOp, std::vector<NpuOp>> npuOpOpt(
@@ -140,6 +149,7 @@ static llvm::cl::list<NpuOp, std::vector<NpuOp>> npuOpOpt(
     llvm::cl::desc("Specify NPU operations to accelerate (comma separated)."),
     llvm::cl::location(NpuOps), 
     llvm::cl::values(
+      clEnumValN(NpuOp::All, "all", "Accelerate all NPU-supported operations"),
         clEnumValN(NpuOp::Conv, "Conv", "Accelerate Conv operation"),
         clEnumValN(NpuOp::MatMul, "MatMul", "Accelerate MatMul operation"),
         clEnumValN(NpuOp::LayerNorm, "LayerNorm", "Accelerate LayerNormalization operation"),

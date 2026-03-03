@@ -124,6 +124,54 @@ struct ConvConfig {
     uint16_t quant_scaleshift;
 };
 
+// ==========================================
+// Micro-Tiling Conv Tile API
+// ==========================================
+// 本函数只负责单个 cout block 的 micro-tile 计算（j_h × j_w × j_cin 三层循环）。
+// IFM / Weight / Bias 的 MVIN，OFM 的 MVOUT，以及 j_cout 循环均由调用者完成。
+// Padding 由编译器在 IFM 数据上预处理完毕，硬件侧 padding 全部为 0。
+// 对称量化：所有 zeropoint 均为 0，不在此结构体中暴露。
+//
+// Layout:
+//   IFM/OFM : NCHWC32 — [C/32][H][W][32]
+//   Weight  : blocked — (Cout/32)*(Cin/32)*Kh*Kw*32*32
+//   c_in / t_cin / t_cout 必须是 32 的整数倍（需提前 pad）
+struct NpuConvTileConfig {
+    // ---- SPM / ACC 基地址（由调用者预先 MVIN 完毕） ----
+    uint32_t sram_addr_ifm;     // IFM 在 SPM 中的基地址，布局 [cin_blk][h][w][32]
+    uint32_t sram_addr_weight;  // Weight 在 SPM 中的基地址，布局 [cin_blk]*Kh*Kw*32*32（单个 cout block）
+    uint32_t sram_addr_ofm;     // OFM 在 SPM 中的基地址（最后一轮 cin 时写出到此处）
+    uint32_t acc_addr_psum;     // Partial sum 在 ACC 中的基地址（中间 cin 轮次累加用）
+                                // Bias 由调用者 MVIN 到 ACC bias 寄存器，硬件 is_bias=1 时自动读取
+
+    // ---- 全局张量维度 ----
+    int32_t c_in;               // 完整 IFM 输入通道数（padded to 32），用于判断 is_last_cin_global
+
+    // ---- 卷积参数 ----
+    int32_t k_h;                // 卷积核高度，写入 weight_shape_m1 并计算 IFM 感受野
+    int32_t k_w;                // 卷积核宽度，计算 IFM 感受野和 weight_block_size
+    int32_t stride;             // 卷积步长，写入 weight_stride_m1 并计算 IFM 感受野
+    int32_t dilation;           // 膨胀系数，写入 weight_dilation_m1 并计算 IFM 感受野
+
+    // ---- 宏 tile 索引与尺寸 ----
+    int32_t i_cin;              // 当前 tile 在 cin 维度的全局起始位置（必须是 32 的倍数）
+                                // 用于判断 is_first/last_cin_global → 控制 bias 加法 / psum 累加 / relu / 输出去向
+    int32_t t_cout;             // 当前 tile 的 cout 大小（仅用于校验，通常等于 SA_SIZE=32）
+    int32_t t_h_out;            // 当前 tile 的输出高度，作为 j_h 循环的上界
+    int32_t t_w_out;            // 当前 tile 的输出宽度，作为 j_w 循环的上界及 stride/offset 计算
+    int32_t t_cin;              // 当前 tile 的 cin 大小，作为 j_cin 循环的上界
+
+    // ---- 量化 / 激活（仅在最后一轮 cin 输出到 SPM 时生效） ----
+    uint16_t quant_scale;       // ACC→SPM 反量化 scale
+    uint16_t quant_scaleshift;  // ACC→SPM 反量化 shift
+    bool     relu_enable;       // 是否启用 ReLU
+    uint8_t  relu_type;         // ReLU 类型: 0=relu, 1=relu6, 2=leaky(0.1), 3=leaky(0.2), 4=leaky(0.01)
+    bool     bias_enable;       // 是否启用 bias（仅在首轮 cin 生效）
+
+    // ---- 分组卷积（预留） ----
+    bool is_group_conv;         // 是否分组卷积，直接传给 ConvConfig
+};
+
 struct GemmConfig {
     // config_compute
     bool     dataflow;            // 1-bit: 0=im2col & OS, 1=OS only，只支持os，填1（卷积时填0）
@@ -184,6 +232,8 @@ struct TransposeConfig {
     uint32_t output_sram_addr;  // 输出矩阵在 SPM 中的地址
     uint16_t col_num;           // 列数 (Width - 1)
     uint16_t row_num;           // 行数 (Height - 1)
+    bool     out_padding_row;   // 输出行方向是否补零
+    bool     out_padding_col;   // 输出列方向是否补零
 };
 
 struct ResampleConfig {
@@ -194,6 +244,15 @@ struct ResampleConfig {
     uint32_t output_sram_addr;  // 输出数据在 SPM 中的地址
     uint16_t input_col_num;     // 输入列数 (Width - 1)
     uint16_t input_row_num;     // 输入行数 (Height - 1)
+};
+
+struct LayoutConvertConfig {
+    uint32_t sram_addr;      // 输入地址 (SPM)
+    uint32_t output_addr;    // 输出地址 (SPM)
+    uint16_t n;              // batch size
+    uint16_t c;              // channel 数
+    uint16_t h;              // height
+    uint16_t w;              // width
 };
 
 // ==========================================
@@ -224,6 +283,9 @@ public:
     void run_matadd(const MataddConfig& cfg);
     void run_transpose(const TransposeConfig& cfg);
     void run_resample(const ResampleConfig& cfg);
+    void run_nchw_to_nchwc32(const LayoutConvertConfig& cfg);
+    void run_nchwc32_to_nchw(const LayoutConvertConfig& cfg);
+    int run_conv_tile(const NpuConvTileConfig& cfg);
 
     // --- Memory Allocator (Heap) ---
     void* alloc(size_t size);
@@ -393,6 +455,31 @@ extern "C" {
         uint16_t quant_scaleshift
     );
 
+
+    // Micro-tiling conv tile
+    void npu_conv_tile_run(
+        uint32_t sram_addr_ifm,
+        uint32_t sram_addr_weight,
+        uint32_t sram_addr_ofm,
+        uint32_t acc_addr_psum,
+        int32_t  c_in,
+        int32_t  k_h,
+        int32_t  k_w,
+        int32_t  stride,
+        int32_t  dilation,
+        int32_t  i_cin,
+        int32_t  t_cout,
+        int32_t  t_h_out,
+        int32_t  t_w_out,
+        int32_t  t_cin,
+        uint16_t quant_scale,
+        uint16_t quant_scaleshift,
+        bool     relu_enable,
+        uint8_t  relu_type,
+        bool     bias_enable,
+        bool     is_group_conv
+    );
+
     void npu_gemm_run(
         bool     dataflow,         // 1-bit: 0=im2col & OS, 1=OS only
         uint8_t  int_type,         // 2-bit
@@ -440,7 +527,9 @@ extern "C" {
         uint32_t input_sram_addr,   // 输入矩阵在 SPM 中的地址
         uint32_t output_sram_addr,  // 输出矩阵在 SPM 中的地址
         uint16_t col_num,           // 列数 (Width - 1)
-        uint16_t row_num            // 行数 (Height - 1)
+        uint16_t row_num,           // 行数 (Height - 1)
+        bool     out_padding_row,   // 输出行方向是否补零
+        bool     out_padding_col    // 输出列方向是否补零
     );
 
     // Resample Operation (via SFU)
@@ -453,6 +542,25 @@ extern "C" {
         uint32_t output_sram_addr,  // 输出数据在 SPM 中的地址
         uint16_t input_col_num,     // 输入列数 (Width - 1)
         uint16_t input_row_num      // 输入行数 (Height - 1)
+    );
+
+    // Layout Convert (NCHW <-> NCHWC32 / NHWC)
+    void npu_layout_nchw_to_nchwc32(
+        uint32_t sram_addr,
+        uint32_t output_addr,
+        uint16_t n,
+        uint16_t c,
+        uint16_t h,
+        uint16_t w
+    );
+
+    void npu_layout_nchwc32_to_nchw(
+        uint32_t sram_addr,
+        uint32_t output_addr,
+        uint16_t n,
+        uint16_t c,
+        uint16_t h,
+        uint16_t w
     );
 
     // Test Interface

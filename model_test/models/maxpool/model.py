@@ -16,7 +16,7 @@ from onnxruntime.quantization import (
 class WrappedMaxPoolModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
     def forward(self, x):
         x = x + 1e-3

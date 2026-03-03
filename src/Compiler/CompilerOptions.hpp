@@ -71,6 +71,7 @@ enum class TargetKind {
 
 enum class NpuOp {
     None,
+    All,
     Conv,
     MatMul,
     LayerNorm,

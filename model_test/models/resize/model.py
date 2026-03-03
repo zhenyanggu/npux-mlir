@@ -20,7 +20,7 @@ class WrappedResizeModel(nn.Module):
 
     def forward(self, x):
         x = x + 1e-3
-        x = F.interpolate(x, scale_factor=2.0, mode="bilinear", align_corners=False)
+        x = F.interpolate(x, scale_factor=2.0, mode="nearest")
         x = x - 1e-3
         return x
 

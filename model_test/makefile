@@ -160,9 +160,10 @@ $(BUILD_DIR)/%/.llvm.stamp: $(BUILD_DIR)/%/.mlir.stamp
 $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 	@model="$*"; \
 	work_dir="$(BUILD_DIR)/$$model"; \
-	output_dir="$$work_dir/output"; \
+	output_root="$(BUILD_DIR)/output"; \
+	output_dir="$$output_root/$$model"; \
 	llvm_mlir="$$work_dir/NpuToLLVM/llvm.mlir"; \
-	output_bin_rel="output/$${model}_zcu102"; \
+	output_bin="$$output_dir/$${model}_zcu102"; \
 	compile_script="$(SCRIPTS_DIR)/compile_to_zcu102.sh"; \
 	if [[ ! -f "$$compile_script" ]]; then \
 		echo "[error] 缺少脚本: $$compile_script"; \
@@ -177,8 +178,8 @@ $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 		exit 2; \
 	fi; \
 	mkdir -p "$$output_dir"; \
-	echo "[zcu102] $$llvm_mlir -> $$work_dir/$$output_bin_rel"; \
-	(cd "$$work_dir" && bash "$$compile_script" "NpuToLLVM/llvm.mlir" "$$output_bin_rel") || { echo "[error] $$model 交叉编译失败"; exit 2; }; \
+	echo "[zcu102] $$llvm_mlir -> $$output_bin"; \
+	(cd "$$work_dir" && bash "$$compile_script" "NpuToLLVM/llvm.mlir" "$$output_bin") || { echo "[error] $$model 交叉编译失败"; exit 2; }; \
 	if [[ -f "$$work_dir/$${model}_input.bin" ]]; then \
 		mv -f "$$work_dir/$${model}_input.bin" "$$output_dir/$${model}_input.bin"; \
 	elif [[ -f "$$work_dir/input.bin" ]]; then \
@@ -199,7 +200,9 @@ clean:
 	@if [[ -n "$(SELECTIVE_CLEAN_MODELS)" ]]; then \
 		for model in $(SELECTIVE_CLEAN_MODELS); do \
 			rm -rf "$(BUILD_DIR)/$$model"; \
+			rm -rf "$(BUILD_DIR)/output/$$model"; \
 			echo "[clean] removed $(BUILD_DIR)/$$model"; \
+			echo "[clean] removed $(BUILD_DIR)/output/$$model"; \
 		done; \
 	else \
 		rm -rf $(BUILD_DIR); \
