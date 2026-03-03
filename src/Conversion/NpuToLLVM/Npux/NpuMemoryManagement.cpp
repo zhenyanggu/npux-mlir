@@ -138,8 +138,8 @@ public:
     auto shape = dramType.getShape();
     auto [rows, cols] = getFlattened2DShape(shape);
 
-    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols-1, 16);
-    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows-1, 16);
+    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols-1, 32);
+    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows-1, 32);
 
     // 2. 获取 DRAM Strides
     int64_t offset;
@@ -159,12 +159,24 @@ public:
       dramStrideVal = 0;
     }
 
-    Value vDramStride = rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 16);
+    Value vDramStride = rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 32);
 
     // 3. 获取 SRAM Strides
     // 通常 SRAM 是连续的，stride 等于 cols。但如果 SRAM 也有 layout，应从 sramType 获取
     // 这里暂时保持和 cols 一致，或者通过 sramType 计算
-    Value vSramStride = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
+    //
+    // 注意：当前硬件 stride 仍为 16-bit。
+    // - cols > 65536 且 rows > 1：stride 必然溢出，直接报错退出。
+    // - cols > 65536 且 rows == 1：stride 不会被使用，置 0 避免 16-bit 截断风险。
+    constexpr int64_t kStride16Limit = 65536;
+    if (cols > kStride16Limit && rows > 1) {
+      op.emitError("DMA shape unsupported: cols > 65536 with multi-row transfer overflows 16-bit stride");
+      return failure();
+    }
+
+    int64_t sramStrideVal = (cols > kStride16Limit && rows == 1) ? 0 : cols;
+    Value vSramStride =
+        rewriter.create<arith::ConstantIntOp>(loc, sramStrideVal, 16);
 
     // 4. Precision Logic (从数据源获取类型)
     // 无论是 mvin 还是 mvout，元素类型通常是一致的

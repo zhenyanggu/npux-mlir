@@ -18,8 +18,8 @@
 struct MvinConfig {
     void* host_ptr;        // 虚拟地址指针
     uint32_t sram_addr;    
-    uint16_t col_num;
-    uint16_t row_num;
+    uint32_t col_num;
+    uint32_t row_num;
     uint16_t sram_stride;//row num=0是随便配置
     uint32_t dram_stride;//同上
     uint8_t  precision;    // 2-bit: 数据精度，01是int8，int32也是int8，所以全部配1
@@ -35,8 +35,8 @@ struct MvinConfig {
 struct MvoutConfig {
     void* host_ptr;      // 虚拟地址指针
     uint32_t sram_addr;
-    uint16_t col_num;
-    uint16_t row_num;
+    uint32_t col_num;
+    uint32_t row_num;
     uint16_t sram_stride;
     uint32_t dram_stride;
     uint8_t  precision;    // 2-bit: 数据精度：仍然全1
@@ -368,8 +368,8 @@ extern "C" {
     void npu_dma_mvin(
         void* host_ptr,
         uint32_t sram_addr,
-        uint16_t col_num,
-        uint16_t row_num,
+        uint32_t col_num,
+        uint32_t row_num,
         uint16_t sram_stride,
         uint32_t dram_stride,
         uint8_t  precision,    // 2-bit
@@ -385,8 +385,8 @@ extern "C" {
     void npu_dma_mvout(
         void* host_ptr,
         uint32_t sram_addr,
-        uint16_t col_num,
-        uint16_t row_num,
+        uint32_t col_num,
+        uint32_t row_num,
         uint16_t sram_stride,
         uint32_t dram_stride,
         uint8_t  precision,    // 2-bit
@@ -567,8 +567,8 @@ extern "C" {
     void npu_dma_mvin_test(
         void* host_ptr,
         uint32_t sram_addr,
-        uint16_t col_num,
-        uint16_t row_num,
+        uint32_t col_num,
+        uint32_t row_num,
         uint16_t sram_stride,
         uint32_t dram_stride,
         uint8_t  precision,    // 2-bit
@@ -584,8 +584,8 @@ extern "C" {
     void npu_dma_mvout_test(
         void* host_ptr,
         uint32_t sram_addr,
-        uint16_t col_num,
-        uint16_t row_num,
+        uint32_t col_num,
+        uint32_t row_num,
         uint16_t sram_stride,
         uint32_t dram_stride,
         uint8_t  precision,    // 2-bit

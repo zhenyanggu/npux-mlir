@@ -359,10 +359,10 @@ public:
     SmallVector<Value> args;
     args.push_back(hostPtr);
     args.push_back(dstAddr);
-    args.push_back(adaptor.getColNum());     // i16
-    args.push_back(adaptor.getRowNum());     // i16
+    args.push_back(adaptor.getColNum());     // i32
+    args.push_back(adaptor.getRowNum());     // i32
     args.push_back(adaptor.getSramStride()); // i16
-    args.push_back(adaptor.getDramStride()); // i16
+    args.push_back(adaptor.getDramStride()); // i32
     args.push_back(adaptor.getPrecision());  // i8
     args.push_back(adaptor.getInputType());  // i8
 
