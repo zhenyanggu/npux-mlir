@@ -102,7 +102,7 @@ echo ">>> Tiling Config: $TILING_CONFIG"
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg --npu-ops=all --npu-tiling-config=$TILING_CONFIG" \
+         "--convert-npu-onnx-to-linalg --npu-ops=Conv,MatMul,LayerNorm,Softmax,Gelu,Gemm,Transpose,MaxPool,AveragePool,Resize --npu-tiling-config=$TILING_CONFIG" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
@@ -142,7 +142,7 @@ run_pass "Insert Dma " \
          "NpuInsertDma.mlir"
 
 run_pass "Op Splitting " \
-         "--npu-op-splitting" \
+         "--npu-op-splitting --npu-remove-redundant-dma" \
          "NpuOpSplitting.mlir"
 
 # ------------------------------------------------
