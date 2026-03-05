@@ -113,7 +113,7 @@ public:
     Value vOutZp = rewriter.create<arith::ConstantIntOp>(loc, outZp, 16); 
 
     // F. 其他配置
-    int8_t intTypeVal = 8; 
+    int8_t intTypeVal = 0;//更正，这个只支持0 
     if (inType.getElementType().isInteger(16)) intTypeVal = 16;
     else if (inType.getElementType().isInteger(32)) intTypeVal = 32;
     Value vIntType = rewriter.create<arith::ConstantIntOp>(loc, intTypeVal, 8);

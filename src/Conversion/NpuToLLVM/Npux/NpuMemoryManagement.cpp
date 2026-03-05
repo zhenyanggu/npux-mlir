@@ -204,7 +204,7 @@ public:
     }
 
     Value vDramStride =
-        rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 16);
+      rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 32);
 
     // 3. 获取 SRAM Strides
     // 通常 SRAM 是连续的，stride 等于 cols。但如果 SRAM 也有 layout，应从
