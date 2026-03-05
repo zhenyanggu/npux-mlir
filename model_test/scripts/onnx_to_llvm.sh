@@ -102,7 +102,7 @@ echo ">>> Tiling Config: $TILING_CONFIG"
 enter_stage "NpuPartition"
 
 run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg --npu-ops=Conv,MatMul,LayerNorm,Softmax,Gelu,Gemm,Transpose,MaxPool,AveragePool,Resize --npu-tiling-config=$TILING_CONFIG" \
+         "--convert-npu-onnx-to-linalg --npu-ops=Conv,MatMul,LayerNorm,Softmax,Gelu,Gemm,Transpose,MaxPool --npu-tiling-config=$TILING_CONFIG" \
          "ConvertONNXToLinalgNpu.mlir"
 
 run_pass "Op Merge" \
