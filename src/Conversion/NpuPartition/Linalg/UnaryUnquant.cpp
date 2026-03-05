@@ -146,6 +146,11 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
     Value input = op.getX();
     auto outputType = mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
     if (!outputType) return failure();
+    auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
+    if (!inputType || inputType.getRank() != 4 || outputType.getRank() != 4) {
+      op.emitWarning() << "ONNXMaxPool lowering to NPU resample requires NCHW (4D) tensors.";
+      return failure();
+    }
 
     QuantizedContext ctx;
     if (failed(handleQuantizationContext(op, input, outputType, rewriter, ctx))) {
@@ -184,10 +189,17 @@ struct AveragePoolToLinalg : public OpConversionPattern<ONNXAveragePoolOp> {
 
   LogicalResult matchAndRewrite(ONNXAveragePoolOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter) const override {
+    op.emitWarning() << "NPU backend does not support AveragePool currently. Skip NPU lowering for this op.";
+    return failure();
 
     Value input = op.getX();
     auto outputType = mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
     if (!outputType) return failure();
+    auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
+    if (!inputType || inputType.getRank() != 4 || outputType.getRank() != 4) {
+      op.emitWarning() << "ONNXAveragePool lowering to NPU resample requires NCHW (4D) tensors.";
+      return failure();
+    }
 
     QuantizedContext ctx;
     if (failed(handleQuantizationContext(op, input, outputType, rewriter, ctx))) {
@@ -233,6 +245,11 @@ struct ResizeToLinalg : public OpConversionPattern<ONNXResizeOp> {
     Value input = op.getX();
     auto outputType = mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
     if (!outputType) return failure();
+    auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
+    if (!inputType || inputType.getRank() != 4 || outputType.getRank() != 4) {
+      op.emitWarning() << "ONNXResize lowering to NPU resample requires NCHW (4D) tensors.";
+      return failure();
+    }
 
     QuantizedContext ctx;
     if (failed(handleQuantizationContext(op, input, outputType, rewriter, ctx))) {
@@ -321,7 +338,7 @@ struct TransposeToLinalg : public OpConversionPattern<ONNXTransposeOp> {
 } // namespace
 
 void npux::populateLinalgResamplePatterns(RewritePatternSet &patterns) {
-  patterns.add<MaxPoolToLinalg, AveragePoolToLinalg, ResizeToLinalg>(patterns.getContext());
+  patterns.add<MaxPoolToLinalg>(patterns.getContext());
 }
 
 void npux::populateLinalgTransposePattern(RewritePatternSet &patterns) {

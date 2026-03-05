@@ -71,6 +71,17 @@
 
 #define NPU_ERR(fmt, ...) fprintf(stderr, "[NPU_ERROR] " fmt "\n", ##__VA_ARGS__)
 
+#ifndef NPU_CAPI_TRACE
+#define NPU_CAPI_TRACE 1
+#endif
+
+#if NPU_CAPI_TRACE
+    #define NPU_CAPI_LOG(fmt, ...) \
+        fprintf(stdout, "[NPU_CAPI] " fmt "\n", ##__VA_ARGS__)
+#else
+    #define NPU_CAPI_LOG(fmt, ...) do {} while(0)
+#endif
+
 // ==========================================
 // Constants & Definitions
 // ==========================================
@@ -846,11 +857,12 @@ void NpuRuntime::run_transpose(const TransposeConfig& cfg) {
     reg_write64_cached(RegOffset::CFG_SFU_1, val_cfg1, &shadow.sfu_cfg1);
     
     // 2. SFU Config 1 - Scale 参数置 0
-    uint64_t val_cfg2 = REG_FIELD(CFG_SFU1, IN_SCALE, 0) |
-                        REG_FIELD(CFG_SFU1, IN_SHIFT, 0) |
-                        REG_FIELD(CFG_SFU1, OUT_SCALE, 0) |
-                        REG_FIELD(CFG_SFU1, OUT_SHIFT, 0);
-    reg_write64_cached(RegOffset::CFG_SFU_2, val_cfg2, &shadow.sfu_cfg2);
+    // 同样不用配置量化参数
+    // uint64_t val_cfg2 = REG_FIELD(CFG_SFU1, IN_SCALE, 0) |
+    //                     REG_FIELD(CFG_SFU1, IN_SHIFT, 0) |
+    //                     REG_FIELD(CFG_SFU1, OUT_SCALE, 0) |
+    //                     REG_FIELD(CFG_SFU1, OUT_SHIFT, 0);
+    // reg_write64_cached(RegOffset::CFG_SFU_2, val_cfg2, &shadow.sfu_cfg2);
     
     // 3. SFU Input - 输入地址和尺寸
     uint64_t val_input = REG_FIELD(SFU_EXE0, IN_ADDR, cfg.input_sram_addr) |
@@ -885,22 +897,22 @@ void NpuRuntime::run_resample(const ResampleConfig& cfg) {
     // Resample 使用 SFU 模块实现
     // 根据 resample_type 和 resample_op 构造 SFU 操作码
     // 硬件使用 cfg_sfu_op 的低 2 位作为 resample_type，bit[2] 作为 resample_op
-    // SFU 操作码: 
+    // SFU 操作码:
     //   3 = DOWNSAMPLE_MAX (type=0, op=0 -> 最大值下采样)
     //   4 = DOWNSAMPLE_AVG (type=0, op=1 -> 平均值下采样)
     //   5 = UPSAMPLE_NEAREST (type=1, op=0 -> 最近邻上采样)
-    
+
     uint8_t sfu_op;
-    if (cfg.resample_type == RESAMPLE_TYPE_DOWNSAMPLE || 
+    if (cfg.resample_type == RESAMPLE_TYPE_DOWNSAMPLE ||
         cfg.resample_type == RESAMPLE_TYPE_POOLING) {
         // 下采样或池化
-        sfu_op = (cfg.resample_op == RESAMPLE_OP_MAX) ? 
+        sfu_op = (cfg.resample_op == RESAMPLE_OP_MAX) ?
                  SFU_OP_DOWNSAMPLE_MAX : SFU_OP_DOWNSAMPLE_AVG;
     } else {
         // 上采样 (当前仅支持最近邻)
         sfu_op = SFU_OP_UPSAMPLE_NEAREST;
     }
-    
+
     // 1. SFU Config 0 - 设置操作码
     uint64_t val_cfg1 = REG_FIELD(CFG_SFU0, OP, sfu_op) |
                         REG_FIELD(CFG_SFU0, INT_TYPE, 0) |  // int8
@@ -908,30 +920,83 @@ void NpuRuntime::run_resample(const ResampleConfig& cfg) {
                         REG_FIELD(CFG_SFU0, OUT_ZP, 0) |
                         REG_FIELD(CFG_SFU0, IN_ZP, 0);
     reg_write64_cached(RegOffset::CFG_SFU_1, val_cfg1, &shadow.sfu_cfg1);
-    
+
     // 2. SFU Config 1 - Scale 参数置 0
-    uint64_t val_cfg2 = REG_FIELD(CFG_SFU1, IN_SCALE, 0) |
-                        REG_FIELD(CFG_SFU1, IN_SHIFT, 0) |
-                        REG_FIELD(CFG_SFU1, OUT_SCALE, 0) |
-                        REG_FIELD(CFG_SFU1, OUT_SHIFT, 0);
-    reg_write64_cached(RegOffset::CFG_SFU_2, val_cfg2, &shadow.sfu_cfg2);
-    
-    // 3. SFU Input - 输入地址和尺寸
-    uint64_t val_input = REG_FIELD(SFU_EXE0, IN_ADDR, cfg.input_sram_addr) |
-                         REG_FIELD(SFU_EXE0, COL, cfg.input_col_num) |
-                         REG_FIELD(SFU_EXE0, ROW, cfg.input_row_num);
-    reg_write64(RegOffset::SFU_INPUT, val_input);
-    
-    // 4. SFU Output - 输出地址
-    uint64_t val_output = REG_FIELD(SFU_EXE1, OUT_ADDR, cfg.output_sram_addr);
-    reg_write64(RegOffset::SFU_OUTPUT, val_output);
-    
-    // 5. Start SFU
-    reg_write(RegOffset::START, BIT_START_SFU);
-    NPU_TIMER_SECTION_END()
-    
-    NPU_TIMER_SECTION_BEGIN("run_resample(wait_irq)")
-    wait_irq();
+    // 由于不涉及量化计算，量化参数随便是什么值，这里直接不写寄存器，减少寄存器访问
+    // uint64_t val_cfg2 = REG_FIELD(CFG_SFU1, IN_SCALE, 0) |
+    //                     REG_FIELD(CFG_SFU1, IN_SHIFT, 0) |
+    //                     REG_FIELD(CFG_SFU1, OUT_SCALE, 0) |
+    //                     REG_FIELD(CFG_SFU1, OUT_SHIFT, 0);
+    // reg_write64_cached(RegOffset::CFG_SFU_2, val_cfg2, &shadow.sfu_cfg2);
+
+    constexpr uint32_t HW_MAX_RESAMPLE_ROWS = 2048; // 实测硬件稳定上限（real rows）
+    const uint32_t in_cols = static_cast<uint32_t>(cfg.input_col_num) + 1;
+    const uint32_t total_rows = static_cast<uint32_t>(cfg.input_row_num) + 1;
+
+    auto output_cols_from_input_cols = [&](uint32_t cols) -> uint32_t {
+        if (cfg.resample_type == RESAMPLE_TYPE_UPSAMPLE) {
+            return cols << 1;
+        }
+        // downsample / pooling
+        return (cols + 1) >> 1;
+    };
+
+    auto output_rows_from_input_rows = [&](uint32_t rows) -> uint32_t {
+        if (cfg.resample_type == RESAMPLE_TYPE_UPSAMPLE) {
+            return rows << 1;
+        }
+        // downsample / pooling
+        return (rows + 1) >> 1;
+    };
+
+    uint32_t row_base = 0;      // 输入已处理 real-row 数
+    uint32_t out_row_base = 0;  // 输出已生成 real-row 数
+
+    while (row_base < total_rows) {
+        uint32_t remain = total_rows - row_base;
+        uint32_t chunk_rows = (remain > HW_MAX_RESAMPLE_ROWS) ? HW_MAX_RESAMPLE_ROWS : remain;
+
+        // 对于 downsample/pooling，非最后一块需要偶数行，避免 2x2 跨块配对问题
+        if ((cfg.resample_type == RESAMPLE_TYPE_DOWNSAMPLE || cfg.resample_type == RESAMPLE_TYPE_POOLING) &&
+            (row_base + chunk_rows < total_rows) &&
+            (chunk_rows & 1U)) {
+            chunk_rows -= 1U;
+        }
+
+        if (chunk_rows == 0) {
+            NPU_ERR("run_resample chunking failed: zero chunk rows (total_rows=%u, row_base=%u)",
+                    total_rows, row_base);
+            break;
+        }
+
+        uint32_t in_addr_chunk = cfg.input_sram_addr + row_base * in_cols;
+        uint32_t out_cols = output_cols_from_input_cols(in_cols);
+        uint32_t out_addr_chunk = cfg.output_sram_addr + out_row_base * out_cols;
+
+        // 3. SFU Input - 输入地址和尺寸（按块）
+        uint64_t val_input = REG_FIELD(SFU_EXE0, IN_ADDR, in_addr_chunk) |
+                             REG_FIELD(SFU_EXE0, COL, cfg.input_col_num) |
+                             REG_FIELD(SFU_EXE0, ROW, static_cast<uint16_t>(chunk_rows - 1));
+        reg_write64(RegOffset::SFU_INPUT, val_input);
+
+        // 4. SFU Output - 输出地址（按块）
+        uint64_t val_output = REG_FIELD(SFU_EXE1, OUT_ADDR, out_addr_chunk);
+        reg_write64(RegOffset::SFU_OUTPUT, val_output);
+
+        // 5. Start SFU
+        reg_write(RegOffset::START, BIT_START_SFU);
+
+        NPU_TIMER_SECTION_END()
+
+        NPU_TIMER_SECTION_BEGIN("run_resample(wait_irq)")
+        wait_irq();
+        NPU_TIMER_SECTION_END()
+
+        NPU_TIMER_SECTION_BEGIN("run_resample(reg_write)")
+        row_base += chunk_rows;
+        out_row_base += output_rows_from_input_rows(chunk_rows);
+    }
+
     NPU_TIMER_SECTION_END()
 }
 
@@ -1130,6 +1195,7 @@ void NpuRuntime::coalesce(BlockHeader* block) {
 extern "C" {
 
 int npu_init() {
+    NPU_CAPI_LOG("npu_init()");
     if (g_npu_runtime) return 0;
     g_npu_runtime = new NpuRuntime();
     if (!g_npu_runtime->init()) {
@@ -1140,29 +1206,49 @@ int npu_init() {
 }
 
 void npu_destroy() {
+    NPU_CAPI_LOG("npu_destroy()");
     if (g_npu_runtime) { delete g_npu_runtime; g_npu_runtime = nullptr; }
 }
 
 void npu_reset() { // <--- [新增]
+    NPU_CAPI_LOG("npu_reset()");
     if (g_npu_runtime) {
         g_npu_runtime->reset();
     }
 }
 
 void* npu_mem_alloc(size_t size) {
+    NPU_CAPI_LOG("npu_mem_alloc(size=%zu)", size);
     if (!g_npu_runtime && npu_init() < 0) return nullptr;
     return g_npu_runtime->alloc(size);
 }
 
 void npu_mem_free(void* ptr) {
+    NPU_CAPI_LOG("npu_mem_free(ptr=%p)", ptr);
     if (g_npu_runtime) g_npu_runtime->free(ptr);
 }
 
 void npu_dma_mvin(
-    void* host_ptr, uint32_t sram_addr, uint16_t col_num, uint16_t row_num,
+    void* host_ptr, uint32_t sram_addr, uint32_t col_num, uint32_t row_num,
     uint16_t sram_stride, uint32_t dram_stride, uint8_t precision, uint8_t input_type,
     bool dest, bool is_bias, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift
 ) {
+    NPU_CAPI_LOG(
+        "npu_dma_mvin(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, input_type=%u, dest=%d, is_bias=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        host_ptr,
+        sram_addr,
+        (unsigned)col_num,
+        (unsigned)row_num,
+        (unsigned)sram_stride,
+        dram_stride,
+        (unsigned)precision,
+        (unsigned)input_type,
+        (int)dest,
+        (int)is_bias,
+        (int)is_quant,
+        quant_zero,
+        (unsigned)quant_scale,
+        (unsigned)quant_shift);
     if (g_npu_runtime) {
         MvinConfig cfg = {host_ptr, sram_addr, col_num, row_num, sram_stride, dram_stride,
                           precision, input_type, dest, is_bias, is_quant, quant_zero, quant_scale, quant_shift};
@@ -1171,10 +1257,25 @@ void npu_dma_mvin(
 }
 
 void npu_dma_mvout(
-    void* host_ptr, uint32_t sram_addr, uint16_t col_num, uint16_t row_num,
+    void* host_ptr, uint32_t sram_addr, uint32_t col_num, uint32_t row_num,
     uint16_t sram_stride, uint32_t dram_stride, uint8_t precision, uint8_t output_type,
     bool source, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift
 ) {
+    NPU_CAPI_LOG(
+        "npu_dma_mvout(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, output_type=%u, source=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        host_ptr,
+        sram_addr,
+        (unsigned)col_num,
+        (unsigned)row_num,
+        (unsigned)sram_stride,
+        dram_stride,
+        (unsigned)precision,
+        (unsigned)output_type,
+        (int)source,
+        (int)is_quant,
+        quant_zero,
+        (unsigned)quant_scale,
+        (unsigned)quant_shift);
     if (g_npu_runtime) {
         MvoutConfig cfg = {host_ptr, sram_addr, col_num, row_num, sram_stride, dram_stride,
                            precision, output_type, source, is_quant, quant_zero, quant_scale, quant_shift};
@@ -1188,6 +1289,21 @@ void npu_sfu_run(
     uint32_t input_zeropoint, uint16_t output_zeropoint, uint16_t input_scale,
     uint16_t input_scale_shift, uint16_t output_scale, uint16_t output_scale_shift
 ) {
+    NPU_CAPI_LOG(
+        "npu_sfu_run(op_type=%u, int_type=%u, is_quant=%d, input_sram_addr=0x%08X, input_col_num=%u, input_row_num=%u, output_sram_addr=0x%08X, input_zeropoint=%u, output_zeropoint=%u, input_scale=%u, input_scale_shift=%u, output_scale=%u, output_scale_shift=%u)",
+        (unsigned)op_type,
+        (unsigned)int_type,
+        (int)is_quant,
+        input_sram_addr,
+        (unsigned)input_col_num,
+        (unsigned)input_row_num,
+        output_sram_addr,
+        input_zeropoint,
+        (unsigned)output_zeropoint,
+        (unsigned)input_scale,
+        (unsigned)input_scale_shift,
+        (unsigned)output_scale,
+        (unsigned)output_scale_shift);
     if (g_npu_runtime) {
         SfuConfig cfg = {op_type, int_type, is_quant, input_sram_addr, input_col_num, input_row_num,
                          output_sram_addr, input_zeropoint, output_zeropoint, input_scale,
@@ -1207,6 +1323,44 @@ void npu_conv_run(
     uint32_t output_addr, uint16_t output_stride, bool is_accumulate, bool relu_enable, uint8_t relu_type,
     bool is_bias, uint32_t output_zeropoint, uint16_t quant_scale, uint16_t quant_scaleshift
 ) {
+    NPU_CAPI_LOG(
+        "npu_conv_run(pad=[%u,%u,%u,%u], pad_mode=%u, weight_shape_m1=%u, weight_stride_m1=%u, weight_dilation_m1=%u, is_group_conv=%d, int_type=%u, op_type=%u, dataflow_mode=%d, accout_dest=%d, input_a_zeropoint=%u, input_b_zeropoint=%u, input_a_addr=0x%08X, input_a_col_num_m1=%u, input_a_row_num_m1=%u, input_a_stride=%u, input_b_addr=0x%08X, input_b_col_num_m1=%u, input_b_row_num_m1=%u, input_b_stride=%u, biaspsum_width=%u, biaspsum_height=%u, biaspsum_addr=0x%08X, biaspsum_stride=%u, output_addr=0x%08X, output_stride=%u, is_accumulate=%d, relu_enable=%d, relu_type=%u, is_bias=%d, output_zeropoint=%u, quant_scale=%u, quant_scaleshift=%u)",
+        (unsigned)pad_top,
+        (unsigned)pad_bottom,
+        (unsigned)pad_left,
+        (unsigned)pad_right,
+        (unsigned)pad_mode,
+        (unsigned)weight_shape_m1,
+        (unsigned)weight_stride_m1,
+        (unsigned)weight_dilation_m1,
+        (int)is_group_conv,
+        (unsigned)int_type,
+        (unsigned)op_type,
+        (int)dataflow_mode,
+        (int)accout_dest,
+        (unsigned)input_a_zeropoint,
+        (unsigned)input_b_zeropoint,
+        input_a_addr,
+        (unsigned)input_a_col_num_m1,
+        (unsigned)input_a_row_num_m1,
+        (unsigned)input_a_stride,
+        input_b_addr,
+        (unsigned)input_b_col_num_m1,
+        (unsigned)input_b_row_num_m1,
+        (unsigned)input_b_stride,
+        (unsigned)biaspsum_width,
+        (unsigned)biaspsum_height,
+        biaspsum_addr,
+        (unsigned)biaspsum_stride,
+        output_addr,
+        (unsigned)output_stride,
+        (int)is_accumulate,
+        (int)relu_enable,
+        (unsigned)relu_type,
+        (int)is_bias,
+        output_zeropoint,
+        (unsigned)quant_scale,
+        (unsigned)quant_scaleshift);
     if (g_npu_runtime) {
         ConvConfig cfg = {
             pad_top, pad_bottom, pad_left, pad_right, pad_mode,
@@ -1246,6 +1400,28 @@ void npu_conv_tile_run(
     bool     is_group_conv
 
 ) {
+    NPU_CAPI_LOG(
+        "npu_conv_tile_run(sram_addr_ifm=0x%08X, sram_addr_weight=0x%08X, sram_addr_ofm=0x%08X, acc_addr_psum=0x%08X, c_in=%d, k_h=%d, k_w=%d, stride=%d, dilation=%d, i_cin=%d, t_cout=%d, t_h_out=%d, t_w_out=%d, t_cin=%d, quant_scale=%u, quant_scaleshift=%u, relu_enable=%d, relu_type=%u, bias_enable=%d, is_group_conv=%d)",
+        sram_addr_ifm,
+        sram_addr_weight,
+        sram_addr_ofm,
+        acc_addr_psum,
+        c_in,
+        k_h,
+        k_w,
+        stride,
+        dilation,
+        i_cin,
+        t_cout,
+        t_h_out,
+        t_w_out,
+        t_cin,
+        (unsigned)quant_scale,
+        (unsigned)quant_scaleshift,
+        (int)relu_enable,
+        (unsigned)relu_type,
+        (int)bias_enable,
+        (int)is_group_conv);
     if (g_npu_runtime) {
         NpuConvTileConfig cfg = {
             sram_addr_ifm,
@@ -1284,6 +1460,35 @@ void npu_gemm_run(
     uint32_t input_a_addr, uint16_t input_a_col_num, uint8_t input_a_row_num, uint16_t input_a_stride,
     uint32_t input_b_addr, uint8_t input_b_col_num, uint16_t input_b_row_num, uint16_t input_b_stride
 ) {
+    NPU_CAPI_LOG(
+        "npu_gemm_run(dataflow=%d, int_type=%u, optype=%u, accout_dest=%d, input_a_zeropoint=%u, input_b_zeropoint=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%u, biaspsum_addr=0x%08X, biaspsum_stride=%u, biaspsum_width=%u, biaspsum_height=%u, output_addr=0x%08X, output_stride=%u, isaccu=%d, relu=%d, relu_type=%u, is_bias=%d, input_a_addr=0x%08X, input_a_col_num=%u, input_a_row_num=%u, input_a_stride=%u, input_b_addr=0x%08X, input_b_col_num=%u, input_b_row_num=%u, input_b_stride=%u)",
+        (int)dataflow,
+        (unsigned)int_type,
+        (unsigned)optype,
+        (int)accout_dest,
+        (unsigned)input_a_zeropoint,
+        (unsigned)input_b_zeropoint,
+        output_zeropoint,
+        (unsigned)output_scale,
+        (unsigned)output_scaleshift,
+        biaspsum_addr,
+        (unsigned)biaspsum_stride,
+        (unsigned)biaspsum_width,
+        (unsigned)biaspsum_height,
+        output_addr,
+        (unsigned)output_stride,
+        (int)isaccu,
+        (int)relu,
+        (unsigned)relu_type,
+        (int)is_bias,
+        input_a_addr,
+        (unsigned)input_a_col_num,
+        (unsigned)input_a_row_num,
+        (unsigned)input_a_stride,
+        input_b_addr,
+        (unsigned)input_b_col_num,
+        (unsigned)input_b_row_num,
+        (unsigned)input_b_stride);
     if (g_npu_runtime) {
         GemmConfig cfg = {
             dataflow, int_type, optype, accout_dest,
@@ -1308,6 +1513,16 @@ void npu_matadd_run(
     uint16_t output_scale,
     uint16_t output_scaleshift
 ) {
+    NPU_CAPI_LOG(
+        "npu_matadd_run(input_a_addr=0x%08X, input_b_addr=0x%08X, output_addr=0x%08X, col_num=%u, row_num=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%u)",
+        input_a_addr,
+        input_b_addr,
+        output_addr,
+        (unsigned)col_num,
+        (unsigned)row_num,
+        output_zeropoint,
+        (unsigned)output_scale,
+        (unsigned)output_scaleshift);
     if (g_npu_runtime) {
         MataddConfig cfg = {
             input_a_addr,
@@ -1331,6 +1546,14 @@ void npu_transpose_run(
     bool     out_padding_row,
     bool     out_padding_col
 ) {
+    NPU_CAPI_LOG(
+        "npu_transpose_run(input_sram_addr=0x%08X, output_sram_addr=0x%08X, col_num=%u, row_num=%u, out_padding_row=%d, out_padding_col=%d)",
+        input_sram_addr,
+        output_sram_addr,
+        (unsigned)col_num,
+        (unsigned)row_num,
+        (int)out_padding_row,
+        (int)out_padding_col);
     if (g_npu_runtime) {
         TransposeConfig cfg = {
             input_sram_addr,
@@ -1352,6 +1575,14 @@ void npu_resample_run(
     uint16_t input_col_num,
     uint16_t input_row_num
 ) {
+    NPU_CAPI_LOG(
+        "npu_resample_run(resample_type=%u, resample_op=%u, input_sram_addr=0x%08X, output_sram_addr=0x%08X, input_col_num=%u, input_row_num=%u)",
+        (unsigned)resample_type,
+        (unsigned)resample_op,
+        input_sram_addr,
+        output_sram_addr,
+        (unsigned)input_col_num,
+        (unsigned)input_row_num);
     if (g_npu_runtime) {
         ResampleConfig cfg = {
             resample_type,
@@ -1373,6 +1604,14 @@ void npu_layout_nchw_to_nchwc32(
     uint16_t h,
     uint16_t w
 ) {
+    NPU_CAPI_LOG(
+        "npu_layout_nchw_to_nchwc32(sram_addr=0x%08X, output_addr=0x%08X, n=%u, c=%u, h=%u, w=%u)",
+        sram_addr,
+        output_addr,
+        (unsigned)n,
+        (unsigned)c,
+        (unsigned)h,
+        (unsigned)w);
     if (g_npu_runtime) {
         LayoutConvertConfig cfg = {sram_addr, output_addr, n, c, h, w};
         g_npu_runtime->run_nchw_to_nchwc32(cfg);
@@ -1387,23 +1626,62 @@ void npu_layout_nchwc32_to_nchw(
     uint16_t h,
     uint16_t w
 ) {
+    NPU_CAPI_LOG(
+        "npu_layout_nchwc32_to_nchw(sram_addr=0x%08X, output_addr=0x%08X, n=%u, c=%u, h=%u, w=%u)",
+        sram_addr,
+        output_addr,
+        (unsigned)n,
+        (unsigned)c,
+        (unsigned)h,
+        (unsigned)w);
     if (g_npu_runtime) {
         LayoutConvertConfig cfg = {sram_addr, output_addr, n, c, h, w};
         g_npu_runtime->run_nchwc32_to_nchw(cfg);
     }
 }
 
-void npu_dma_mvin_test(void* host_ptr, uint32_t sram_addr, uint16_t col_num, uint16_t row_num,
+void npu_dma_mvin_test(void* host_ptr, uint32_t sram_addr, uint32_t col_num, uint32_t row_num,
                        uint16_t sram_stride, uint32_t dram_stride, uint8_t precision, uint8_t input_type,
                        bool dest, bool is_bias, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift) {
+    NPU_CAPI_LOG(
+        "npu_dma_mvin_test(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, input_type=%u, dest=%d, is_bias=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        host_ptr,
+        sram_addr,
+        (unsigned)col_num,
+        (unsigned)row_num,
+        (unsigned)sram_stride,
+        dram_stride,
+        (unsigned)precision,
+        (unsigned)input_type,
+        (int)dest,
+        (int)is_bias,
+        (int)is_quant,
+        quant_zero,
+        (unsigned)quant_scale,
+        (unsigned)quant_shift);
     #ifdef NPU_DEBUG
     printf("[TEST] MVIN: Host=%p SRAM=0x%x Size=%dx%d\n", host_ptr, sram_addr, row_num, col_num);
     #endif
 }
 
-void npu_dma_mvout_test(void* host_ptr, uint32_t sram_addr, uint16_t col_num, uint16_t row_num,
+void npu_dma_mvout_test(void* host_ptr, uint32_t sram_addr, uint32_t col_num, uint32_t row_num,
                         uint16_t sram_stride, uint32_t dram_stride, uint8_t precision, uint8_t output_type,
                         bool source, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift) {
+    NPU_CAPI_LOG(
+        "npu_dma_mvout_test(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, output_type=%u, source=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        host_ptr,
+        sram_addr,
+        (unsigned)col_num,
+        (unsigned)row_num,
+        (unsigned)sram_stride,
+        dram_stride,
+        (unsigned)precision,
+        (unsigned)output_type,
+        (int)source,
+        (int)is_quant,
+        quant_zero,
+        (unsigned)quant_scale,
+        (unsigned)quant_shift);
     #ifdef NPU_DEBUG
     printf("[TEST] MVOUT: Host=%p SRAM=0x%x Size=%dx%d\n", host_ptr, sram_addr, row_num, col_num);
     #endif

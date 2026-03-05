@@ -160,7 +160,7 @@ def Npux_DmaMvinOp : Npux_Op<"dma_mvin"> {
       AnyMemRef:$host_ptr, 
       NpuSramOrAccMemRef:$dst_memref, 
 
-      I16:$col_num, I16:$row_num, I16:$sram_stride, I16:$dram_stride,
+      I32:$col_num, I32:$row_num, I16:$sram_stride, I32:$dram_stride,
       I8:$precision, I8:$input_type, 
       
       I8:$dest, 
@@ -201,8 +201,8 @@ def Npux_MvinBiasOp : Npux_Op<"mvin_bias"> {
 def Npux_DmaMvoutOp : Npux_Op<"dma_mvout"> {
   let summary = "SRAM -> Host DMA";
 
-  let arguments = (ins AnyMemRef:$host_ptr, NpuSramMemRef:$sram_memref, I16:$col_num,
-      I16:$row_num, I16:$sram_stride, I16:$dram_stride, I8:$precision,
+  let arguments = (ins AnyMemRef:$host_ptr, NpuSramMemRef:$sram_memref, I32:$col_num,
+      I32:$row_num, I16:$sram_stride, I32:$dram_stride, I8:$precision,
       I8:$output_type, I8:$source, I1:$is_quant, I32:$quant_zero,
       I16:$quant_scale, I16:$quant_shift);
   let results = (outs);

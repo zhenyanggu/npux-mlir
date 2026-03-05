@@ -209,8 +209,8 @@ public:
         typeEnum = npux::ResampleType::downsample;
         modeEnum = npux::ResampleMode::max_nearest;
     } else if (opName == "npu_avgpool") {
-        typeEnum = npux::ResampleType::downsample;
-        modeEnum = npux::ResampleMode::avg_bilinear;
+      op.emitWarning() << "NPU backend does not support AveragePool currently.";
+      return failure();
     } else if (opName == "npu_upsample") {
         typeEnum = npux::ResampleType::upsample;
         modeEnum = npux::ResampleMode::max_nearest; // Nearest Neighbor
@@ -228,14 +228,32 @@ public:
     auto inType = mlir::dyn_cast<MemRefType>(inputMemRef.getType());
     if (!inType || inType.getMemorySpaceAsInt() != 2) return failure();
 
-    // 计算 Shape: C API 需要 INPUT 的 col_num (W-1) 和 row_num (H-1)
-    // 这一点很重要，对于 Upsample，Output 比 Input 大，但 API 仍需 Input 尺寸
+    // 计算 Shape: API 只支持 2D 输入，且 resample 仅允许 NCHW(4D) 输入。
+    // 规则: [N, C, H, W] -> [N*C*H, W]
+    // 传给 CAPI 的是 (col_num, row_num) = (mergedW-1, mergedH-1)。
     ArrayRef<int64_t> shape = inType.getShape();
     int rank = shape.size();
     if (rank < 2) return failure();
 
-    int64_t rows = shape[rank - 2] - 1;
-    int64_t cols = shape[rank - 1] - 1;
+    if (rank == 5) {
+      op.emitWarning()
+          << "Resample forbids NCHWc32 (5D) input. Please keep resample in NCHW (4D) format.";
+      return failure();
+    }
+    if (rank != 4) {
+      op.emitWarning() << "Resample expects NCHW (4D) input, but got rank=" << rank;
+      return failure();
+    }
+
+    for (int64_t dim : shape) {
+      if (dim == ShapedType::kDynamic || dim <= 0) return failure();
+    }
+
+    int64_t mergedRows = shape[0] * shape[1] * shape[2];
+    int64_t mergedCols = shape[3];
+
+    int64_t rows = mergedRows - 1;
+    int64_t cols = mergedCols - 1;
 
     Value vInputCol = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
     Value vInputRow = rewriter.create<arith::ConstantIntOp>(loc, rows, 16);
