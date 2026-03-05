@@ -132,12 +132,10 @@ struct ONNXToLinalgNpuPass
             return !isSupportedPooling(op);
           });
     }
-    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::AveragePool)) {
-      target.addDynamicallyLegalOp<ONNXAveragePoolOp>(
-          [](ONNXAveragePoolOp op) {
-            return !isSupportedPooling(op);
-          });
-    }
+    target.addDynamicallyLegalOp<ONNXAveragePoolOp>(
+        [](ONNXAveragePoolOp) {
+          return true;
+        });
     if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Resize)) {
       target.addDynamicallyLegalOp<ONNXResizeOp>(
           [](ONNXResizeOp op) {

@@ -80,7 +80,7 @@ enum class NpuOp {
     Gemm,
     Relu,
     MaxPool,
-    AveragePool,
+    // AveragePool,
     Resize,
     Transpose
 };

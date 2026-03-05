@@ -897,22 +897,22 @@ void NpuRuntime::run_resample(const ResampleConfig& cfg) {
     // Resample 使用 SFU 模块实现
     // 根据 resample_type 和 resample_op 构造 SFU 操作码
     // 硬件使用 cfg_sfu_op 的低 2 位作为 resample_type，bit[2] 作为 resample_op
-    // SFU 操作码: 
+    // SFU 操作码:
     //   3 = DOWNSAMPLE_MAX (type=0, op=0 -> 最大值下采样)
     //   4 = DOWNSAMPLE_AVG (type=0, op=1 -> 平均值下采样)
     //   5 = UPSAMPLE_NEAREST (type=1, op=0 -> 最近邻上采样)
-    
+
     uint8_t sfu_op;
-    if (cfg.resample_type == RESAMPLE_TYPE_DOWNSAMPLE || 
+    if (cfg.resample_type == RESAMPLE_TYPE_DOWNSAMPLE ||
         cfg.resample_type == RESAMPLE_TYPE_POOLING) {
         // 下采样或池化
-        sfu_op = (cfg.resample_op == RESAMPLE_OP_MAX) ? 
+        sfu_op = (cfg.resample_op == RESAMPLE_OP_MAX) ?
                  SFU_OP_DOWNSAMPLE_MAX : SFU_OP_DOWNSAMPLE_AVG;
     } else {
         // 上采样 (当前仅支持最近邻)
         sfu_op = SFU_OP_UPSAMPLE_NEAREST;
     }
-    
+
     // 1. SFU Config 0 - 设置操作码
     uint64_t val_cfg1 = REG_FIELD(CFG_SFU0, OP, sfu_op) |
                         REG_FIELD(CFG_SFU0, INT_TYPE, 0) |  // int8
@@ -920,7 +920,7 @@ void NpuRuntime::run_resample(const ResampleConfig& cfg) {
                         REG_FIELD(CFG_SFU0, OUT_ZP, 0) |
                         REG_FIELD(CFG_SFU0, IN_ZP, 0);
     reg_write64_cached(RegOffset::CFG_SFU_1, val_cfg1, &shadow.sfu_cfg1);
-    
+
     // 2. SFU Config 1 - Scale 参数置 0
     // 由于不涉及量化计算，量化参数随便是什么值，这里直接不写寄存器，减少寄存器访问
     // uint64_t val_cfg2 = REG_FIELD(CFG_SFU1, IN_SCALE, 0) |
@@ -928,23 +928,75 @@ void NpuRuntime::run_resample(const ResampleConfig& cfg) {
     //                     REG_FIELD(CFG_SFU1, OUT_SCALE, 0) |
     //                     REG_FIELD(CFG_SFU1, OUT_SHIFT, 0);
     // reg_write64_cached(RegOffset::CFG_SFU_2, val_cfg2, &shadow.sfu_cfg2);
-    
-    // 3. SFU Input - 输入地址和尺寸
-    uint64_t val_input = REG_FIELD(SFU_EXE0, IN_ADDR, cfg.input_sram_addr) |
-                         REG_FIELD(SFU_EXE0, COL, cfg.input_col_num) |
-                         REG_FIELD(SFU_EXE0, ROW, cfg.input_row_num);
-    reg_write64(RegOffset::SFU_INPUT, val_input);
-    
-    // 4. SFU Output - 输出地址
-    uint64_t val_output = REG_FIELD(SFU_EXE1, OUT_ADDR, cfg.output_sram_addr);
-    reg_write64(RegOffset::SFU_OUTPUT, val_output);
-    
-    // 5. Start SFU
-    reg_write(RegOffset::START, BIT_START_SFU);
-    NPU_TIMER_SECTION_END()
-    
-    NPU_TIMER_SECTION_BEGIN("run_resample(wait_irq)")
-    wait_irq();
+
+    constexpr uint32_t HW_MAX_RESAMPLE_ROWS = 2048; // 实测硬件稳定上限（real rows）
+    const uint32_t in_cols = static_cast<uint32_t>(cfg.input_col_num) + 1;
+    const uint32_t total_rows = static_cast<uint32_t>(cfg.input_row_num) + 1;
+
+    auto output_cols_from_input_cols = [&](uint32_t cols) -> uint32_t {
+        if (cfg.resample_type == RESAMPLE_TYPE_UPSAMPLE) {
+            return cols << 1;
+        }
+        // downsample / pooling
+        return (cols + 1) >> 1;
+    };
+
+    auto output_rows_from_input_rows = [&](uint32_t rows) -> uint32_t {
+        if (cfg.resample_type == RESAMPLE_TYPE_UPSAMPLE) {
+            return rows << 1;
+        }
+        // downsample / pooling
+        return (rows + 1) >> 1;
+    };
+
+    uint32_t row_base = 0;      // 输入已处理 real-row 数
+    uint32_t out_row_base = 0;  // 输出已生成 real-row 数
+
+    while (row_base < total_rows) {
+        uint32_t remain = total_rows - row_base;
+        uint32_t chunk_rows = (remain > HW_MAX_RESAMPLE_ROWS) ? HW_MAX_RESAMPLE_ROWS : remain;
+
+        // 对于 downsample/pooling，非最后一块需要偶数行，避免 2x2 跨块配对问题
+        if ((cfg.resample_type == RESAMPLE_TYPE_DOWNSAMPLE || cfg.resample_type == RESAMPLE_TYPE_POOLING) &&
+            (row_base + chunk_rows < total_rows) &&
+            (chunk_rows & 1U)) {
+            chunk_rows -= 1U;
+        }
+
+        if (chunk_rows == 0) {
+            NPU_ERR("run_resample chunking failed: zero chunk rows (total_rows=%u, row_base=%u)",
+                    total_rows, row_base);
+            break;
+        }
+
+        uint32_t in_addr_chunk = cfg.input_sram_addr + row_base * in_cols;
+        uint32_t out_cols = output_cols_from_input_cols(in_cols);
+        uint32_t out_addr_chunk = cfg.output_sram_addr + out_row_base * out_cols;
+
+        // 3. SFU Input - 输入地址和尺寸（按块）
+        uint64_t val_input = REG_FIELD(SFU_EXE0, IN_ADDR, in_addr_chunk) |
+                             REG_FIELD(SFU_EXE0, COL, cfg.input_col_num) |
+                             REG_FIELD(SFU_EXE0, ROW, static_cast<uint16_t>(chunk_rows - 1));
+        reg_write64(RegOffset::SFU_INPUT, val_input);
+
+        // 4. SFU Output - 输出地址（按块）
+        uint64_t val_output = REG_FIELD(SFU_EXE1, OUT_ADDR, out_addr_chunk);
+        reg_write64(RegOffset::SFU_OUTPUT, val_output);
+
+        // 5. Start SFU
+        reg_write(RegOffset::START, BIT_START_SFU);
+
+        NPU_TIMER_SECTION_END()
+
+        NPU_TIMER_SECTION_BEGIN("run_resample(wait_irq)")
+        wait_irq();
+        NPU_TIMER_SECTION_END()
+
+        NPU_TIMER_SECTION_BEGIN("run_resample(reg_write)")
+        row_base += chunk_rows;
+        out_row_base += output_rows_from_input_rows(chunk_rows);
+    }
+
     NPU_TIMER_SECTION_END()
 }
 

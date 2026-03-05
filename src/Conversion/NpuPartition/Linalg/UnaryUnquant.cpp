@@ -189,11 +189,12 @@ static Value createPackedResampleOp(
     std::function<void(Operation *)> attrHook = nullptr 
 ) {
   int64_t rank = inputType.getRank();
-  //bool isSpatial = (rank == 4);
-
-  bool isSpatial = false;
+  // Spatial pool/resize path expects packed 5D maps.
+  // Non-spatial path requires indexing maps consistent with tensor rank.
+  bool useSpatialPackPath =
+      (rank == 4) && (inputMap.getNumDims() == 5) && (outputMap.getNumDims() == 5);
   // --- Path A: Non-Spatial ---
-  if (!isSpatial) {
+  if (!useSpatialPackPath) {
     auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outputType);
     {
       OpBuilder::InsertionGuard guard(rewriter);
@@ -322,6 +323,11 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
     Value input = op.getX();
     auto outputType = mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
     if (!outputType) return failure();
+    auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
+    if (!inputType || inputType.getRank() != 4 || outputType.getRank() != 4) {
+      op.emitWarning() << "ONNXMaxPool lowering to NPU resample requires NCHW (4D) tensors.";
+      return failure();
+    }
 
     // 2. 处理量化上下文 [New Logic]
     QuantizedContext ctx;
@@ -331,13 +337,12 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
 
     // 3. 构建 Maps
     auto nExpr = rewriter.getAffineDimExpr(0);
-    auto cOutExpr = rewriter.getAffineDimExpr(1);
+    auto cExpr = rewriter.getAffineDimExpr(1);
     auto hExpr = rewriter.getAffineDimExpr(2);
     auto wExpr = rewriter.getAffineDimExpr(3);
-    auto cInExpr = rewriter.getAffineDimExpr(4);
 
-    auto inputMap = AffineMap::get(5, 0, {nExpr, cOutExpr, hExpr * 2, wExpr * 2, cInExpr}, rewriter.getContext());
-    auto outputMap = rewriter.getMultiDimIdentityMap(5);
+    auto inputMap = AffineMap::get(4, 0, {nExpr, cExpr, hExpr * 2, wExpr * 2}, rewriter.getContext());
+    auto outputMap = rewriter.getMultiDimIdentityMap(4);
 
     // 4. 使用 ctx 中的 input 和 outputType 创建 NPU Op
     Value result = createPackedResampleOp(rewriter, op.getLoc(), 
@@ -361,10 +366,17 @@ struct AveragePoolToLinalg : public OpConversionPattern<ONNXAveragePoolOp> {
 
   LogicalResult matchAndRewrite(ONNXAveragePoolOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter) const override {
+    op.emitWarning() << "NPU backend does not support AveragePool currently. Skip NPU lowering for this op.";
+    return failure();
 
     Value input = op.getX();
     auto outputType = mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
     if (!outputType) return failure();
+    auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
+    if (!inputType || inputType.getRank() != 4 || outputType.getRank() != 4) {
+      op.emitWarning() << "ONNXAveragePool lowering to NPU resample requires NCHW (4D) tensors.";
+      return failure();
+    }
 
     QuantizedContext ctx;
     if (failed(handleQuantizationContext(op, input, outputType, rewriter, ctx))) {
@@ -372,13 +384,12 @@ struct AveragePoolToLinalg : public OpConversionPattern<ONNXAveragePoolOp> {
     }
 
     auto nExpr = rewriter.getAffineDimExpr(0);
-    auto cOutExpr = rewriter.getAffineDimExpr(1);
+    auto cExpr = rewriter.getAffineDimExpr(1);
     auto hExpr = rewriter.getAffineDimExpr(2);
     auto wExpr = rewriter.getAffineDimExpr(3);
-    auto cInExpr = rewriter.getAffineDimExpr(4);
 
-    auto inputMap = AffineMap::get(5, 0, {nExpr, cOutExpr, hExpr * 2, wExpr * 2, cInExpr}, rewriter.getContext());
-    auto outputMap = rewriter.getMultiDimIdentityMap(5);
+    auto inputMap = AffineMap::get(4, 0, {nExpr, cExpr, hExpr * 2, wExpr * 2}, rewriter.getContext());
+    auto outputMap = rewriter.getMultiDimIdentityMap(4);
 
     Value result = createPackedResampleOp(rewriter, op.getLoc(), 
         ctx.finalInput, 
@@ -406,6 +417,11 @@ struct ResizeToLinalg : public OpConversionPattern<ONNXResizeOp> {
     Value input = op.getX();
     auto outputType = mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
     if (!outputType) return failure();
+    auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
+    if (!inputType || inputType.getRank() != 4 || outputType.getRank() != 4) {
+      op.emitWarning() << "ONNXResize lowering to NPU resample requires NCHW (4D) tensors.";
+      return failure();
+    }
 
     QuantizedContext ctx;
     if (failed(handleQuantizationContext(op, input, outputType, rewriter, ctx))) {
@@ -413,15 +429,14 @@ struct ResizeToLinalg : public OpConversionPattern<ONNXResizeOp> {
     }
 
     auto nExpr = rewriter.getAffineDimExpr(0);
-    auto cOutExpr = rewriter.getAffineDimExpr(1);
+    auto cExpr = rewriter.getAffineDimExpr(1);
     auto hExpr = rewriter.getAffineDimExpr(2);
     auto wExpr = rewriter.getAffineDimExpr(3);
-    auto cInExpr = rewriter.getAffineDimExpr(4);
 
-    auto inputMap = AffineMap::get(5, 0,
-        {nExpr, cOutExpr, hExpr.floorDiv(2), wExpr.floorDiv(2), cInExpr},
-        rewriter.getContext());
-    auto outputMap = rewriter.getMultiDimIdentityMap(5);
+    auto inputMap = AffineMap::get(4, 0,
+      {nExpr, cExpr, hExpr.floorDiv(2), wExpr.floorDiv(2)},
+      rewriter.getContext());
+    auto outputMap = rewriter.getMultiDimIdentityMap(4);
 
     Value result = createPackedResampleOp(rewriter, op.getLoc(), 
         ctx.finalInput, 
@@ -495,7 +510,7 @@ struct TransposeToLinalg : public OpConversionPattern<ONNXTransposeOp> {
 } // namespace
 
 void npux::populateLinalgResamplePatterns(RewritePatternSet &patterns) {
-  patterns.add<MaxPoolToLinalg, AveragePoolToLinalg, ResizeToLinalg>(patterns.getContext());
+  patterns.add<MaxPoolToLinalg, ResizeToLinalg>(patterns.getContext());
 }
 
 void npux::populateLinalgTransposePattern(RewritePatternSet &patterns) {

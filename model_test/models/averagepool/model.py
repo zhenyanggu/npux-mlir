@@ -1,104 +1,114 @@
 import os
 import numpy as np
-import torch
-import torch.nn as nn
 import onnx
+from onnx import helper, TensorProto
 import onnxruntime as ort
-from onnxruntime.quantization import (
-    CalibrationDataReader,
-    CalibrationMethod,
-    QuantFormat,
-    QuantType,
-    quantize_static,
-)
 
 
-class WrappedAveragePoolModel(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.pool = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
+def build_quantized_averagepool_model(input_shape, model_path):
+    """
+    手动构建带 int8 链路的 AveragePool 量化模型
+    注意: ONNX 标准 AveragePool 不支持 int8 输入，因此采用 QDQ 包裹结构
+    结构:
+    input(fp32) -> Q(i8) -> Identity(i8) -> DQ(fp32) -> AveragePool(fp32)
+    -> Q(i8) -> Identity(i8) -> DQ(fp32) -> output(fp32)
+    """
+    scale_value = 0.039
+    zero_point = 0
 
-    def forward(self, x):
-        x = x + 1e-3
-        x = self.pool(x)
-        x = x - 1e-3
-        return x
+    scale_init = helper.make_tensor("scale", TensorProto.FLOAT, [], [scale_value])
+    zp_init = helper.make_tensor("zero_point", TensorProto.INT8, [], [zero_point])
 
+    nodes = [
+        helper.make_node(
+            "QuantizeLinear",
+            inputs=["input", "scale", "zero_point"],
+            outputs=["quantized_input"],
+            name="quantize_input",
+        ),
+        helper.make_node(
+            "Identity",
+            inputs=["quantized_input"],
+            outputs=["identity_before_output"],
+            name="identity_before_averagepool",
+        ),
+        helper.make_node(
+            "DequantizeLinear",
+            inputs=["identity_before_output", "scale", "zero_point"],
+            outputs=["dequant_before_pool"],
+            name="dequant_before_averagepool",
+        ),
+        helper.make_node(
+            "AveragePool",
+            inputs=["dequant_before_pool"],
+            outputs=["pooled_fp32"],
+            kernel_shape=[2, 2],
+            pads=[0, 0, 0, 0],
+            strides=[2, 2],
+            name="averagepool_fp32",
+        ),
+        helper.make_node(
+            "QuantizeLinear",
+            inputs=["pooled_fp32", "scale", "zero_point"],
+            outputs=["pooled_i8"],
+            name="quantize_after_averagepool",
+        ),
+        helper.make_node(
+            "Identity",
+            inputs=["pooled_i8"],
+            outputs=["identity_after_output"],
+            name="identity_after_averagepool",
+        ),
+        helper.make_node(
+            "DequantizeLinear",
+            inputs=["identity_after_output", "scale", "zero_point"],
+            outputs=["output"],
+            name="dequantize_output",
+        ),
+    ]
 
-class RandomDataReader(CalibrationDataReader):
-    def __init__(self, input_name, input_shape, num_batches=10, seed=2026):
-        self.input_name = input_name
-        self.input_shape = tuple(input_shape)
-        self.num_batches = num_batches
-        self.seed = seed
-        self._iterator = iter(self._generate())
+    graph_inputs = [
+        helper.make_tensor_value_info("input", TensorProto.FLOAT, list(input_shape))
+    ]
 
-    def _generate(self):
-        rng = np.random.default_rng(self.seed)
-        data = []
-        for _ in range(self.num_batches):
-            sample = rng.standard_normal(size=self.input_shape).astype(np.float32)
-            data.append({self.input_name: sample})
-        return data
+    output_shape = [
+        input_shape[0],
+        input_shape[1],
+        input_shape[2] // 2,
+        input_shape[3] // 2,
+    ]
+    graph_outputs = [
+        helper.make_tensor_value_info("output", TensorProto.FLOAT, output_shape)
+    ]
 
-    def get_next(self):
-        return next(self._iterator, None)
+    graph = helper.make_graph(
+        nodes,
+        "averagepool_int8_graph",
+        graph_inputs,
+        graph_outputs,
+        [scale_init, zp_init],
+    )
 
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    model.ir_version = 8
 
-def check_symmetric_zero_points(quant_model_path):
-    model = onnx.load(quant_model_path)
-    for initializer in model.graph.initializer:
-        if "zero_point" not in initializer.name:
-            continue
-        if initializer.data_type != onnx.TensorProto.INT8:
-            continue
-        values = np.frombuffer(initializer.raw_data, dtype=np.int8)
-        if values.size and not np.all(values == 0):
-            raise RuntimeError(
-                f"INT8 zero point is not 0 in initializer '{initializer.name}': {values}"
-            )
+    onnx.checker.check_model(model)
+    onnx.save(model, model_path)
+    print(f"✓ 手动构建的 AveragePool(QDQ) 模型已保存: {model_path}")
 
 
 def main():
     model_name = "averagepool"
     workdir = os.path.dirname(os.path.abspath(__file__))
-    fp32_model_path = os.path.join(workdir, "model_fp32.onnx")
     model_path = os.path.join(workdir, "model.onnx")
     input_path = os.path.join(workdir, f"{model_name}_input.bin")
     golden_path = os.path.join(workdir, f"{model_name}_output_golden.bin")
 
     input_shape = (1, 64, 56, 56)
 
-    torch.manual_seed(2026)
     np.random.seed(2026)
 
-    model = WrappedAveragePoolModel().eval()
-    dummy_input = torch.randn(*input_shape, dtype=torch.float32)
-
-    torch.onnx.export(
-        model,
-        dummy_input,
-        fp32_model_path,
-        input_names=["input"],
-        output_names=["output"],
-        opset_version=20,
-        do_constant_folding=True,
-    )
-
-    reader = RandomDataReader("input", input_shape, 10)
-    quantize_static(
-        model_input=fp32_model_path,
-        model_output=model_path,
-        calibration_data_reader=reader,
-        quant_format=QuantFormat.QDQ,
-        op_types_to_quantize=["AveragePool"],
-        weight_type=QuantType.QInt8,
-        activation_type=QuantType.QInt8,
-        calibrate_method=CalibrationMethod.MinMax,
-        extra_options={"ActivationSymmetric": True, "WeightSymmetric": True},
-    )
-
-    check_symmetric_zero_points(model_path)
+    build_quantized_averagepool_model(input_shape, model_path)
 
     test_input = np.random.randn(*input_shape).astype(np.float32)
     test_input.tofile(input_path)
@@ -108,14 +118,19 @@ def main():
     output = sess.run(None, {input_name: test_input})[0]
     output.astype(np.float32).tofile(golden_path)
 
-    if os.path.exists(fp32_model_path):
-        os.remove(fp32_model_path)
-
-    print("Generated files:")
+    print("\n✓ 生成文件:")
     print(f"  {os.path.basename(model_path)}")
     print(f"  {os.path.basename(input_path)}")
     print(f"  {os.path.basename(golden_path)}")
-    print(f"Input shape: {input_shape}, dtype: float32")
+    print(f"\n✓ 输入 shape: {input_shape}, dtype: float32")
+    print("✓ 模型结构: input(fp32) -> Q(i8) -> Identity(i8) -> DQ -> AveragePool(fp32) -> Q(i8) -> Identity(i8) -> DQ -> output(fp32)")
+
+    model = onnx.load(model_path)
+    for node in model.graph.node:
+        if node.op_type == "AveragePool":
+            print(f"✓ 找到 AveragePool 节点: {node.name}")
+            print(f"  输入: {node.input[0]}")
+            print(f"  输出: {node.output[0]}")
 
 
 if __name__ == "__main__":

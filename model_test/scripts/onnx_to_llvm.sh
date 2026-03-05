@@ -150,9 +150,9 @@ run_pass "Op Splitting " \
 # ------------------------------------------------
 enter_stage "NpuBufferization"
 
-# run_pass "Pack&UnPack Lower" \
-#          "--npu-lower-pack" \
-#          "NpuLowerPack.mlir"
+run_pass "Pack&UnPack Lower" \
+         "--npu-lower-pack" \
+         "NpuLowerPack.mlir"
 
 # 这是一个很长的命令，现在写起来很清爽
 run_pass "Bufferize" \

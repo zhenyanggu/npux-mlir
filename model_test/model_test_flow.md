@@ -82,14 +82,14 @@ LLVM IR 编译: 使用 scripts/onnx_to_llvm.sh，将上一步生成的 MLIR 文�
 
 - [ ] Conv
 - [x] MaxPool
-- [x] AveragePool
+<!-- - [] AveragePool硬件不支持 -->
 - [ ] MatMul
 - [ ] Gemm
-- [x] Transpose（842/98304为什么会有错误？）
+- [x] Transpose
 - [ ] Relu（和卷积放在一起测试）
 - [x] Gelu
-- [x] Softmax(精度较低)
-- [x] LayerNorm（精度较低，错误：2356/98304）
+- [x] Softmax(精度较低Top-1 match: 89 / 128)
+- [x] LayerNorm（精度较低，错误：2061/98304）
 - [ ] Resize
 
 3.2 模型级测试 (Integration Tests)

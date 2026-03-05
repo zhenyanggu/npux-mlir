@@ -1,10 +1,15 @@
 .idea/
-test/
+test/*
 cmake-*/
 docs/
 install/
 CMakePresets.json
 python/static_onnx_models/
+python/onnx_models
+python/*bin
+python/*onnx
+python/*pt
+python/*json
 # Prerequisites
 *.d
 
