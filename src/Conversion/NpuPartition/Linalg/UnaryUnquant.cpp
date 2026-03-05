@@ -510,7 +510,7 @@ struct TransposeToLinalg : public OpConversionPattern<ONNXTransposeOp> {
 } // namespace
 
 void npux::populateLinalgResamplePatterns(RewritePatternSet &patterns) {
-  patterns.add<MaxPoolToLinalg, ResizeToLinalg>(patterns.getContext());
+  patterns.add<MaxPoolToLinalg>(patterns.getContext());
 }
 
 void npux::populateLinalgTransposePattern(RewritePatternSet &patterns) {

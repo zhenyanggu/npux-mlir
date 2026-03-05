@@ -136,12 +136,10 @@ struct ONNXToLinalgNpuPass
         [](ONNXAveragePoolOp) {
           return true;
         });
-    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Resize)) {
-      target.addDynamicallyLegalOp<ONNXResizeOp>(
-          [](ONNXResizeOp op) {
-            return !isSupportedResize(op);
-          });
-    }
+    target.addDynamicallyLegalOp<ONNXResizeOp>(
+        [](ONNXResizeOp) {
+          return true;
+        });
 
 
     RewritePatternSet patterns(context);
