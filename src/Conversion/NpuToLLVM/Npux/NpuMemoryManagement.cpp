@@ -182,8 +182,8 @@ public:
     auto shape = dramType.getShape();
     auto [rows, cols] = getFlattened2DShape(shape,op);
 
-    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 16);
-    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 16);
+    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
+    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
 
     // 2. 获取 DRAM Strides
     int64_t offset;
