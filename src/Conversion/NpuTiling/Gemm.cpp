@@ -48,6 +48,14 @@ static int64_t getStaticTripCount(scf::ForOp forOp) {
   return -1;
 }
 
+static void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) {
+  if (!source || !target) return;
+  if (auto attr = source->getAttr("npu.target"))
+    target->setAttr("npu.target", attr);
+  if (auto attr = source->getAttr("npu.loop_dim"))
+    target->setAttr("npu.loop_dim", attr);
+}
+
 // -----------------------------------------------------------------------------
 // Helper: Peel Last Iteration
 // -----------------------------------------------------------------------------
@@ -297,6 +305,7 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
         // --- Phase 4.1: Peel Head ---
         scf::ForOp headLoop;
         if (succeeded(peelForLoopFirstIteration(rewriter, loopOp, headLoop))) {
+          inheritNpuAttributes(restLoop, headLoop);
           tagInnerComputeOp(headLoop, "head", rewriter);
           restLoop = loopOp;
         }
@@ -326,6 +335,7 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
           }
 
           if (hasTail) {
+            inheritNpuAttributes(restLoop, tailLoop);
             tagInnerComputeOp(tailLoop, "tail", rewriter);
             tagInnerComputeOp(restLoop, "body", rewriter);
             finalKResults = tailLoop->getResults();
@@ -358,8 +368,7 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       scf::ForOp partialLoop;
       if (succeeded(scf::peelForLoopAndSimplifyBounds(
               rewriter, loopOp, partialLoop))) {
-        // 这里可以给剥离出来的 tail loop 打标签，或者留作后续处理
-        partialLoop->setAttr("npu.peeled_tail", rewriter.getUnitAttr());
+        inheritNpuAttributes(loopOp, partialLoop);
       }
     }
 

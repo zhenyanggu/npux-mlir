@@ -29,24 +29,69 @@ bool isInNpuKernel(Operation *op) {
   return false;
 }
 
-std::pair<int64_t, int64_t> getFlattened2DShape(ArrayRef<int64_t> shape) {
+std::pair<int64_t, int64_t> getFlattened2DShape(
+    ArrayRef<int64_t> shape, Operation *op = nullptr) {
   int64_t rank = shape.size();
 
+  // 处理低维度情况
   if (rank == 0)
     return {1, 1};
   if (rank == 1)
     return {1, shape[0]};
+  if (rank == 2)
+    return {shape[0], shape[1]};
 
-  // [NEW] Rank 2 处理：保留矩阵结构
-  if (rank == 2) {
-    return {shape[0], shape[1]}; // Row, Col
+  int64_t row = 1;
+  int64_t col = 1;
+  const int64_t COL_LIMIT = 65536; // 2^16 寄存器限制
+
+  // 定义分割点索引：从该索引开始（含）往后的所有维度都乘入 col
+  int64_t splitIdx = rank - 1;
+
+  // 分情况讨论逻辑
+  if (rank == 3 || rank == 4) {
+    // 3、4维：Col 为最里面一维
+    splitIdx = rank - 1;
+  } else if (rank == 5) {
+    // 5维：Col 为最里面两位相乘
+    splitIdx = rank - 2;
+  } else if (rank >= 6) {
+    // 6维及以上：Col 为最里面五位相乘
+    splitIdx = rank - 5;
   }
 
-  // Rank >= 3 处理：低两维合并
-  int64_t col = shape[rank - 1] * shape[rank - 2];
-  int64_t row = 1;
-  for (int i = 0; i < rank - 2; ++i) {
+  // 安全边界检查：防止 splitIdx 计算越界
+  if (splitIdx < 0)
+    splitIdx = 0;
+
+  // 计算 Col 乘积
+  for (int i = splitIdx; i < rank; ++i) {
+    col *= shape[i];
+  }
+
+  // 计算 Row 乘积
+  for (int i = 0; i < splitIdx; ++i) {
     row *= shape[i];
+  }
+
+  if (col > COL_LIMIT) {
+    if (op) {
+      // 如果有 Op 上下文，直接在 IR 位置报 warning
+      op->emitWarning() << "Hardware Constraint: col value (" << col
+                        << ") exceeds 16-bit register limit (" << COL_LIMIT
+                        << ") at Rank " << rank;
+    } else {
+      // 否则使用 llvm::errs 打印到控制台
+      std::string msg;
+      llvm::raw_string_ostream os(msg);
+      os << "[NPU Warning] Col value (" << col
+         << ") exceeds 16-bit register limit (" << COL_LIMIT << ") for shape [";
+      for (size_t i = 0; i < shape.size(); ++i) {
+        os << shape[i] << (i == shape.size() - 1 ? "" : ", ");
+      }
+      os << "]\n";
+      llvm::errs() << os.str();
+    }
   }
 
   return {row, col};
@@ -93,7 +138,6 @@ public:
   }
 };
 
-
 class ConvertMemrefCopyToNpuxPattern
     : public OpRewritePattern<linalg::GenericOp> {
 public:
@@ -102,10 +146,10 @@ public:
   LogicalResult matchAndRewrite(
       linalg::GenericOp op, PatternRewriter &rewriter) const override {
     auto libCallAttr = op.getLibraryCallAttr();
-    if (!libCallAttr) return failure();
-    
-    StringRef libName = libCallAttr.getValue();
+    if (!libCallAttr)
+      return failure();
 
+    StringRef libName = libCallAttr.getValue();
 
     if (libName != "npu_dma_mvin" && libName != "npu_dma_mvout") {
       return failure();
@@ -125,7 +169,7 @@ public:
     int dstSpace = dstType.getMemorySpaceAsInt();
     bool isMvin = (srcSpace == 0 && (dstSpace == 2 || dstSpace == 3));
     bool isMvout = (srcSpace == 2 && dstSpace == 0);
-    
+
     if (!isMvin && !isMvout)
       return failure();
 
@@ -136,10 +180,10 @@ public:
 
     // 1. 获取物理形状 (通常从逻辑形状一致的 dramType 获取)
     auto shape = dramType.getShape();
-    auto [rows, cols] = getFlattened2DShape(shape);
+    auto [rows, cols] = getFlattened2DShape(shape,op);
 
-    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols-1, 16);
-    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows-1, 16);
+    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 16);
+    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 16);
 
     // 2. 获取 DRAM Strides
     int64_t offset;
@@ -159,11 +203,12 @@ public:
       dramStrideVal = 0;
     }
 
-    Value vDramStride = rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 16);
+    Value vDramStride =
+        rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 16);
 
     // 3. 获取 SRAM Strides
-    // 通常 SRAM 是连续的，stride 等于 cols。但如果 SRAM 也有 layout，应从 sramType 获取
-    // 这里暂时保持和 cols 一致，或者通过 sramType 计算
+    // 通常 SRAM 是连续的，stride 等于 cols。但如果 SRAM 也有 layout，应从
+    // sramType 获取 这里暂时保持和 cols 一致，或者通过 sramType 计算
     Value vSramStride = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
 
     // 4. Precision Logic (从数据源获取类型)

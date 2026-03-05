@@ -11,14 +11,12 @@
 using namespace mlir;
 
 namespace {
-bool isFusibleOp(linalg::GenericOp op) {
-  if (!op)
-    return false;
+
+// 辅助函数：安全地获取 library_call 属性
+StringRef getLibraryCall(linalg::GenericOp op) {
+  if (!op) return "";
   auto libCall = op->getAttrOfType<StringAttr>("library_call");
-  if (!libCall)
-    return false;
-  StringRef name = libCall.getValue();
-  return name == "npu_gemm" || name == "npu_matmul" || name == "npu_conv";
+  return libCall ? libCall.getValue() : "";
 }
 
 struct NpuReluAccFusion : public OpRewritePattern<linalg::GenericOp> {
@@ -26,12 +24,9 @@ struct NpuReluAccFusion : public OpRewritePattern<linalg::GenericOp> {
 
   LogicalResult matchAndRewrite(
       linalg::GenericOp reluOp, PatternRewriter &rewriter) const override {
+    
     // 1. 检查 Consumer (ReLU/LeakyReLU)
-    auto reluCall = reluOp->getAttrOfType<StringAttr>("library_call");
-    if (!reluCall)
-      return failure();
-    StringRef reluName = reluCall.getValue();
-
+    StringRef reluName = getLibraryCall(reluOp);
     int reluTypeVal = -1;
     if (reluName == "npu_relu") {
       reluTypeVal = 0;
@@ -56,22 +51,51 @@ struct NpuReluAccFusion : public OpRewritePattern<linalg::GenericOp> {
       return failure();
     }
 
-    // 2. 获取 Producer (Compute Op)
-    Value input = reluOp.getInputs()[0];
-    auto producerOp = input.getDefiningOp<linalg::GenericOp>();
-
-    // 3. 验证 Producer 是否合法
-    if (!isFusibleOp(producerOp))
+    // 2. 向上追溯，匹配特定的数据流模式
+    Value currentInput = reluOp.getInputs()[0];
+    auto prevOp = currentInput.getDefiningOp<linalg::GenericOp>();
+    
+    // 确保依赖链存在且唯一
+    if (!prevOp || !prevOp->getResult(0).hasOneUse()) 
       return failure();
 
-    // 4. 验证依赖关系 (Single User check)
-    // 只有当 Compute 的结果只被这个 ReLU 使用时，才能安全融合
-    if (!producerOp->getResult(0).hasOneUse())
+    StringRef prevName = getLibraryCall(prevOp);
+    bool hasLayout = false;
+
+    // a. 检查是否存在 Layout 转换 (针对 Conv -> mv -> layout -> relu 模式)
+    // 根据 IR，这里可能是 npu_layout_nchwc32_to_nchw 等，所以用 contains 进行泛化匹配
+    if (prevName.contains("layout")) {
+      currentInput = prevOp.getInputs()[0];
+      prevOp = currentInput.getDefiningOp<linalg::GenericOp>();
+      if (!prevOp || !prevOp->getResult(0).hasOneUse()) 
+        return failure();
+      prevName = getLibraryCall(prevOp);
+      hasLayout = true;
+    }
+
+    // b. 此时的 prevOp 必须是 mv_acc_to_spm
+    if (prevName != "mv_acc_to_spm") 
       return failure();
 
-    // 5. 准备新 Op 的属性
+    // c. 获取底层的 Producer (Compute Op)
+    currentInput = prevOp.getInputs()[0];
+    auto producerOp = currentInput.getDefiningOp<linalg::GenericOp>();
+    if (!producerOp || !producerOp->getResult(0).hasOneUse()) 
+      return failure();
+
+    StringRef producerName = getLibraryCall(producerOp);
+
+    // 3. 严格验证 Producer 是否与模式匹配
+    if (hasLayout) {
+      if (producerName != "npu_conv") 
+        return failure();
+    } else {
+      if (producerName != "npu_gemm" && producerName != "npu_matmul") 
+        return failure();
+    }
+
+    // 4. 准备新 Compute Op 的属性 (将 relu 的属性迁移过去)
     SmallVector<NamedAttribute> newAttrs;
-
     for (auto attr : producerOp->getAttrs()) {
       StringRef attrName = attr.getName().strref();
       if (attrName == "out_scale" || attrName == "out_zp")
@@ -79,10 +103,8 @@ struct NpuReluAccFusion : public OpRewritePattern<linalg::GenericOp> {
       newAttrs.push_back(attr);
     }
 
-    newAttrs.push_back(
-        rewriter.getNamedAttr("do_relu", rewriter.getI32IntegerAttr(1)));
-    newAttrs.push_back(rewriter.getNamedAttr(
-        "relu_type", rewriter.getI32IntegerAttr(reluTypeVal)));
+    newAttrs.push_back(rewriter.getNamedAttr("do_relu", rewriter.getI32IntegerAttr(1)));
+    newAttrs.push_back(rewriter.getNamedAttr("relu_type", rewriter.getI32IntegerAttr(reluTypeVal)));
 
     if (auto outScale = reluOp->getAttr("out_scale")) {
       newAttrs.push_back(rewriter.getNamedAttr("out_scale", outScale));
@@ -91,24 +113,14 @@ struct NpuReluAccFusion : public OpRewritePattern<linalg::GenericOp> {
       newAttrs.push_back(rewriter.getNamedAttr("out_zp", outZp));
     }
 
-    auto newGenericOp = rewriter.create<linalg::GenericOp>(reluOp.getLoc(),
-        reluOp.getResultTypes(),           // resultTensorTypes
-        producerOp.getInputs(),            // inputs
-        reluOp.getOutputs(),               // outputs
-        producerOp.getIndexingMapsAttr(),  // indexingMaps
-        producerOp.getIteratorTypesAttr(), // iteratorTypes
-        StringAttr(),                      // doc (留空)
-        StringAttr(),                      // library_call (留空)
-        nullptr, // body builder (留空，因为后面用了 takeBody)
-        newAttrs // attributes (直接传 ArrayRef<NamedAttribute>)
-    );
+    // 5. 【关键修复】直接原地更新 ProducerOp 的属性！
+    // 这样不会改变 Op 的位置，也不会影响它和 mv_acc_to_spm 之间的连线
+    rewriter.modifyOpInPlace(producerOp, [&]() {
+      producerOp->setAttrs(rewriter.getDictionaryAttr(newAttrs));
+    });
 
-    // 3. 移动 Region (Body)
-    newGenericOp.getRegion().takeBody(producerOp.getRegion());
-
-    // 4. 替换并擦除
-    rewriter.replaceOp(reluOp, newGenericOp->getResults());
-    rewriter.eraseOp(producerOp);
+    // 6. “短接” Relu：跳过 Relu，让下游直接使用 Relu 的输入
+    rewriter.replaceOp(reluOp, reluOp.getInputs());
 
     return success();
   }

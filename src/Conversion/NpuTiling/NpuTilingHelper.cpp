@@ -190,11 +190,12 @@ SmallVector<int64_t> getNpuTileSizes(linalg::GenericOp op) {
          << ", OC_blk:" << t_oc << "]\n";
       llvm::errs() << os.str();
 
-      if (sizes.size() >= 4) {
-        sizes[0] = (t_oc > 32) ? (t_oc / 32) : 1;
-        sizes[1] = t_oh;
-        sizes[2] = t_ow;
-        sizes[3] = (t_ic > 32) ? (t_ic / 32) : 1;
+      if (sizes.size() >= 5) {
+        sizes[0] = 1;                              // N 维度：按 1 分块
+        sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1;  // OC 维度 (Outer)
+        sizes[2] = t_oh;                           // OH 维度
+        sizes[3] = t_ow;                           // OW 维度
+        sizes[4] = (t_ic > 32) ? (t_ic / 32) : 1;  // IC 维度 (Reduction Outer)
       }
     }
   }
@@ -487,6 +488,157 @@ SmallVector<int64_t> getLayoutTileSizes(linalg::GenericOp op, StringRef opName) 
        << ", H:" << tileSizes[2] << ", W:" << tileSizes[3] << ", inner_c:" << tileSizes[4] << "]\n";
     llvm::errs() << os.str();
   }
+
+  return tileSizes;
+}
+
+SmallVector<int64_t> calculateAutoMaxPoolTileNCHW(
+    linalg::GenericOp op, int64_t spmSize) {
+  
+  auto loopRanges = op.getStaticLoopRanges();
+  // 安全检查：NCHW 迭代空间为 Rank 4 [N, C, H_out, W_out]
+  if (loopRanges.size() != 4) return {1, 1, 1, 1}; 
+
+  int64_t N = loopRanges[0];
+  int64_t C = loopRanges[1];
+  int64_t H_out = loopRanges[2];
+  int64_t W_out = loopRanges[3];
+
+  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
+  int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
+  int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
+
+  // 核心内存计算 (针对 2x2 MaxPool, stride=2):
+  // 1 个 Output 元素对应 2x2 = 4 个 Input 元素
+  // 暂存这 1 个输出像素的计算，SRAM 需要的空间为 1(Out) + 4(In) = 5 个元素大小
+  int64_t bytesPerOutPixel = 5 * bytesPerElem;
+  int64_t maxPixels = spmSize / bytesPerOutPixel;
+
+  if (maxPixels <= 0) return {1, 1, 1, 1}; // SPM极度受限的保护
+
+  // 初始化 Tiling Sizes
+  int64_t t_c = 1, t_h = 1, t_w = 1;
+  int64_t remaining_pixels = maxPixels;
+
+  // 1. 优先填满 W 维度 (NCHW 下 W 是最内侧维度，连续 DMA 效率最高)
+  t_w = std::min<int64_t>(W_out, remaining_pixels);
+  remaining_pixels /= t_w;
+
+  // 2. 尝试填满 H 维度 (获取完整的特征图平面)
+  if (remaining_pixels > 0) {
+      t_h = std::min<int64_t>(H_out, remaining_pixels);
+      remaining_pixels /= t_h;
+  }
+
+  // 3. 最后利用剩余空间切分 C 维度 (Channel)
+  if (remaining_pixels > 0) {
+      t_c = std::min<int64_t>(C, remaining_pixels);
+  }
+
+  // 返回对应 [N, C, H, W] 的分块配置
+  return {1, t_c, t_h, t_w};
+}
+
+SmallVector<int64_t> getMaxPoolTileSizes(linalg::GenericOp op, StringRef opName) {
+  auto &config = npux::NPUConfig::getInstance();
+  int64_t spmSize = config.getSpmSize();
+
+  SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
+  SmallVector<int64_t> tileSizes(loopRanges.size(), 0);
+
+  std::string msg;
+  llvm::raw_string_ostream os(msg);
+
+  if (opName == "npu_maxpool" && loopRanges.size() == 4) {
+    tileSizes = calculateAutoMaxPoolTileNCHW(op, spmSize);
+
+    os << "Tiling [MaxPool 2x2 NCHW] (Auto): SPM=" << spmSize 
+       << " Problem=[" << loopRanges[0] << ", " << loopRanges[1] << ", " 
+       << loopRanges[2] << ", " << loopRanges[3] << "] "
+       << "-> Tile=[N:" << tileSizes[0] << ", C:" << tileSizes[1]
+       << ", H_out:" << tileSizes[2] << ", W_out:" << tileSizes[3] << "]\n";
+    llvm::errs() << os.str();
+  }
+
+  return tileSizes;
+}
+
+
+SmallVector<int64_t> calculateAutoElemWiseTile(
+    linalg::GenericOp op, int64_t spmSize) {
+  
+  auto loopRanges = op.getStaticLoopRanges();
+  int64_t rank = loopRanges.size();
+  
+  // 默认全部切分为 1 (最保守情况)
+  SmallVector<int64_t> tileSizes(rank, 1);
+  if (rank == 0) return tileSizes; // 处理 Scalar
+
+  // 1. 计算每次迭代需要的内存 (Input + Output)
+  // 获取输入和输出的总数量 (例如 GeLU 是 1进1出 = 2，Add 是 2进1出 = 3)
+  int64_t numOperands = op.getNumDpsInputs() + op.getNumDpsInits(); 
+  
+  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
+  int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
+  int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
+
+  // 一次内层循环处理 1 个元素需要的字节数
+  int64_t bytesPerIteration = numOperands * bytesPerElem;
+  int64_t maxElems = spmSize / bytesPerIteration;
+
+  if (maxElems <= 0) return tileSizes; // SPM 极度受限时的保护
+
+  int64_t remainingElems = maxElems;
+
+  // 2. 贪心策略：从最内层 (rank-1) 向最外层 (0) 填充
+  // 最内层通常在内存中是连续的 (Row-Major)，优先填满能最大化 DMA 效率
+  for (int i = rank - 1; i >= 0; --i) {
+      int64_t dimSize = loopRanges[i];
+      
+      // 容错处理：如果是动态维度 (<=0)，保守设为 1
+      if (dimSize <= 0) dimSize = 1; 
+
+      if (remainingElems >= dimSize) {
+          // SPM 容量足够放下当前整个维度
+          tileSizes[i] = dimSize;
+          remainingElems /= dimSize; 
+      } else {
+          // SPM 容量放不下当前整个维度了，全部分配给当前维度
+          // 硬件对齐优化：如果 NPU 的 DMA 对 16 或 32 字节对齐敏感，可以在这里对齐
+          int64_t tile = (remainingElems / 16) * 16; 
+          if (tile == 0) tile = remainingElems; // 如果连 16 都不到，能放多少放多少
+
+          tileSizes[i] = tile;
+          remainingElems = 1; // 空间耗尽
+          break; // 外层维度保持默认值 1
+      }
+  }
+
+  return tileSizes;
+}
+
+SmallVector<int64_t> getElemWiseTileSizes(linalg::GenericOp op, StringRef opName) {
+  auto &config = npux::NPUConfig::getInstance();
+  int64_t spmSize = config.getSpmSize();
+
+  // 默认获取自动计算的分块大小
+  SmallVector<int64_t> tileSizes = calculateAutoElemWiseTile(op, spmSize);
+
+  // 日志打印 (动态拼接维度信息)
+  std::string msg;
+  llvm::raw_string_ostream os(msg);
+  os << "Tiling [" << opName << "] (Auto, Any-Rank): SPM=" << spmSize << " Problem=[";
+  
+  auto loopRanges = op.getStaticLoopRanges();
+  for (size_t i = 0; i < loopRanges.size(); ++i) {
+      os << loopRanges[i] << (i == loopRanges.size() - 1 ? "" : ", ");
+  }
+  os << "] -> Tile=[";
+  for (size_t i = 0; i < tileSizes.size(); ++i) {
+      os << tileSizes[i] << (i == tileSizes.size() - 1 ? "" : ", ");
+  }
+  os << "]\n";
+  llvm::errs() << os.str();
 
   return tileSizes;
 }

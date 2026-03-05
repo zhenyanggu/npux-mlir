@@ -22,8 +22,42 @@ using namespace mlir;
 
 namespace {
 
+// ============================================================================
+// 辅助函数：严格检查上下游是否有 Dequantize -> Op -> Quantize 模式并报警
+// ============================================================================
+static bool hasStrictQDQContext(Operation *op) {
+  if (op->getNumOperands() == 0 || op->getNumResults() == 0) return false;
+
+  // 1. 检查上游 Operand 0 是否有 DequantizeLinearOp
+  Value input = op->getOperand(0);
+  bool hasDq = (input.getDefiningOp<ONNXDequantizeLinearOp>() != nullptr);
+
+  // 2. 检查下游 Result 0 是否有且仅有一个 QuantizeLinearOp
+  Value result = op->getResult(0);
+  bool hasQ = false;
+  if (result.hasOneUse() && isa<ONNXQuantizeLinearOp>(*result.getUsers().begin())) {
+    hasQ = true;
+  }
+
+  // 3. 满足严格条件，放行
+  if (hasDq && hasQ) {
+    return true; 
+  }
+
+  // 4. 不满足条件，利用 Attr 避免重复报 Warning
+  StringRef warningAttrName = "npu_qdq_warning_emitted";
+  if (!op->hasAttr(warningAttrName)) {
+    op->emitWarning() << "Operation '" << op->getName() 
+                      << "' lacks strict Dequantize -> Op -> Quantize context. "
+                      << "Skipping conversion to NPU Linalg.";
+    // 打上标签，标记该 Op 已经报过警
+    op->setAttr(warningAttrName, UnitAttr::get(op->getContext()));
+  }
+  
+  return false;
+}
+
 static bool isSupportedPooling(Operation *op) {
-  // 获取属性
   ArrayAttr kernelShape, strides;
   if (auto maxPool = dyn_cast<ONNXMaxPoolSingleOutOp>(op)) {
     kernelShape = maxPool.getKernelShapeAttr();
@@ -37,10 +71,8 @@ static bool isSupportedPooling(Operation *op) {
 
   if (!kernelShape || !strides) return false;
 
-  // 1. 检查维度是否为 2D
   if (kernelShape.size() != 2 || strides.size() != 2) return false;
 
-  // 2. 检查数值是否全为 2
   auto checkAttr = [](ArrayAttr attr) {
     for (auto val : attr) {
       if (cast<IntegerAttr>(val).getInt() != 2) return false;
@@ -52,10 +84,8 @@ static bool isSupportedPooling(Operation *op) {
 }
 
 static bool isSupportedResize(ONNXResizeOp op) {
-  // 1. Check Mode
   if (op.getMode() != "nearest") return false;
 
-  // 2. Check Scales
   Value scales = op.getScales();
   auto constOp = scales.getDefiningOp<ONNXConstantOp>();
   if (!constOp) return false;
@@ -100,51 +130,52 @@ struct ONNXToLinalgNpuPass
 
     bool isEmpty=onnx_mlir::NpuOps.empty();
 
+    // --- 所有目标 Op 全部修改为 DynamicallyLegalOp，强制绑定 QDQ 检查 ---
+
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv)) {
-      target.addIllegalOp<ONNXConvOp>();
+      target.addDynamicallyLegalOp<ONNXConvOp>([](Operation *op) { return !hasStrictQDQContext(op); });
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
       target.addIllegalOp<ONNXQLinearMatMulOp>();
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm)) {
-      target.addIllegalOp<ONNXLayerNormalizationOp>();
+      target.addDynamicallyLegalOp<ONNXLayerNormalizationOp>([](Operation *op) { return !hasStrictQDQContext(op); });
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax)) {
-      target.addIllegalOp<ONNXSoftmaxOp>();
+      target.addDynamicallyLegalOp<ONNXSoftmaxOp>([](Operation *op) { return !hasStrictQDQContext(op); });
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu)) {
-      target.addIllegalOp<ONNXGeluOp>();
+      target.addDynamicallyLegalOp<ONNXGeluOp>([](Operation *op) { return !hasStrictQDQContext(op); });
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm)) {
-      target.addIllegalOp<ONNXGemmOp>();
+      target.addDynamicallyLegalOp<ONNXGemmOp>([](Operation *op) { return !hasStrictQDQContext(op); });
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Relu)) {
-      target.addIllegalOp<ONNXReluOp, ONNXLeakyReluOp>();
+      target.addDynamicallyLegalOp<ONNXReluOp, ONNXLeakyReluOp>([](Operation *op) { return !hasStrictQDQContext(op); });
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Transpose)) {
-      target.addIllegalOp<ONNXTransposeOp>();
+      target.addDynamicallyLegalOp<ONNXTransposeOp>([](Operation *op) { return !hasStrictQDQContext(op); });
     }
 
-
+    // 组合判定：满足属性支持 且 满足 QDQ 上下文，才视作 Illegal(被 Pattern 拦截改写)
     if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MaxPool)) {
       target.addDynamicallyLegalOp<ONNXMaxPoolSingleOutOp>(
           [](ONNXMaxPoolSingleOutOp op) {
-            return !isSupportedPooling(op);
+            return !(isSupportedPooling(op) && hasStrictQDQContext(op));
           });
     }
     if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::AveragePool)) {
       target.addDynamicallyLegalOp<ONNXAveragePoolOp>(
           [](ONNXAveragePoolOp op) {
-            return !isSupportedPooling(op);
+            return !(isSupportedPooling(op) && hasStrictQDQContext(op));
           });
     }
     if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Resize)) {
       target.addDynamicallyLegalOp<ONNXResizeOp>(
           [](ONNXResizeOp op) {
-            return !isSupportedResize(op);
+            return !(isSupportedResize(op) && hasStrictQDQContext(op));
           });
     }
-
 
     RewritePatternSet patterns(context);
 

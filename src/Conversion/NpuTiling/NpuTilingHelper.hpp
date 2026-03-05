@@ -14,7 +14,11 @@ llvm::SmallVector<int64_t> getNpuTileSizes(mlir::linalg::GenericOp op);
 llvm::SmallVector<int64_t> getGemmTileSizes(mlir::linalg::GenericOp op);
 mlir::SmallVector<int64_t> getLayoutTileSizes(
     mlir::linalg::GenericOp op, llvm::StringRef opName);
-    
+mlir::SmallVector<int64_t> getMaxPoolTileSizes(
+    mlir::linalg::GenericOp op, llvm::StringRef opName);
+mlir::SmallVector<int64_t> getElemWiseTileSizes(
+    mlir::linalg::GenericOp op, llvm::StringRef opName);
+
 bool isTilingNecessary(llvm::ArrayRef<int64_t> tileSizes, llvm::ArrayRef<int64_t> loopRanges);
 void populateElemWiseTilingPatterns(
     mlir::RewritePatternSet &patterns, mlir::MLIRContext *context);
@@ -30,6 +34,10 @@ void populateGemmTilingPatterns(
     mlir::RewritePatternSet &patterns, mlir::MLIRContext *context 
 );
 void populateLayoutTilingPatterns(
+    mlir::RewritePatternSet &patterns, mlir::MLIRContext *context
+);
+
+void populateMaxPoolTilingPatterns(
     mlir::RewritePatternSet &patterns, mlir::MLIRContext *context
 );
 

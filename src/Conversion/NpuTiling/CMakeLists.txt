@@ -4,6 +4,7 @@ add_onnx_mlir_library(NpuTiling
     Conv.cpp
     Gemm.cpp
     Layout.cpp
+    MaxPool.cpp
     NpuTilingHelper.cpp
     NpuInnerTiling.cpp
     ElemWiseInnerTiling.cpp

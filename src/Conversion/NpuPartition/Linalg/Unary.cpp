@@ -279,160 +279,160 @@ struct SoftmaxToLinalg
 };
 }
 
-struct ReluToLinalg : public OpConversionPattern<ONNXReluOp> {
-  using OpConversionPattern<ONNXReluOp>::OpConversionPattern;
+// struct ReluToLinalg : public OpConversionPattern<ONNXReluOp> {
+//   using OpConversionPattern<ONNXReluOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(ONNXReluOp op, OpAdaptor adaptor,
-      ConversionPatternRewriter &rewriter) const override {
+//   LogicalResult matchAndRewrite(ONNXReluOp op, OpAdaptor adaptor,
+//       ConversionPatternRewriter &rewriter) const override {
     
-    // 1. 获取输入和其定义 Op (Dequantize)
-    Value originInput = op.getX();
-    auto dequantOp = originInput.getDefiningOp<ONNXDequantizeLinearOp>();
-    if (!dequantOp) return failure();
+//     // 1. 获取输入和其定义 Op (Dequantize)
+//     Value originInput = op.getX();
+//     auto dequantOp = originInput.getDefiningOp<ONNXDequantizeLinearOp>();
+//     if (!dequantOp) return failure();
 
-    Value quantizedInput = dequantOp.getX();
-    auto inputType = mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
-    if (!inputType) return failure();
+//     Value quantizedInput = dequantOp.getX();
+//     auto inputType = mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
+//     if (!inputType) return failure();
 
-    // 2. 检查 Relu 的后继节点是否为 Quantize
-    auto users = op.getResult().getUsers();
-    ONNXQuantizeLinearOp quantOp = nullptr;
+//     // 2. 检查 Relu 的后继节点是否为 Quantize
+//     auto users = op.getResult().getUsers();
+//     ONNXQuantizeLinearOp quantOp = nullptr;
     
-    // 只有当 Relu 只有一个用户且该用户是 Quantize Op 时，才走标准的 Q-DQ 融合路径
-    if (op.getResult().hasOneUse()) {
-      quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(*users.begin());
-    }
+//     // 只有当 Relu 只有一个用户且该用户是 Quantize Op 时，才走标准的 Q-DQ 融合路径
+//     if (op.getResult().hasOneUse()) {
+//       quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(*users.begin());
+//     }
 
-    // 获取输入的量化参数
-    auto inParams = getScalarQuantParams(dequantOp);
+//     // 获取输入的量化参数
+//     auto inParams = getScalarQuantParams(dequantOp);
 
-    // Path A: 标准融合路径 (Dequantize -> Relu -> Quantize)
-    // ------------------------------------------------------------------------
-    if (quantOp) {
-      auto outParams = getScalarQuantParams(quantOp);
-      auto outputType = mlir::dyn_cast<RankedTensorType>(quantOp.getResult().getType());
+//     // Path A: 标准融合路径 (Dequantize -> Relu -> Quantize)
+//     // ------------------------------------------------------------------------
+//     if (quantOp) {
+//       auto outParams = getScalarQuantParams(quantOp);
+//       auto outputType = mlir::dyn_cast<RankedTensorType>(quantOp.getResult().getType());
 
-      Value result = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
-          inputType, outputType, inParams.scale, inParams.zeroPoint,
-          outParams.scale, outParams.zeroPoint, "npu_relu");
+//       Value result = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
+//           inputType, outputType, inParams.scale, inParams.zeroPoint,
+//           outParams.scale, outParams.zeroPoint, "npu_relu");
 
-      rewriter.replaceOp(quantOp, result);
-      rewriter.eraseOp(op);
-      // 如果 Dequantize 没有其他用户，则清理
-      if (dequantOp->hasOneUse()) rewriter.eraseOp(dequantOp);
+//       rewriter.replaceOp(quantOp, result);
+//       rewriter.eraseOp(op);
+//       // 如果 Dequantize 没有其他用户，则清理
+//       if (dequantOp->hasOneUse()) rewriter.eraseOp(dequantOp);
       
-      return success();
-    }
+//       return success();
+//     }
 
-    // Path B: 交换顺序路径 (Dequantize -> Relu) => (Linalg(Relu) -> Dequantize)
-    // ------------------------------------------------------------------------
-    // 这种情况下，我们在 Int8 域执行 Relu，输出仍然是 Int8，然后再 Dequantize 回 FP。
-    // 数学上：Relu(x_fp) <=> max(x_q, zp) (在 quantized domain)。
-    // 因此，输出的 Scale 和 ZP 必须与输入保持一致（Identity Quantization）。
-    {
-      // 输出类型保持为量化类型 (Int8/Uint8/Int32)
-      RankedTensorType quantizedOutputType = inputType; 
+//     // Path B: 交换顺序路径 (Dequantize -> Relu) => (Linalg(Relu) -> Dequantize)
+//     // ------------------------------------------------------------------------
+//     // 这种情况下，我们在 Int8 域执行 Relu，输出仍然是 Int8，然后再 Dequantize 回 FP。
+//     // 数学上：Relu(x_fp) <=> max(x_q, zp) (在 quantized domain)。
+//     // 因此，输出的 Scale 和 ZP 必须与输入保持一致（Identity Quantization）。
+//     {
+//       // 输出类型保持为量化类型 (Int8/Uint8/Int32)
+//       RankedTensorType quantizedOutputType = inputType; 
 
-      // 使用与输入相同的量化参数作为输出参数
-      // 这样 npu_relu 内部逻辑为：out = max(in, zp)
-      Value npuReluResult = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
-          inputType, quantizedOutputType, 
-          inParams.scale, inParams.zeroPoint, 
-          inParams.scale, inParams.zeroPoint, // Out Params = In Params
-          "npu_relu");
+//       // 使用与输入相同的量化参数作为输出参数
+//       // 这样 npu_relu 内部逻辑为：out = max(in, zp)
+//       Value npuReluResult = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
+//           inputType, quantizedOutputType, 
+//           inParams.scale, inParams.zeroPoint, 
+//           inParams.scale, inParams.zeroPoint, // Out Params = In Params
+//           "npu_relu");
 
-      // 创建新的 Dequantize Op，连接在 npuReluResult 之后
-      // 我们重用原 Dequantize Op 的 Scale 和 ZeroPoint 操作数
-      Value newDequant = rewriter.create<ONNXDequantizeLinearOp>(
-          op.getLoc(),
-          op.getType(), // 结果类型是原本 Relu 的输出类型 (FP32/FP16)
-          npuReluResult,
-          dequantOp.getXScale(),
-          dequantOp.getXZeroPoint());
+//       // 创建新的 Dequantize Op，连接在 npuReluResult 之后
+//       // 我们重用原 Dequantize Op 的 Scale 和 ZeroPoint 操作数
+//       Value newDequant = rewriter.create<ONNXDequantizeLinearOp>(
+//           op.getLoc(),
+//           op.getType(), // 结果类型是原本 Relu 的输出类型 (FP32/FP16)
+//           npuReluResult,
+//           dequantOp.getXScale(),
+//           dequantOp.getXZeroPoint());
 
-      // 用新 Dequantize 的结果替换原 Relu 的结果
-      rewriter.replaceOp(op, newDequant);
+//       // 用新 Dequantize 的结果替换原 Relu 的结果
+//       rewriter.replaceOp(op, newDequant);
 
-      // 如果旧的 Dequantize 已经没有其他用途（原 Relu 被移除了），则删除它
-      if (dequantOp->hasOneUse()) rewriter.eraseOp(dequantOp);
+//       // 如果旧的 Dequantize 已经没有其他用途（原 Relu 被移除了），则删除它
+//       if (dequantOp->hasOneUse()) rewriter.eraseOp(dequantOp);
 
-      return success();
-    }
-  }
-};
+//       return success();
+//     }
+//   }
+// };
 
-// ============================================================================
-// 4. LeakyRelu Pattern (带有 Alpha 近似逻辑)
-// ============================================================================
-struct LeakyReluToLinalg : public OpConversionPattern<ONNXLeakyReluOp> {
-  using OpConversionPattern<ONNXLeakyReluOp>::OpConversionPattern;
+// // ============================================================================
+// // 4. LeakyRelu Pattern (带有 Alpha 近似逻辑)
+// // ============================================================================
+// struct LeakyReluToLinalg : public OpConversionPattern<ONNXLeakyReluOp> {
+//   using OpConversionPattern<ONNXLeakyReluOp>::OpConversionPattern;
 
-  LogicalResult matchAndRewrite(ONNXLeakyReluOp op, OpAdaptor adaptor,
-      ConversionPatternRewriter &rewriter) const override {
-    Value originInput = op.getX();
-    auto dequantOp = originInput.getDefiningOp<ONNXDequantizeLinearOp>();
-    if (!dequantOp) return failure();
+//   LogicalResult matchAndRewrite(ONNXLeakyReluOp op, OpAdaptor adaptor,
+//       ConversionPatternRewriter &rewriter) const override {
+//     Value originInput = op.getX();
+//     auto dequantOp = originInput.getDefiningOp<ONNXDequantizeLinearOp>();
+//     if (!dequantOp) return failure();
 
-    Value quantizedInput = dequantOp.getX();
-    auto inputType = mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
-    if (!inputType) return failure();
+//     Value quantizedInput = dequantOp.getX();
+//     auto inputType = mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
+//     if (!inputType) return failure();
 
-    if (!op.getResult().hasOneUse()) return failure();
-    auto quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(
-        *op.getResult().getUsers().begin());
-    if (!quantOp) return failure();
-    auto outputType =
-        mlir::dyn_cast<RankedTensorType>(quantOp.getResult().getType());
+//     if (!op.getResult().hasOneUse()) return failure();
+//     auto quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(
+//         *op.getResult().getUsers().begin());
+//     if (!quantOp) return failure();
+//     auto outputType =
+//         mlir::dyn_cast<RankedTensorType>(quantOp.getResult().getType());
 
-    auto inParams = getScalarQuantParams(dequantOp);
-    auto outParams = getScalarQuantParams(quantOp);
+//     auto inParams = getScalarQuantParams(dequantOp);
+//     auto outParams = getScalarQuantParams(quantOp);
 
-    // --- Alpha 近似逻辑 ---
-    float originalAlpha = op.getAlpha().convertToFloat(); // 获取原始 alpha
+//     // --- Alpha 近似逻辑 ---
+//     float originalAlpha = op.getAlpha().convertToFloat(); // 获取原始 alpha
     
-    // 硬件支持的 alpha 列表
-    std::vector<float> supportedAlphas = {0.1f, 0.2f, 0.01f}; 
+//     // 硬件支持的 alpha 列表
+//     std::vector<float> supportedAlphas = {0.1f, 0.2f, 0.01f}; 
     
-    float closestAlpha = supportedAlphas[0];
-    float minDiff = std::abs(originalAlpha - closestAlpha);
+//     float closestAlpha = supportedAlphas[0];
+//     float minDiff = std::abs(originalAlpha - closestAlpha);
 
-    for (float alpha : supportedAlphas) {
-      float diff = std::abs(originalAlpha - alpha);
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestAlpha = alpha;
-      }
-    }
+//     for (float alpha : supportedAlphas) {
+//       float diff = std::abs(originalAlpha - alpha);
+//       if (diff < minDiff) {
+//         minDiff = diff;
+//         closestAlpha = alpha;
+//       }
+//     }
 
-    // 如果发生了近似（允许微小浮点误差），打印信息
-    if (std::abs(originalAlpha - closestAlpha) > 1e-5) {
-      // 使用 emitWarning 可以在编译日志中清晰看到，且带有源码位置信息
-      op.emitWarning() << "Hardware does not support LeakyRelu alpha = " << originalAlpha 
-                       << ". Approximating to closest supported value: " << closestAlpha;
+//     // 如果发生了近似（允许微小浮点误差），打印信息
+//     if (std::abs(originalAlpha - closestAlpha) > 1e-5) {
+//       // 使用 emitWarning 可以在编译日志中清晰看到，且带有源码位置信息
+//       op.emitWarning() << "Hardware does not support LeakyRelu alpha = " << originalAlpha 
+//                        << ". Approximating to closest supported value: " << closestAlpha;
       
-      // 或者如果你更喜欢直接打印到 stderr:
-      // llvm::errs() << "[NPU Partition] Warning: Approximating LeakyRelu alpha " 
-      //              << originalAlpha << " to " << closestAlpha << "\n";
-    }
+//       // 或者如果你更喜欢直接打印到 stderr:
+//       // llvm::errs() << "[NPU Partition] Warning: Approximating LeakyRelu alpha " 
+//       //              << originalAlpha << " to " << closestAlpha << "\n";
+//     }
 
-    // 调用 createPackedUnaryOp，并通过 hook 将 alpha 写入属性
-    Value result = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
-        inputType, outputType, inParams.scale, inParams.zeroPoint,
-        outParams.scale, outParams.zeroPoint, "npu_leaky_relu", 
-        [&](Operation *genericOp) {
-          // 将近似后的 alpha 写入属性，而不是作为输入
-          genericOp->setAttr("alpha", rewriter.getF32FloatAttr(closestAlpha));
-        });
+//     // 调用 createPackedUnaryOp，并通过 hook 将 alpha 写入属性
+//     Value result = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
+//         inputType, outputType, inParams.scale, inParams.zeroPoint,
+//         outParams.scale, outParams.zeroPoint, "npu_leaky_relu", 
+//         [&](Operation *genericOp) {
+//           // 将近似后的 alpha 写入属性，而不是作为输入
+//           genericOp->setAttr("alpha", rewriter.getF32FloatAttr(closestAlpha));
+//         });
 
-    rewriter.replaceOp(quantOp, result);
-    rewriter.eraseOp(op);
-    if (dequantOp->hasOneUse()) rewriter.eraseOp(dequantOp);
-    return success();
-  }
-};
+//     rewriter.replaceOp(quantOp, result);
+//     rewriter.eraseOp(op);
+//     if (dequantOp->hasOneUse()) rewriter.eraseOp(dequantOp);
+//     return success();
+//   }
+// };
 
 void npux::populateLinalgUnaryPatterns(RewritePatternSet &patterns) {
   // 注册新增的 Relu 和 LeakyRelu
-  patterns.add<GeluToLinalg, SoftmaxToLinalg, ReluToLinalg, LeakyReluToLinalg>(
+  patterns.add<GeluToLinalg, SoftmaxToLinalg>(
       patterns.getContext());
 }

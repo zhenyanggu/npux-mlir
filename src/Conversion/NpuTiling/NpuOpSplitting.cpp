@@ -85,7 +85,7 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
     if (rank == 4) {
         // 四维：对最高维（第0维）分块
-        splitDim = 0;
+        splitDim = 1;
     } else if (rank == 5) {
         // 五维：对第二位（第1维）分块
         splitDim = 1;
@@ -169,7 +169,7 @@ private:
   // 场景 B 的实现：仅对 npu_conv 进行分块
   // ----------------------------------------------------------------------------
   LogicalResult handleSimpleConvTiling(linalg::GenericOp op, PatternRewriter &rewriter) const {
-    SmallVector<int64_t> staticTileSizes = {1, 0, 0, 0};
+    SmallVector<int64_t> staticTileSizes = {0, 1, 0, 0, 0};
     SmallVector<OpFoldResult> tileSizes = getAsIndexOpFoldResult(rewriter.getContext(), staticTileSizes);
 
     auto type = cast<RankedTensorType>(op.getOutputs()[0].getType());
@@ -202,7 +202,7 @@ private:
     auto prodLibCall = producerOp->getAttrOfType<StringAttr>("library_call");
     if (!prodLibCall || prodLibCall.getValue() != "npu_conv") return failure();
 
-    SmallVector<int64_t> staticTileSizes = {1, 0, 0, 0};
+    SmallVector<int64_t> staticTileSizes = {0, 1, 0, 0, 0};
     SmallVector<OpFoldResult> tileSizes = getAsIndexOpFoldResult(rewriter.getContext(), staticTileSizes);
 
     auto type = cast<RankedTensorType>(consumerOp.getOutputs()[0].getType());

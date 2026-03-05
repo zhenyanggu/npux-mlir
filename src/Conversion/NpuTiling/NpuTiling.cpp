@@ -21,6 +21,7 @@ void populateNpuTilingPatterns(
   populateConvTilingPatterns(patterns, context);
   populateGemmTilingPatterns(patterns, context);
   populateLayoutTilingPatterns(patterns, context);
+  populateMaxPoolTilingPatterns(patterns, context);
 };
 } // namespace npux
 
