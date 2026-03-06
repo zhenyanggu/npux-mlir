@@ -49,6 +49,9 @@
   - `ActivationSymmetric=True`
   - `WeightSymmetric=True`
 - 建议保留 zero point 检查（INT8 应为 0）
+- 最终用于编译验证的目标算子必须落在 `DequantizeLinear -> [OP_NAME] -> QuantizeLinear` 模式中。
+- 若生成结果是 `QuantizeLinear -> [OP_NAME] -> DequantizeLinear`、`QLinear[OP_NAME]` 或其他不满足该模式的形式，则该测试视为不合规，需要继续调整模型生成方式。
+- 建议在 `model.onnx.mlir` 中人工或脚本检查目标算子附近 IR，确认 pattern 成立后再交付。
 
 ### 2.5 测试尺寸必须贴近真实模型
 
@@ -178,7 +181,7 @@
     - 打印 max diff / mse 与误差明细（小张量全量或大张量 Top-K）
     - 如算子适用，增加定制化验证（例如 Softmax 的 Top-K 一致性）
    - 正确释放资源
-6. 输出最终自检清单，确认文件名、shape、dtype、阈值一致。
+6. 输出最终自检清单，确认文件名、shape、dtype、阈值一致，并确认 `model.onnx.mlir` 中目标算子满足 `DequantizeLinear -> [OP_NAME] -> QuantizeLinear`。
 7. 给出 `build/[model_name]/output/` 最终交付清单（可执行文件 + input + golden）。
 8. 不执行 `make`，仅给出建议命令，由开发者手动执行。
 

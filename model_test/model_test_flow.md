@@ -76,6 +76,9 @@ LLVM IR 编译: 使用 scripts/onnx_to_llvm.sh，将上一步生成的 MLIR 文�
 - 需要统计错误数据的数量，格式（错误点数量/总点数量）
 - 测试日志最后一行必须使用统一且固定的脚本识别格式输出：`@@MODEL_TEST_RESULT@@ errors=<错误点数量>/<总点数量> status=<PASS|FAIL>`
 - 该统一格式必须作为程序最后输出；在该行之后禁止再打印其他日志。
+- 被测试的目标算子在量化图中必须满足 `DequantizeLinear -> 目标算子 -> QuantizeLinear` 的直接相邻模式，供 NPU 编译器识别并替换为 NPU 算子。
+- 禁止使用仅有 `QuantizeLinear -> 目标算子 -> DequantizeLinear` 的形式作为最终测试图，这种形式不满足当前 NPU pattern 识别要求。
+- 建议在生成 `model.onnx.mlir` 后，检查目标算子附近的 MLIR，确认存在 `onnx.DequantizeLinear -> onnx.[Op] -> onnx.QuantizeLinear`。
 - 鼓励按算子增加定制化验证：例如 Softmax 额外关注 Top-K 一致性与概率和约束。
 
 # 3. 测试进度与目标

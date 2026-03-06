@@ -39,6 +39,58 @@ static Value createNpuMediumTensor(PatternRewriter &rewriter, Location loc,
 }
 
 //=============================================================================
+// Helper: Collect dynamic sizes for a tensor value
+//=============================================================================
+static SmallVector<Value> getDynamicTensorSizes(
+    PatternRewriter &rewriter, Location loc, Value tensor) {
+  SmallVector<Value> dynamicSizes;
+  auto tensorType = dyn_cast<RankedTensorType>(tensor.getType());
+  if (!tensorType)
+    return dynamicSizes;
+
+  for (auto [idx, dim] : llvm::enumerate(tensorType.getShape())) {
+    if (ShapedType::isDynamic(dim)) {
+      dynamicSizes.push_back(
+          rewriter.create<tensor::DimOp>(loc, tensor, idx));
+    }
+  }
+
+  return dynamicSizes;
+}
+
+//=============================================================================
+// Helper: Stage a DMA input into internal DRAM
+//
+// Runtime 要求 DMA 访问的 DRAM 指针必须来自 npu_mem_alloc。这里显式创建一个
+// memory_space=0 的内部 staging tensor，并通过普通拷贝把外部/未知来源的数据
+// 先搬进去，再让后续 npu_dma_mvin 从这个 staging tensor 读取。
+//=============================================================================
+static Value createInternalDramStagingTensor(
+    PatternRewriter &rewriter, Location loc, Value input) {
+  auto inputType = cast<RankedTensorType>(input.getType());
+  SmallVector<Value> dynamicSizes = getDynamicTensorSizes(rewriter, loc, input);
+
+  Value stagingTensor = rewriter.create<bufferization::AllocTensorOp>(
+      loc, inputType, dynamicSizes);
+
+  SmallVector<utils::IteratorType> iteratorTypes(
+      inputType.getRank(), utils::IteratorType::parallel);
+  AffineMap indexingMap = rewriter.getMultiDimIdentityMap(inputType.getRank());
+  SmallVector<AffineMap> maps(2, indexingMap);
+
+  auto copyOp = rewriter.create<linalg::GenericOp>(loc, inputType,
+      /*inputs=*/ValueRange{input},
+      /*outputs=*/ValueRange{stagingTensor},
+      /*indexingMaps=*/maps,
+      /*iteratorTypes=*/iteratorTypes,
+      [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
+        b.create<linalg::YieldOp>(nestedLoc, args[0]);
+      });
+
+  return copyOp.getResult(0);
+}
+
+//=============================================================================
 // Helper: Create DMA Generic Op (mvin or mvout)
 //=============================================================================
 static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
@@ -122,11 +174,13 @@ struct NpuConvInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     for (Value operand : op.getInputs()) {
       Value processedInput = operand;
       if (operandIdx == 0) {
+        Value stagedInput = createInternalDramStagingTensor(rewriter, loc, operand);
         processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "input");
+            createDmaOp(rewriter, loc, stagedInput, "npu_dma_mvin", 2, "input");
       } else if (operandIdx == 1) {
+        Value stagedWeight = createInternalDramStagingTensor(rewriter, loc, operand);
         processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "weight");
+            createDmaOp(rewriter, loc, stagedWeight, "npu_dma_mvin", 2, "weight");
       }
       newInputs.push_back(processedInput);
       operandIdx++;
@@ -237,8 +291,9 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 
       if (index < 2) {
         // 仅对前两个输入 (通常是 LHS, RHS) 执行 MVIN，放入 Memory Space 2
+        Value stagedInput = createInternalDramStagingTensor(rewriter, loc, operand);
         Value processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "");
+            createDmaOp(rewriter, loc, stagedInput, "npu_dma_mvin", 2, "");
         newInputs.push_back(processedInput);
       } else {
         // 超过两个的后续输入（如 Bias 或其他参数）保持原样
@@ -344,8 +399,9 @@ struct NpuUnaryInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     // --- 步骤 1: 为输入插入 MVIN ---
     // createDmaOp 内部会自动为 mvin 申请 memory_space=2 的新 tensor
     Value input = op.getInputs()[0];
+    Value stagedInput = createInternalDramStagingTensor(rewriter, loc, input);
     Value mvinResult =
-        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+      createDmaOp(rewriter, loc, stagedInput, "npu_dma_mvin", 2, "input");
 
     // --- 步骤 2: 准备 Medium Tensor (分配 memory_space=2 的新内存) ---
     // 无论原输出在哪，NPU 算子的直接输出必须写入 NPU 内部存储

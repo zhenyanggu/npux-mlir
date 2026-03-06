@@ -36,6 +36,17 @@ struct NpuMaxPoolTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     SmallVector<int64_t> rawTileSizes = getMaxPoolTileSizes(op, libCall.getValue());
     if (rawTileSizes.empty()) return failure();
 
+    // MaxPool 当前是通过 output->input 的缩放 map 来表达 2x2/stride=2，
+    // 通用 tileUsingSCF 在“整块不切分”场景下仍会物化 input slice，
+    // 但它无法为 pooling window 自动补 halo，最终会把 56x56 错切成 55x55。
+    // 因此当 TileSize 已经覆盖完整迭代空间时，直接打标记跳过实际 tiling。
+    auto loopRanges = op.getStaticLoopRanges();
+    if (!isTilingNecessary(rawTileSizes, loopRanges)) {
+      op->setAttr("npu.tiled", rewriter.getUnitAttr());
+      op->setAttr("npu.trivial_tiling", rewriter.getUnitAttr());
+      return success();
+    }
+
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
     SmallVector<OpFoldResult> tileSizes = getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
     

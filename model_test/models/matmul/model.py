@@ -1,104 +1,153 @@
 import os
 import numpy as np
-import torch
-import torch.nn as nn
 import onnx
+from onnx import TensorProto, helper
 import onnxruntime as ort
-from onnxruntime.quantization import (
-    CalibrationDataReader,
-    CalibrationMethod,
-    QuantFormat,
-    QuantType,
-    quantize_static,
-)
 
 
-class WrappedMatMulModel(nn.Module):
-    def __init__(self, hidden=768):
-        super().__init__()
-        self.weight = nn.Parameter(torch.randn(hidden, hidden, dtype=torch.float32))
-
-    def forward(self, x):
-        x = x + 1e-3
-        x = torch.matmul(x, self.weight)
-        x = x - 1e-3
-        return x
+def symmetric_scale_from_max_abs(max_abs):
+    return float(max(max_abs / 127.0, 1e-6))
 
 
-class RandomDataReader(CalibrationDataReader):
-    def __init__(self, input_name, input_shape, num_batches=10, seed=2026):
-        self.input_name = input_name
-        self.input_shape = tuple(input_shape)
-        self.num_batches = num_batches
-        self.seed = seed
-        self._iterator = iter(self._generate())
-
-    def _generate(self):
-        rng = np.random.default_rng(self.seed)
-        data = []
-        for _ in range(self.num_batches):
-            sample = rng.standard_normal(size=self.input_shape).astype(np.float32)
-            data.append({self.input_name: sample})
-        return data
-
-    def get_next(self):
-        return next(self._iterator, None)
+def quantize_to_int8(array, scale):
+    quantized = np.clip(np.round(array / scale), -128, 127).astype(np.int8)
+    return quantized
 
 
-def check_symmetric_zero_points(quant_model_path):
-    model = onnx.load(quant_model_path)
-    for initializer in model.graph.initializer:
-        if "zero_point" not in initializer.name:
+def validate_dq_op_q_pattern(model, target_op_type):
+    producer = {}
+    consumers = {}
+    for node in model.graph.node:
+        for output in node.output:
+            producer[output] = node
+        for input_name in node.input:
+            consumers.setdefault(input_name, []).append(node)
+
+    for node in model.graph.node:
+        if node.op_type != target_op_type:
             continue
-        if initializer.data_type != onnx.TensorProto.INT8:
-            continue
-        values = np.frombuffer(initializer.raw_data, dtype=np.int8)
-        if values.size and not np.all(values == 0):
-            raise RuntimeError(
-                f"INT8 zero point is not 0 in initializer '{initializer.name}': {values}"
-            )
+        has_dq_input = any(
+            input_name in producer and producer[input_name].op_type == "DequantizeLinear"
+            for input_name in node.input
+        )
+        has_q_output = any(
+            consumer.op_type == "QuantizeLinear"
+            for consumer in consumers.get(node.output[0], [])
+        )
+        if has_dq_input and has_q_output:
+            return True
+    return False
+
+
+def build_qdq_matmul_model(input_shape, model_path, seed=2026):
+    rng = np.random.default_rng(seed)
+    hidden = input_shape[-1]
+    wrap_bias = 1e-3
+
+    weight_fp32 = rng.standard_normal(size=(hidden, hidden), dtype=np.float32) / np.sqrt(hidden)
+    calib_input = rng.standard_normal(size=input_shape, dtype=np.float32)
+    shifted_input = calib_input + wrap_bias
+    calib_output = np.matmul(shifted_input, weight_fp32)
+
+    input_scale = symmetric_scale_from_max_abs(np.max(np.abs(shifted_input)))
+    weight_scale = symmetric_scale_from_max_abs(np.max(np.abs(weight_fp32)))
+    output_scale = symmetric_scale_from_max_abs(np.max(np.abs(calib_output)))
+
+    weight_q = quantize_to_int8(weight_fp32, weight_scale)
+
+    initializers = [
+        helper.make_tensor("input_scale", TensorProto.FLOAT, [], [input_scale]),
+        helper.make_tensor("weight_scale", TensorProto.FLOAT, [], [weight_scale]),
+        helper.make_tensor("output_scale", TensorProto.FLOAT, [], [output_scale]),
+        helper.make_tensor("zero_point", TensorProto.INT8, [], [0]),
+        helper.make_tensor("wrap_add", TensorProto.FLOAT, [], [wrap_bias]),
+        helper.make_tensor("wrap_sub", TensorProto.FLOAT, [], [-wrap_bias]),
+        helper.make_tensor(
+            "weight_q",
+            TensorProto.INT8,
+            list(weight_q.shape),
+            weight_q.reshape(-1).tolist(),
+        ),
+    ]
+
+    nodes = [
+        helper.make_node("Add", ["input", "wrap_add"], ["wrapped_input"], name="node_add"),
+        helper.make_node(
+            "QuantizeLinear",
+            ["wrapped_input", "input_scale", "zero_point"],
+            ["input_q"],
+            name="quantize_before_matmul",
+        ),
+        helper.make_node(
+            "DequantizeLinear",
+            ["input_q", "input_scale", "zero_point"],
+            ["input_dq"],
+            name="dequant_before_matmul_input",
+        ),
+        helper.make_node(
+            "DequantizeLinear",
+            ["weight_q", "weight_scale", "zero_point"],
+            ["weight_dq"],
+            name="dequant_before_matmul_weight",
+        ),
+        helper.make_node(
+            "MatMul",
+            ["input_dq", "weight_dq"],
+            ["matmul_fp32"],
+            name="node_matmul",
+        ),
+        helper.make_node(
+            "QuantizeLinear",
+            ["matmul_fp32", "output_scale", "zero_point"],
+            ["matmul_q"],
+            name="quantize_after_matmul",
+        ),
+        helper.make_node(
+            "DequantizeLinear",
+            ["matmul_q", "output_scale", "zero_point"],
+            ["dequantized_output"],
+            name="dequant_after_matmul",
+        ),
+        helper.make_node(
+            "Add",
+            ["dequantized_output", "wrap_sub"],
+            ["output"],
+            name="node_sub",
+        ),
+    ]
+
+    graph = helper.make_graph(
+        nodes,
+        "matmul_qdq_graph",
+        [helper.make_tensor_value_info("input", TensorProto.FLOAT, list(input_shape))],
+        [helper.make_tensor_value_info("output", TensorProto.FLOAT, list(input_shape))],
+        initializers,
+    )
+
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    model.ir_version = 8
+    onnx.checker.check_model(model)
+    onnx.save(model, model_path)
+
+    reloaded = onnx.load(model_path)
+    if not validate_dq_op_q_pattern(reloaded, "MatMul"):
+        raise RuntimeError("Generated MatMul model does not satisfy DQ -> MatMul -> Q pattern")
+
+    return weight_fp32
 
 
 def main():
     model_name = "matmul"
     workdir = os.path.dirname(os.path.abspath(__file__))
-    fp32_model_path = os.path.join(workdir, "model_fp32.onnx")
     model_path = os.path.join(workdir, "model.onnx")
     input_path = os.path.join(workdir, f"{model_name}_input.bin")
     golden_path = os.path.join(workdir, f"{model_name}_output_golden.bin")
 
     input_shape = (1, 128, 768)
 
-    torch.manual_seed(2026)
     np.random.seed(2026)
 
-    model = WrappedMatMulModel(hidden=input_shape[-1]).eval()
-    dummy_input = torch.randn(*input_shape, dtype=torch.float32)
-
-    torch.onnx.export(
-        model,
-        dummy_input,
-        fp32_model_path,
-        input_names=["input"],
-        output_names=["output"],
-        opset_version=20,
-        do_constant_folding=True,
-    )
-
-    reader = RandomDataReader("input", input_shape, 10)
-    quantize_static(
-        model_input=fp32_model_path,
-        model_output=model_path,
-        calibration_data_reader=reader,
-        quant_format=QuantFormat.QDQ,
-        op_types_to_quantize=["MatMul"],
-        weight_type=QuantType.QInt8,
-        activation_type=QuantType.QInt8,
-        calibrate_method=CalibrationMethod.MinMax,
-        extra_options={"ActivationSymmetric": True, "WeightSymmetric": True},
-    )
-
-    check_symmetric_zero_points(model_path)
+    build_qdq_matmul_model(input_shape, model_path)
 
     test_input = np.random.randn(*input_shape).astype(np.float32)
     test_input.tofile(input_path)
@@ -108,14 +157,17 @@ def main():
     output = sess.run(None, {input_name: test_input})[0]
     output.astype(np.float32).tofile(golden_path)
 
-    if os.path.exists(fp32_model_path):
-        os.remove(fp32_model_path)
+    model = onnx.load(model_path)
+    if not validate_dq_op_q_pattern(model, "MatMul"):
+        raise RuntimeError("Pattern 检查失败: 未找到 DQ -> MatMul -> Q")
 
     print("Generated files:")
     print(f"  {os.path.basename(model_path)}")
     print(f"  {os.path.basename(input_path)}")
     print(f"  {os.path.basename(golden_path)}")
     print(f"Input shape: {input_shape}, dtype: float32")
+    print("Model structure: input -> Add -> Q -> DQ -> MatMul -> Q -> DQ -> Sub -> output")
+    print("Pattern check: PASS (DequantizeLinear -> MatMul -> QuantizeLinear)")
 
 
 if __name__ == "__main__":
