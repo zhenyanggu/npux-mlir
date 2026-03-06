@@ -74,6 +74,8 @@ LLVM IR 编译: 使用 scripts/onnx_to_llvm.sh，将上一步生成的 MLIR 文�
 - `main.cpp` 在结果比对时应打印错误对比明细（至少包含 index、actual、golden、abs diff）。
 - 小张量建议全量打印；大张量建议打印误差最大的 Top-K 样本。
 - 需要统计错误数据的数量，格式（错误点数量/总点数量）
+- 测试日志最后一行必须使用统一且固定的脚本识别格式输出：`@@MODEL_TEST_RESULT@@ errors=<错误点数量>/<总点数量> status=<PASS|FAIL>`
+- 该统一格式必须作为程序最后输出；在该行之后禁止再打印其他日志。
 - 鼓励按算子增加定制化验证：例如 Softmax 额外关注 Top-K 一致性与概率和约束。
 
 # 3. 测试进度与目标
@@ -90,7 +92,7 @@ LLVM IR 编译: 使用 scripts/onnx_to_llvm.sh，将上一步生成的 MLIR 文�
 - [x] Gelu
 - [x] Softmax(精度较低Top-1 match: 89 / 128)
 - [x] LayerNorm（精度较低，错误：2061/98304）
-- [ ] Resize
+<!-- - [ ] Resize硬件不支持 -->
 
 3.2 模型级测试 (Integration Tests)
 简单模型验证: MNIST

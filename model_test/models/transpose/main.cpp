@@ -16,6 +16,14 @@ namespace {
 
 namespace fs = std::filesystem;
 
+struct VerificationSummary {
+  float maxAbsError;
+  double mse;
+  int64_t errorCount;
+  int64_t totalCount;
+  bool passed;
+};
+
 struct DiffItem {
   int64_t index;
   float actual;
@@ -145,8 +153,8 @@ void verifyTransposeMapping(const std::vector<float> &input, const float *output
   }
 }
 
-void compareOutputs(const float *actual, const std::vector<float> &golden,
-    int64_t count, float threshold = 0.1f) {
+VerificationSummary compareOutputs(const float *actual,
+  const std::vector<float> &golden, int64_t count, float threshold = 0.1f) {
   float maxAbsError = 0.0f;
   double mse = 0.0;
   int64_t errorCount = 0;
@@ -171,11 +179,16 @@ void compareOutputs(const float *actual, const std::vector<float> &golden,
   std::cout << "Error Count (错误点数量/总点数量): " << errorCount << "/" << count
             << std::endl;
 
-  if (maxAbsError < threshold) {
-    std::cout << "RESULT: PASS" << std::endl;
-  } else {
-    std::cout << "RESULT: WARNING (max error exceeds threshold)" << std::endl;
-  }
+  const bool passed = (errorCount == 0);
+  std::cout << "Threshold Result: " << (passed ? "PASS" : "FAIL")
+            << std::endl;
+  return {maxAbsError, mse, errorCount, count, passed};
+}
+
+void printFinalSummary(const VerificationSummary &summary) {
+  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << summary.errorCount << "/"
+            << summary.totalCount << " status="
+            << (summary.passed ? "PASS" : "FAIL") << std::endl;
 }
 
 } // namespace
@@ -241,7 +254,8 @@ int main(int argc, char **argv) {
   std::cout << "]" << std::endl;
 
   std::vector<float> golden = loadBinaryFloatFile(goldenFile, outputElements);
-  compareOutputs(outputData, golden, outputElements);
+  const VerificationSummary summary =
+      compareOutputs(outputData, golden, outputElements);
 
   if (outputRank == 3 && outputShape[0] == dim0 && outputShape[1] == dim2 && outputShape[2] == dim1) {
     verifyTransposeMapping(inputData, outputData, dim0, dim1, dim2);
@@ -249,5 +263,6 @@ int main(int argc, char **argv) {
 
   omTensorListDestroy(inputList);
   omTensorListDestroy(outputList);
+  printFinalSummary(summary);
   return 0;
 }

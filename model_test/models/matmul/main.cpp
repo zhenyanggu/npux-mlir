@@ -15,6 +15,14 @@ extern "C" OMTensorList *run_main_graph(OMTensorList *);
 namespace {
 namespace fs = std::filesystem;
 
+struct VerificationSummary {
+  float maxAbsError;
+  double mse;
+  int64_t errorCount;
+  int64_t totalCount;
+  bool passed;
+};
+
 struct ErrorItem { int64_t index; float actual; float golden; float absDiff; };
 
 bool endsWith(const std::string &value, const std::string &suffix) {
@@ -60,8 +68,9 @@ std::vector<float> loadBinaryFloatFile(const std::string &filename, int64_t expe
   return data;
 }
 
-void compareOutputs(const float *actual, const std::vector<float> &golden, int64_t count,
-    float threshold = 0.1f, int64_t topK = 10) {
+VerificationSummary compareOutputs(const float *actual,
+  const std::vector<float> &golden, int64_t count, float threshold = 0.1f,
+  int64_t topK = 10) {
   float maxAbsError = 0.0f;
   double mse = 0.0;
   int64_t errorCount = 0;
@@ -102,8 +111,15 @@ void compareOutputs(const float *actual, const std::vector<float> &golden, int64
   std::cout << "Mean Squared Error: " << mse << std::endl;
   std::cout << "Error Count (错误点数量/总点数量): " << errorCount << "/" << count
             << std::endl;
-  std::cout << (maxAbsError < threshold ? "RESULT: PASS" : "RESULT: WARNING (max error exceeds threshold)")
-            << std::endl;
+  const bool passed = (errorCount == 0);
+  std::cout << "Threshold Result: " << (passed ? "PASS" : "FAIL") << std::endl;
+  return {maxAbsError, mse, errorCount, count, passed};
+}
+
+void printFinalSummary(const VerificationSummary &summary) {
+  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << summary.errorCount << "/"
+            << summary.totalCount << " status="
+            << (summary.passed ? "PASS" : "FAIL") << std::endl;
 }
 
 void verifyShape(const int64_t *shape, int64_t rank) {
@@ -146,10 +162,12 @@ int main(int argc, char **argv) {
   for (int64_t i = 0; i < rank; ++i) outputElements *= shape[i];
 
   std::vector<float> golden = loadBinaryFloatFile(goldenFile, outputElements);
-  compareOutputs(outputData, golden, outputElements);
+  const VerificationSummary summary =
+      compareOutputs(outputData, golden, outputElements);
   verifyShape(shape, rank);
 
   omTensorListDestroy(inputList);
   omTensorListDestroy(outputList);
+  printFinalSummary(summary);
   return 0;
 }

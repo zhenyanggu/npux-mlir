@@ -43,7 +43,7 @@ std::pair<int64_t, int64_t> getFlattened2DShape(
 
   int64_t row = 1;
   int64_t col = 1;
-  const int64_t COL_LIMIT = 65536; // 2^16 寄存器限制
+  const int64_t COL_LIMIT = 262144; // 现在已经更改为 32bit寄存器限制，但是spm只有512k，所以限制
 
   // 定义分割点索引：从该索引开始（含）往后的所有维度都乘入 col
   int64_t splitIdx = rank - 1;
@@ -56,7 +56,7 @@ std::pair<int64_t, int64_t> getFlattened2DShape(
     // 5维：Col 为最里面两位相乘
     splitIdx = rank - 2;
   } else if (rank >= 6) {
-    // 6维及以上：Col 为最里面五位相乘
+    // 6维及以上：Col 为最里面五位相乘, 这是处理卷积的权重
     splitIdx = rank - 5;
   }
 
@@ -193,14 +193,23 @@ public:
     }
 
     int64_t rank = dramType.getRank();
-    int64_t dramStrideVal = 0;
+    int64_t splitIdx = rank - 1;
 
-    if (rank >= 3) {
-      dramStrideVal = strides[rank - 3];
-    } else if (rank == 2) {
-      dramStrideVal = strides[0];
-    } else {
-      dramStrideVal = 0;
+    // 与 getFlattened2DShape 的分块规则保持一致
+    if (rank == 5) {
+      splitIdx = rank - 2;
+    } else if (rank >= 6) {
+      splitIdx = rank - 5;
+    }
+
+    if (splitIdx < 0)
+      splitIdx = 0;
+
+    int64_t dramStrideVal = cols;
+    // 对于有 row 维度的情况，优先使用真实 memref stride，兼容非连续 layout。
+    // 对于 splitIdx == 0（row=1）则退回 cols。
+    if (splitIdx > 0 && (splitIdx - 1) < (int64_t)strides.size()) {
+      dramStrideVal = strides[splitIdx - 1];
     }
 
     Value vDramStride =
