@@ -755,12 +755,16 @@ public:
       args.push_back(rewriter.create<LLVM::ConstantOp>(
           loc, i32Type, rewriter.getI32IntegerAttr(kw_val)));
 
-      // int32_t stride (直接使用 npux op 里的，无需 cast i8)
-      args.push_back(adaptor
-              .getWeightStrideM1()); // 注意：如果CAPI要的是原始stride，这里可能需要+1，这里按"直接使用"处理
+      Value convParamOne = rewriter.create<LLVM::ConstantOp>(
+          loc, i32Type, rewriter.getI32IntegerAttr(1));
 
-      // int32_t dilation
-      args.push_back(adaptor.getWeightDilationM1());
+      // int32_t stride (CAPI 需要原始值，因此对 *_m1 做 +1)
+      args.push_back(rewriter.create<LLVM::AddOp>(
+          loc, adaptor.getWeightStrideM1(), convParamOne));
+
+      // int32_t dilation (CAPI 需要原始值，因此对 *_m1 做 +1)
+      args.push_back(rewriter.create<LLVM::AddOp>(
+          loc, adaptor.getWeightDilationM1(), convParamOne));
 
       // [注意] Padding 在你提供的新列表中被注释掉了，如果 CAPI 确实移除了
       // padding 参数，这里就不传。 如果需要
@@ -793,31 +797,20 @@ public:
           loc, i32Type, rewriter.getI32IntegerAttr(tcin_val)));
 
       // --- Quantization / Activation ---
-      // uint32_t output_zeropoint (i32)
-      args.push_back(adaptor.getOutputZeropoint());
-
-      // uint16_t quant_scale (cast to i16 usually, but user list says uint16_t
-      // in struct, passed as val) LLVM Call convention handles small ints,
-      // usually passed as i32 extended. Safe to pass adaptor's Value (i32) if
-      // the C signature handles it, but strictly matching "uint16_t" usually
-      // implies we truncate or mask. 之前的代码用了
-      // castToI16，这里按照新列表的类型保持一致:
+        // uint16_t quant_scale
       args.push_back(castToI16(loc, adaptor.getQuantScale(), rewriter));
 
       // uint16_t quant_scaleshift
       args.push_back(castToI16(loc, adaptor.getQuantScaleshift(), rewriter));
-
-      // uint16_t input_a_zeropoint
-      args.push_back(castToI16(loc, adaptor.getInputAZeropoint(), rewriter));
-
-      // uint16_t input_b_zeropoint
-      args.push_back(castToI16(loc, adaptor.getInputBZeropoint(), rewriter));
 
       // bool relu_enable
       args.push_back(adaptor.getReluEnable());
 
       // uint8_t relu_type (3bit -> i8)
       args.push_back(getEnumI8(loc, op.getReluType(), rewriter));
+
+        // bool bias_enable
+        args.push_back(adaptor.getAccBias());
 
       // bool is_group_conv
       args.push_back(adaptor.getIsGroupConv());

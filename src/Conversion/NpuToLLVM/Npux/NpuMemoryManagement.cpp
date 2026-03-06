@@ -224,9 +224,9 @@ public:
     // 无论是 mvin 还是 mvout，元素类型通常是一致的
     Type elemType = dramType.getElementType();
     int64_t precisionVal = elemType.isInteger(32) ? 1 : 0;
-
+    // 更正，硬件这里全部配1就行了
     Value vPrecision =
-        rewriter.create<arith::ConstantIntOp>(loc, precisionVal, 8);
+        rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
     Value vInputType =
         rewriter.create<arith::ConstantIntOp>(loc, 0, 8); // Default
 

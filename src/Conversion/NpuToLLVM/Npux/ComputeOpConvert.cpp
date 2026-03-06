@@ -313,9 +313,11 @@ public:
 
         vPadT, vPadB, vPadL, vPadR, vPadMode,
 
-        vWeightShapeM1, vWeightStrideM1, vWeightDilationM1, vIsGroup,
+        vWeightShapeM1, vWeightStrideM1, vWeightDilationM1, 
+        vIsGroup,
 
-        vInAColM1, vInARowM1, vInAStride, vInBColM1, vInBRowM1, vInBStride,
+        vInAColM1, vInARowM1, vInAStride,
+         vInBColM1, vInBRowM1, vInBStride,
 
         vBiasPsumWidth, vBiasPsumHeight, vBiasPsumStride,
 
@@ -325,7 +327,8 @@ public:
         vReluEnable, reluTypeAttr,
         vAccBias, // Controlled by logic
 
-        vOutZp, vQuantScale, vQuantShift, vInAZp, vInBZp);
+        vOutZp, vQuantScale, vQuantShift, 
+        vInAZp, vInBZp);
 
     return success();
   }
