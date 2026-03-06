@@ -1,7 +1,6 @@
 add_onnx_mlir_library(NpuFuse
     FuseHelper.cpp
     NpuFuse.cpp
-    ReluAcc.cpp
 
     LINK_LIBS PUBLIC
     # 核心 MLIR 基础库

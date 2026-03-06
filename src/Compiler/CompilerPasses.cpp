@@ -367,7 +367,7 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR){
     if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
-      pm.addPass(npux::createNpuSramPromotionPass());
+      //pm.addPass(npux::createNpuSramPromotionPass());
     }
     addKrnlToLLVMPasses(pm, outputNameNoExt, /*enableCSE=*/true);
   }

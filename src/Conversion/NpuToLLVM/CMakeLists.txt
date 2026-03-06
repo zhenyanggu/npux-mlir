@@ -7,15 +7,10 @@ add_onnx_mlir_library(NpuToLLVM
     Npux/NpuMemoryManagement.cpp
     NpuMemPlan.cpp
     Npux/InsertNpuLifecycle.cpp
-    NpuSramPromotion.cpp
     BufferDeallocTest.cpp
-    #LoopSplit.cpp
-    #ConvSplit.cpp
     NpuLowerSubview.cpp
     NpuxComputeFusion.cpp
-    #GemmPipeline.cpp
     CustomBufferLoopHoist.cpp
-    #NpuxSfu5DShapePatch.cpp
 
     LINK_LIBS PUBLIC
     # --- 基础库 ---

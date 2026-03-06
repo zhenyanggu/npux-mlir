@@ -688,13 +688,13 @@ public:
       int64_t kw_val = weightType.getDimSize(3);
 
       // Output Layout: [N, C/32, H, W, 32] -> indices 2, 3 correspond to H, W
-      int64_t th_out_val = outType.getDimSize(1);
-      int64_t tw_out_val = outType.getDimSize(2);
+      int64_t th_out_val = outType.getDimSize(2);
+      int64_t tw_out_val = outType.getDimSize(3);
 
-      int64_t tcout_val = outType.getDimSize(0) * outType.getDimSize(3);
+      int64_t tcout_val = outType.getDimSize(1) * outType.getDimSize(4);
 
       // t_cin 逻辑: 输入的第二个维度(index 1) 乘 最里面的维度(index 4)
-      int64_t tcin_val = inType.getDimSize(0) * inType.getDimSize(3);
+      int64_t tcin_val = inType.getDimSize(1) * inType.getDimSize(4);
 
       // ==========================================
       // 3. 构建参数列表 (Strict Order)

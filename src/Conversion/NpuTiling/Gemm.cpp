@@ -102,6 +102,151 @@ static LogicalResult peelForLoopLastIteration(
   return success();
 }
 
+
+static SmallVector<int64_t, 3> calculateAutoGemmTile(
+    int64_t M, int64_t N, int64_t K, int64_t spmSize, int64_t accSize) {
+
+  // 硬件对齐参数
+  const int64_t arraySizeH = 32;
+  const int64_t arraySizeW = 32;
+  const int64_t inputDtypeBytes = 1;  // int8 (输入)
+  const int64_t outputDtypeBytes = 1; // int8 (输出到SPM也是int8)
+  const int64_t accDtypeBytes = 4;    // int32 (ACC累加)
+
+  // ---------------------------------------------------------
+  // Step 1: 初始估计 Tm 和 Tn (基于 ACC 容量)
+  // ---------------------------------------------------------
+  int64_t maxAccElem = accSize / accDtypeBytes;
+
+  int64_t targetDim = std::floor(std::sqrt(maxAccElem));
+
+  // M 维度初步分块
+  int64_t t_m = std::min(M, targetDim);
+  if (t_m >= arraySizeH)
+    t_m = (t_m / arraySizeH) * arraySizeH;
+  else
+    t_m = arraySizeH;
+
+  // N 维度初步分块
+  int64_t t_n = std::min(N, maxAccElem / t_m);
+  if (t_n >= arraySizeW)
+    t_n = (t_n / arraySizeW) * arraySizeW;
+  else
+    t_n = arraySizeW;
+
+  // ---------------------------------------------------------
+  // Step 2: 联合调整 Tm, Tn, Tk (基于 ACC 和 SPM 容量)
+  // ---------------------------------------------------------
+  // 这里需要循环，因为如果 SPM 放不下 (Input + Output)，
+  // 我们需要缩小 Tm/Tn 来腾出空间。
+  int64_t t_k = arraySizeH; // 初始设为最小对齐单位
+
+  while (true) {
+    // 1. 检查 ACC 限制 (Accumulator overflow check)
+    // ---------------------------------------------
+    bool accFits = (t_m * t_n * accDtypeBytes) <= accSize;
+
+    // 2. 检查 SPM 限制 (SPM overflow check)
+    // ---------------------------------------------
+    // Output 占用: Tm * Tn * 1 byte
+    int64_t outputSpmBytes = t_m * t_n * outputDtypeBytes;
+
+    // Input 单位 K 占用: (Tm + Tn) * 1 byte
+    int64_t inputBytesPerK = (t_m + t_n) * inputDtypeBytes;
+
+    // 计算 SPM 中剩余给 Input 的空间
+    int64_t remainingSpmForInput = spmSize - outputSpmBytes;
+
+    // 至少要能放下一个最小单位的 Tk (arraySizeH)
+    bool spmFits = (remainingSpmForInput >= (inputBytesPerK * arraySizeH));
+
+    // 3. 如果 ACC 或 SPM 爆了，缩小 Tm/Tn
+    // ---------------------------------------------
+    if (!accFits || !spmFits) {
+      t_n -= arraySizeW; // 优先缩减 N
+      if (t_n < arraySizeW) {
+        t_n = arraySizeW;
+        t_m -= arraySizeH; // N 缩无可缩，缩 M
+      }
+
+      // 保护机制：如果连最小块都放不下（极少见），强制退出
+      if (t_m < arraySizeH) {
+        t_m = arraySizeH;
+        t_n = arraySizeW;
+        break;
+      }
+      continue; // 重新检查新的 Tm/Tn
+    }
+
+    // 4. 计算最终的 Tk
+    // ---------------------------------------------
+    // 到这里说明 Tm, Tn 既符合 ACC，也给 SPM 留出了至少 32*K 的空间
+    int64_t maxTk = remainingSpmForInput / inputBytesPerK;
+    t_k = std::min(K, maxTk);
+
+    // Tk 对齐
+    if (t_k >= arraySizeH)
+      t_k = (t_k / arraySizeH) * arraySizeH;
+    else
+      t_k = arraySizeH;
+
+    // 成功找到合适的分块
+    break;
+  }
+
+  return {t_m, t_n, t_k};
+}
+
+SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
+  auto &config = npux::NPUConfig::getInstance();
+
+  // 1. 获取手动配置
+  std::vector<int64_t> manualSizes = config.getMatMulTileSize();
+
+  // 2. 获取 Loop Ranges
+  SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
+  int64_t rank = loopRanges.size();
+
+  if (rank < 3) {
+    return {};
+  }
+
+  // 提取 M, N, K
+  int64_t K = loopRanges[rank - 1];
+  int64_t N = loopRanges[rank - 2];
+  int64_t M = loopRanges[rank - 3];
+
+  SmallVector<int64_t, 3> computedSizes;
+  bool isManual = false;
+
+  if (!manualSizes.empty() && manualSizes.size() >= 3) {
+    computedSizes = {manualSizes[0], manualSizes[1], manualSizes[2]};
+    isManual = true;
+  } else {
+    int64_t spmSize = config.getSpmSize();
+    int64_t accSize = config.getAccSize();
+    computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize);
+  }
+
+  std::string msg;
+  llvm::raw_string_ostream os(msg);
+  os << "Tiling [Gemm] (" << (isManual ? "Manual" : "Auto") << "): "
+     << "Problem=[M:" << M << ", N:" << N << ", K:" << K << "] "
+     << "-> Tile=[Tm:" << computedSizes[0] << ", Tn:" << computedSizes[1]
+     << ", Tk:" << computedSizes[2] << "]\n";
+  llvm::errs() << os.str();
+
+  // 3. 构建最终的 Tile Sizes 数组
+  SmallVector<int64_t> finalTileSizes(rank, 0);
+
+  // [..., tm, tn, tk]
+  finalTileSizes[rank - 3] = computedSizes[0]; // M -> tm
+  finalTileSizes[rank - 2] = computedSizes[1]; // N -> tn
+  finalTileSizes[rank - 1] = computedSizes[2]; // K -> tk
+
+  return finalTileSizes;
+}
+
 // -----------------------------------------------------------------------------
 // Main Pattern for Gemm
 // -----------------------------------------------------------------------------

@@ -10,6 +10,6 @@ using namespace mlir;
 
 namespace npux{
 void populateNpuFusePatterns(RewritePatternSet &patterns) {
-  populateReluAccFusionPatterns(patterns);
+  
 }
 }

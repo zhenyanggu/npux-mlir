@@ -17,7 +17,84 @@ using namespace mlir;
 using namespace npux; 
 
 namespace {
+SmallVector<int64_t> calculateAutoElemWiseTile(
+    linalg::GenericOp op, int64_t spmSize) {
+  
+  auto loopRanges = op.getStaticLoopRanges();
+  int64_t rank = loopRanges.size();
+  
+  // 默认全部切分为 1 (最保守情况)
+  SmallVector<int64_t> tileSizes(rank, 1);
+  if (rank == 0) return tileSizes; // 处理 Scalar
 
+  // 1. 计算每次迭代需要的内存 (Input + Output)
+  // 获取输入和输出的总数量 (例如 GeLU 是 1进1出 = 2，Add 是 2进1出 = 3)
+  int64_t numOperands = op.getNumDpsInputs() + op.getNumDpsInits(); 
+  
+  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
+  int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
+  int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
+
+  // 一次内层循环处理 1 个元素需要的字节数
+  int64_t bytesPerIteration = numOperands * bytesPerElem;
+  int64_t maxElems = spmSize / bytesPerIteration;
+
+  if (maxElems <= 0) return tileSizes; // SPM 极度受限时的保护
+
+  int64_t remainingElems = maxElems;
+
+  // 2. 贪心策略：从最内层 (rank-1) 向最外层 (0) 填充
+  // 最内层通常在内存中是连续的 (Row-Major)，优先填满能最大化 DMA 效率
+  for (int i = rank - 1; i >= 0; --i) {
+      int64_t dimSize = loopRanges[i];
+      
+      // 容错处理：如果是动态维度 (<=0)，保守设为 1
+      if (dimSize <= 0) dimSize = 1; 
+
+      if (remainingElems >= dimSize) {
+          // SPM 容量足够放下当前整个维度
+          tileSizes[i] = dimSize;
+          remainingElems /= dimSize; 
+      } else {
+          // SPM 容量放不下当前整个维度了，全部分配给当前维度
+          // 硬件对齐优化：如果 NPU 的 DMA 对 16 或 32 字节对齐敏感，可以在这里对齐
+          int64_t tile = (remainingElems / 16) * 16; 
+          if (tile == 0) tile = remainingElems; // 如果连 16 都不到，能放多少放多少
+
+          tileSizes[i] = tile;
+          remainingElems = 1; // 空间耗尽
+          break; // 外层维度保持默认值 1
+      }
+  }
+
+  return tileSizes;
+}
+
+SmallVector<int64_t> getElemWiseTileSizes(linalg::GenericOp op, StringRef opName) {
+  auto &config = npux::NPUConfig::getInstance();
+  int64_t spmSize = config.getSpmSize();
+
+  // 默认获取自动计算的分块大小
+  SmallVector<int64_t> tileSizes = calculateAutoElemWiseTile(op, spmSize);
+
+  // 日志打印 (动态拼接维度信息)
+  std::string msg;
+  llvm::raw_string_ostream os(msg);
+  os << "Tiling [" << opName << "] (Auto, Any-Rank): SPM=" << spmSize << " Problem=[";
+  
+  auto loopRanges = op.getStaticLoopRanges();
+  for (size_t i = 0; i < loopRanges.size(); ++i) {
+      os << loopRanges[i] << (i == loopRanges.size() - 1 ? "" : ", ");
+  }
+  os << "] -> Tile=[";
+  for (size_t i = 0; i < tileSizes.size(); ++i) {
+      os << tileSizes[i] << (i == tileSizes.size() - 1 ? "" : ", ");
+  }
+  os << "]\n";
+  llvm::errs() << os.str();
+
+  return tileSizes;
+}
 
 // === 2. Tiling Pattern ===
 struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
@@ -37,15 +114,6 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
     SmallVector<int64_t> rawTileSizes = getElemWiseTileSizes(op, opName);
     auto loopRanges = op.getStaticLoopRanges();
-
-
-    if (!isTilingNecessary(rawTileSizes, loopRanges)) {
-        op->setAttr("npu.tiled", rewriter.getUnitAttr());
-        
-        op->setAttr("npu.trivial_tiling", rewriter.getUnitAttr());
-
-        return success();
-    }
 
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
     SmallVector<OpFoldResult> tileSizes = getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));

@@ -6,12 +6,8 @@ add_onnx_mlir_library(NpuTiling
     Layout.cpp
     MaxPool.cpp
     NpuTilingHelper.cpp
-    NpuInnerTiling.cpp
-    ElemWiseInnerTiling.cpp
-    ConvInnerTiling.cpp
     NpuInsertDma.cpp
     NpuOpSplitting.cpp
-    ConvSpatialTiling.cpp
     RestoreAllocSpace.cpp
     RemoveRedundantDma.cpp
 

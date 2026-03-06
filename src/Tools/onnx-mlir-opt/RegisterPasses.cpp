@@ -175,10 +175,6 @@ void registerNpuPasses() {
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuSramPromotionPass();
-  });
-
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuInlinePass();
   });
 
@@ -192,10 +188,6 @@ void registerNpuPasses() {
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuTilingPass();
-  });
-
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuInnerTilingPass();
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
@@ -257,10 +249,6 @@ void registerNpuPasses() {
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuOpSplittingPass();
-  });
-
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuSpatialPeelingPass();
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {

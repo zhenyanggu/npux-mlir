@@ -16,7 +16,6 @@
 
 using namespace mlir;
 using namespace npux;
-
 namespace {
 
 // 1. 更新维度标签：现在是 5 维 (NCHWc32 中的外层 5 维)
@@ -93,6 +92,60 @@ static LogicalResult peelForLoopLastIteration(
   return success();
 }
 
+
+static std::vector<int64_t> getDseAttrValues(linalg::GenericOp op) {
+  auto dseAttr = op->getAttrOfType<ArrayAttr>("npu.dse_tiling");
+  if (!dseAttr || dseAttr.size() != 4) {
+    return {};
+  }
+  std::vector<int64_t> values;
+  for (auto val : dseAttr) {
+    values.push_back(cast<IntegerAttr>(val).getInt());
+  }
+  return values;
+}
+
+SmallVector<int64_t> getConvTileSizes(linalg::GenericOp op) {
+  unsigned rank = 0;
+  if (!op.getOutputs().empty()) {
+    if (auto type = dyn_cast<RankedTensorType>(op.getOutputs()[0].getType())) {
+      rank = type.getRank();
+    }
+  }
+  // Conv 在 NCHWc32 下通常是 5 维
+  if (rank < 5) return {};
+
+  SmallVector<int64_t> sizes(rank, 0);
+  auto &config = npux::NPUConfig::getInstance();
+  
+  // 1. 优先级：CLI/JSON 配置 > IR 属性 (DSE)
+  std::vector<int64_t> configSizes = config.getConvTileSize();
+  if (configSizes.empty()) {
+    configSizes = getDseAttrValues(op);
+  }
+
+  // 2. 维度映射逻辑
+  if (configSizes.size() >= 4) {
+    int64_t t_oh = configSizes[0];
+    int64_t t_ow = configSizes[1];
+    int64_t t_ic = configSizes[2];
+    int64_t t_oc = configSizes[3];
+
+    // 映射到 NCHWc32: [N, OC_outer, OH, OW, IC_outer]
+    sizes[0] = 1;                                 // N 维度不分块
+    sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1;     // OC (对齐 32)
+    sizes[2] = t_oh;                              // OH
+    sizes[3] = t_ow;                              // OW
+    sizes[4] = (t_ic > 32) ? (t_ic / 32) : 1;     // IC (对齐 32)
+
+    // 日志记录
+    llvm::errs() << "[Tiling] Conv: Tile=[OH:" << t_oh << ", OW:" << t_ow 
+                 << ", IC_blk:" << t_ic << ", OC_blk:" << t_oc << "]\n";
+  }
+
+  return sizes;
+}
+
 struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
@@ -114,7 +167,7 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     }
 
     // 2. 获取 TileSizes，现在长度应为 5 [N, OC, OH, OW, IC]
-    SmallVector<int64_t> tileSizes = getNpuTileSizes(convOp);
+    SmallVector<int64_t> tileSizes = getConvTileSizes(convOp);
     if (tileSizes.size() < 5)
       return failure();
 

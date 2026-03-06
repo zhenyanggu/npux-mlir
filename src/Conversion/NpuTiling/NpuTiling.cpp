@@ -14,17 +14,6 @@
 
 using namespace mlir;
 
-namespace npux {
-void populateNpuTilingPatterns(
-    RewritePatternSet &patterns, MLIRContext *context) {
-  populateElemWiseTilingPatterns(patterns, context);
-  populateConvTilingPatterns(patterns, context);
-  populateGemmTilingPatterns(patterns, context);
-  populateLayoutTilingPatterns(patterns, context);
-  populateMaxPoolTilingPatterns(patterns, context);
-};
-} // namespace npux
-
 namespace {
 struct NpuTilingPass
     : public PassWrapper<NpuTilingPass, OperationPass<func::FuncOp>> {
