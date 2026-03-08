@@ -818,7 +818,6 @@ public:
       // args.push_back(adaptor.getIsGroupConv());
 
       funcName = "npu_conv_run";
-      SmallVector<Value, 36> args;
 
       // ==========================================
       // 1-5. Padding 相关 (uint8_t)
