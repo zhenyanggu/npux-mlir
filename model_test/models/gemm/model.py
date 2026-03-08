@@ -1,4 +1,5 @@
 import os
+import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -14,9 +15,9 @@ from onnxruntime.quantization import (
 
 
 class WrappedGemmModel(nn.Module):
-    def __init__(self, in_features=768, out_features=1024):
+    def __init__(self, in_features=768, out_features=1024, use_bias=True):
         super().__init__()
-        self.fc = nn.Linear(in_features, out_features, bias=True)
+        self.fc = nn.Linear(in_features, out_features, bias=use_bias)
 
     def forward(self, x):
         x = x + 1e-3
@@ -59,7 +60,24 @@ def check_symmetric_zero_points(quant_model_path):
             )
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Generate GEMM quant model/input/golden")
+    parser.add_argument("--batch", type=int, default=128, help="Input batch size")
+    parser.add_argument("--in-features", type=int, default=768, help="Input feature size")
+    parser.add_argument("--out-features", type=int, default=1024, help="Output feature size")
+    parser.add_argument("--seed", type=int, default=2026, help="Random seed")
+    parser.add_argument("--calib-batches", type=int, default=10, help="Calibration batch count")
+    parser.add_argument(
+        "--disable-bias",
+        action="store_true",
+        help="Disable Linear bias to isolate bias-path issues on NPU",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+
     model_name = "gemm"
     workdir = os.path.dirname(os.path.abspath(__file__))
     fp32_model_path = os.path.join(workdir, "model_fp32.onnx")
@@ -67,12 +85,16 @@ def main():
     input_path = os.path.join(workdir, f"{model_name}_input.bin")
     golden_path = os.path.join(workdir, f"{model_name}_output_golden.bin")
 
-    input_shape = (128, 768)
+    input_shape = (args.batch, args.in_features)
 
-    torch.manual_seed(2026)
-    np.random.seed(2026)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
-    model = WrappedGemmModel(in_features=input_shape[-1], out_features=1024).eval()
+    model = WrappedGemmModel(
+        in_features=input_shape[-1],
+        out_features=args.out_features,
+        use_bias=not args.disable_bias,
+    ).eval()
     dummy_input = torch.randn(*input_shape, dtype=torch.float32)
 
     torch.onnx.export(
@@ -85,7 +107,7 @@ def main():
         do_constant_folding=True,
     )
 
-    reader = RandomDataReader("input", input_shape, 10)
+    reader = RandomDataReader("input", input_shape, args.calib_batches, seed=args.seed)
     quantize_static(
         model_input=fp32_model_path,
         model_output=model_path,
@@ -116,6 +138,8 @@ def main():
     print(f"  {os.path.basename(input_path)}")
     print(f"  {os.path.basename(golden_path)}")
     print(f"Input shape: {input_shape}, dtype: float32")
+    print(f"Bias enabled: {not args.disable_bias}")
+    print(f"Seed: {args.seed}, calibration batches: {args.calib_batches}")
 
 
 if __name__ == "__main__":

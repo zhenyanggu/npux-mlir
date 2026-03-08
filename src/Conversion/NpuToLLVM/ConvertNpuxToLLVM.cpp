@@ -419,6 +419,8 @@ public:
         rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI1Type(), 1);
     Value c0_i8 =
         rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(), 0);
+    Value c2_i8 =
+      rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(), 2);
     Value c0_i16 =
         rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI16Type(), 0);
     Value c0_i32 =
@@ -433,8 +435,8 @@ public:
     args.push_back(c0_i16);  // sramStride
     args.push_back(c0_i32);  // dramStride
     args.push_back(c0_i8);   // precision
-    args.push_back(c0_i8);   // inputType
-    args.push_back(c0_i1);   // dest
+    args.push_back(c2_i8);   // inputType=2 (BIAS)
+    args.push_back(c1_i1);   // dest=1 (ACC)
 
     // --- 核心设置 ---
     args.push_back(c1_i1); // is_bias: 必须设为 1

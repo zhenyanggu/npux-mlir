@@ -1234,7 +1234,7 @@ void npu_dma_mvin(
     bool dest, bool is_bias, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift
 ) {
     NPU_CAPI_LOG(
-        "npu_dma_mvin(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, input_type=%u, dest=%d, is_bias=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        "npu_dma_mvin(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, input_type=%u, dest=%d, is_bias=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%d)",
         host_ptr,
         sram_addr,
         (unsigned)col_num,
@@ -1248,7 +1248,7 @@ void npu_dma_mvin(
         (int)is_quant,
         quant_zero,
         (unsigned)quant_scale,
-        (unsigned)quant_shift);
+        (int)static_cast<int16_t>(quant_shift));
     if (g_npu_runtime) {
         MvinConfig cfg = {host_ptr, sram_addr, col_num, row_num, sram_stride, dram_stride,
                           precision, input_type, dest, is_bias, is_quant, quant_zero, quant_scale, quant_shift};
@@ -1262,7 +1262,7 @@ void npu_dma_mvout(
     bool source, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift
 ) {
     NPU_CAPI_LOG(
-        "npu_dma_mvout(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, output_type=%u, source=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        "npu_dma_mvout(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, output_type=%u, source=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%d)",
         host_ptr,
         sram_addr,
         (unsigned)col_num,
@@ -1275,7 +1275,7 @@ void npu_dma_mvout(
         (int)is_quant,
         quant_zero,
         (unsigned)quant_scale,
-        (unsigned)quant_shift);
+        (int)static_cast<int16_t>(quant_shift));
     if (g_npu_runtime) {
         MvoutConfig cfg = {host_ptr, sram_addr, col_num, row_num, sram_stride, dram_stride,
                            precision, output_type, source, is_quant, quant_zero, quant_scale, quant_shift};
@@ -1290,7 +1290,7 @@ void npu_sfu_run(
     uint16_t input_scale_shift, uint16_t output_scale, uint16_t output_scale_shift
 ) {
     NPU_CAPI_LOG(
-        "npu_sfu_run(op_type=%u, int_type=%u, is_quant=%d, input_sram_addr=0x%08X, input_col_num=%u, input_row_num=%u, output_sram_addr=0x%08X, input_zeropoint=%u, output_zeropoint=%u, input_scale=%u, input_scale_shift=%u, output_scale=%u, output_scale_shift=%u)",
+        "npu_sfu_run(op_type=%u, int_type=%u, is_quant=%d, input_sram_addr=0x%08X, input_col_num=%u, input_row_num=%u, output_sram_addr=0x%08X, input_zeropoint=%u, output_zeropoint=%u, input_scale=%u, input_scale_shift=%d, output_scale=%u, output_scale_shift=%d)",
         (unsigned)op_type,
         (unsigned)int_type,
         (int)is_quant,
@@ -1301,9 +1301,9 @@ void npu_sfu_run(
         input_zeropoint,
         (unsigned)output_zeropoint,
         (unsigned)input_scale,
-        (unsigned)input_scale_shift,
+        (int)static_cast<int16_t>(input_scale_shift),
         (unsigned)output_scale,
-        (unsigned)output_scale_shift);
+        (int)static_cast<int16_t>(output_scale_shift));
     if (g_npu_runtime) {
         SfuConfig cfg = {op_type, int_type, is_quant, input_sram_addr, input_col_num, input_row_num,
                          output_sram_addr, input_zeropoint, output_zeropoint, input_scale,
@@ -1324,7 +1324,7 @@ void npu_conv_run(
     bool is_bias, uint32_t output_zeropoint, uint16_t quant_scale, uint16_t quant_scaleshift
 ) {
     NPU_CAPI_LOG(
-        "npu_conv_run(pad=[%u,%u,%u,%u], pad_mode=%u, weight_shape_m1=%u, weight_stride_m1=%u, weight_dilation_m1=%u, is_group_conv=%d, int_type=%u, op_type=%u, dataflow_mode=%d, accout_dest=%d, input_a_zeropoint=%u, input_b_zeropoint=%u, input_a_addr=0x%08X, input_a_col_num_m1=%u, input_a_row_num_m1=%u, input_a_stride=%u, input_b_addr=0x%08X, input_b_col_num_m1=%u, input_b_row_num_m1=%u, input_b_stride=%u, biaspsum_width=%u, biaspsum_height=%u, biaspsum_addr=0x%08X, biaspsum_stride=%u, output_addr=0x%08X, output_stride=%u, is_accumulate=%d, relu_enable=%d, relu_type=%u, is_bias=%d, output_zeropoint=%u, quant_scale=%u, quant_scaleshift=%u)",
+        "npu_conv_run(pad=[%u,%u,%u,%u], pad_mode=%u, weight_shape_m1=%u, weight_stride_m1=%u, weight_dilation_m1=%u, is_group_conv=%d, int_type=%u, op_type=%u, dataflow_mode=%d, accout_dest=%d, input_a_zeropoint=%u, input_b_zeropoint=%u, input_a_addr=0x%08X, input_a_col_num_m1=%u, input_a_row_num_m1=%u, input_a_stride=%u, input_b_addr=0x%08X, input_b_col_num_m1=%u, input_b_row_num_m1=%u, input_b_stride=%u, biaspsum_width=%u, biaspsum_height=%u, biaspsum_addr=0x%08X, biaspsum_stride=%u, output_addr=0x%08X, output_stride=%u, is_accumulate=%d, relu_enable=%d, relu_type=%u, is_bias=%d, output_zeropoint=%u, quant_scale=%u, quant_scaleshift=%d)",
         (unsigned)pad_top,
         (unsigned)pad_bottom,
         (unsigned)pad_left,
@@ -1360,7 +1360,7 @@ void npu_conv_run(
         (int)is_bias,
         output_zeropoint,
         (unsigned)quant_scale,
-        (unsigned)quant_scaleshift);
+        (int)static_cast<int16_t>(quant_scaleshift));
     if (g_npu_runtime) {
         ConvConfig cfg = {
             pad_top, pad_bottom, pad_left, pad_right, pad_mode,
@@ -1401,7 +1401,7 @@ void npu_conv_tile_run(
 
 ) {
     NPU_CAPI_LOG(
-        "npu_conv_tile_run(sram_addr_ifm=0x%08X, sram_addr_weight=0x%08X, sram_addr_ofm=0x%08X, acc_addr_psum=0x%08X, c_in=%d, k_h=%d, k_w=%d, stride=%d, dilation=%d, i_cin=%d, t_cout=%d, t_h_out=%d, t_w_out=%d, t_cin=%d, quant_scale=%u, quant_scaleshift=%u, relu_enable=%d, relu_type=%u, bias_enable=%d, is_group_conv=%d)",
+        "npu_conv_tile_run(sram_addr_ifm=0x%08X, sram_addr_weight=0x%08X, sram_addr_ofm=0x%08X, acc_addr_psum=0x%08X, c_in=%d, k_h=%d, k_w=%d, stride=%d, dilation=%d, i_cin=%d, t_cout=%d, t_h_out=%d, t_w_out=%d, t_cin=%d, quant_scale=%u, quant_scaleshift=%d, relu_enable=%d, relu_type=%u, bias_enable=%d, is_group_conv=%d)",
         sram_addr_ifm,
         sram_addr_weight,
         sram_addr_ofm,
@@ -1417,7 +1417,7 @@ void npu_conv_tile_run(
         t_w_out,
         t_cin,
         (unsigned)quant_scale,
-        (unsigned)quant_scaleshift,
+        (int)static_cast<int16_t>(quant_scaleshift),
         (int)relu_enable,
         (unsigned)relu_type,
         (int)bias_enable,
@@ -1461,7 +1461,7 @@ void npu_gemm_run(
     uint32_t input_b_addr, uint8_t input_b_col_num, uint16_t input_b_row_num, uint16_t input_b_stride
 ) {
     NPU_CAPI_LOG(
-        "npu_gemm_run(dataflow=%d, int_type=%u, optype=%u, accout_dest=%d, input_a_zeropoint=%u, input_b_zeropoint=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%u, biaspsum_addr=0x%08X, biaspsum_stride=%u, biaspsum_width=%u, biaspsum_height=%u, output_addr=0x%08X, output_stride=%u, isaccu=%d, relu=%d, relu_type=%u, is_bias=%d, input_a_addr=0x%08X, input_a_col_num=%u, input_a_row_num=%u, input_a_stride=%u, input_b_addr=0x%08X, input_b_col_num=%u, input_b_row_num=%u, input_b_stride=%u)",
+        "npu_gemm_run(dataflow=%d, int_type=%u, optype=%u, accout_dest=%d, input_a_zeropoint=%u, input_b_zeropoint=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%d, biaspsum_addr=0x%08X, biaspsum_stride=%u, biaspsum_width=%u, biaspsum_height=%u, output_addr=0x%08X, output_stride=%u, isaccu=%d, relu=%d, relu_type=%u, is_bias=%d, input_a_addr=0x%08X, input_a_col_num=%u, input_a_row_num=%u, input_a_stride=%u, input_b_addr=0x%08X, input_b_col_num=%u, input_b_row_num=%u, input_b_stride=%u)",
         (int)dataflow,
         (unsigned)int_type,
         (unsigned)optype,
@@ -1470,7 +1470,7 @@ void npu_gemm_run(
         (unsigned)input_b_zeropoint,
         output_zeropoint,
         (unsigned)output_scale,
-        (unsigned)output_scaleshift,
+        (int)static_cast<int16_t>(output_scaleshift),
         biaspsum_addr,
         (unsigned)biaspsum_stride,
         (unsigned)biaspsum_width,
@@ -1514,7 +1514,7 @@ void npu_matadd_run(
     uint16_t output_scaleshift
 ) {
     NPU_CAPI_LOG(
-        "npu_matadd_run(input_a_addr=0x%08X, input_b_addr=0x%08X, output_addr=0x%08X, col_num=%u, row_num=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%u)",
+        "npu_matadd_run(input_a_addr=0x%08X, input_b_addr=0x%08X, output_addr=0x%08X, col_num=%u, row_num=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%d)",
         input_a_addr,
         input_b_addr,
         output_addr,
@@ -1522,7 +1522,7 @@ void npu_matadd_run(
         (unsigned)row_num,
         output_zeropoint,
         (unsigned)output_scale,
-        (unsigned)output_scaleshift);
+        (int)static_cast<int16_t>(output_scaleshift));
     if (g_npu_runtime) {
         MataddConfig cfg = {
             input_a_addr,
@@ -1644,7 +1644,7 @@ void npu_dma_mvin_test(void* host_ptr, uint32_t sram_addr, uint32_t col_num, uin
                        uint16_t sram_stride, uint32_t dram_stride, uint8_t precision, uint8_t input_type,
                        bool dest, bool is_bias, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift) {
     NPU_CAPI_LOG(
-        "npu_dma_mvin_test(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, input_type=%u, dest=%d, is_bias=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        "npu_dma_mvin_test(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, input_type=%u, dest=%d, is_bias=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%d)",
         host_ptr,
         sram_addr,
         (unsigned)col_num,
@@ -1658,7 +1658,7 @@ void npu_dma_mvin_test(void* host_ptr, uint32_t sram_addr, uint32_t col_num, uin
         (int)is_quant,
         quant_zero,
         (unsigned)quant_scale,
-        (unsigned)quant_shift);
+        (int)static_cast<int16_t>(quant_shift));
     #ifdef NPU_DEBUG
     printf("[TEST] MVIN: Host=%p SRAM=0x%x Size=%dx%d\n", host_ptr, sram_addr, row_num, col_num);
     #endif
@@ -1668,7 +1668,7 @@ void npu_dma_mvout_test(void* host_ptr, uint32_t sram_addr, uint32_t col_num, ui
                         uint16_t sram_stride, uint32_t dram_stride, uint8_t precision, uint8_t output_type,
                         bool source, bool is_quant, uint32_t quant_zero, uint16_t quant_scale, uint16_t quant_shift) {
     NPU_CAPI_LOG(
-        "npu_dma_mvout_test(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, output_type=%u, source=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%u)",
+        "npu_dma_mvout_test(host_ptr=%p, sram_addr=0x%08X, col_num=%u, row_num=%u, sram_stride=%u, dram_stride=%u, precision=%u, output_type=%u, source=%d, is_quant=%d, quant_zero=%u, quant_scale=%u, quant_shift=%d)",
         host_ptr,
         sram_addr,
         (unsigned)col_num,
@@ -1681,7 +1681,7 @@ void npu_dma_mvout_test(void* host_ptr, uint32_t sram_addr, uint32_t col_num, ui
         (int)is_quant,
         quant_zero,
         (unsigned)quant_scale,
-        (unsigned)quant_shift);
+        (int)static_cast<int16_t>(quant_shift));
     #ifdef NPU_DEBUG
     printf("[TEST] MVOUT: Host=%p SRAM=0x%x Size=%dx%d\n", host_ptr, sram_addr, row_num, col_num);
     #endif

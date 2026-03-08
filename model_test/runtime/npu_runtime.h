@@ -355,16 +355,55 @@ private:
 // ==========================================
 
 extern "C" {
+    // ---------------------------------------------------------------------
     // Lifecycle
+    // ---------------------------------------------------------------------
+
+    // 初始化 Runtime，打开驱动并完成寄存器/DDR 映射。
+    // 返回值：0=成功，-1=失败。
     int npu_init();
+
+    // 释放 Runtime 资源（mmap / fd / allocator）。
     void npu_destroy();
+
+    // 触发硬件复位，同时清空 Runtime 影子寄存器缓存。
     void npu_reset(); // <--- [新增]
     
+    // ---------------------------------------------------------------------
     // Memory
+    // ---------------------------------------------------------------------
+
+    // 从 Runtime 管理的 DDR 映射区申请内存。
+    // size: 申请字节数，建议按 64B 对齐（内部最小对齐 64B）。
+    // 返回：可直接传给 DMA API 的虚拟地址；失败返回 nullptr。
     void* npu_mem_alloc(size_t size);
+
+    // 释放 npu_mem_alloc() 申请的内存。
+    // ptr: 必须是 npu_mem_alloc 返回值；传 nullptr 时无操作。
     void npu_mem_free(void* ptr);
 
+    // ---------------------------------------------------------------------
     // DMA Operations
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief DRAM -> SPM/ACC（MVIN）
+     *
+     * @param host_ptr        DDR 映射区内虚拟地址（32-bit 物理地址会在内部换算）。
+     * @param sram_addr       目标 SPM/ACC 地址，硬件位宽 32-bit。
+     * @param col_num         传输列数，硬件位宽 32-bit（按硬件协议填写，当前实现直接透传）。
+     * @param row_num         传输行数，硬件位宽 32-bit（按硬件协议填写，当前实现直接透传）。
+     * @param sram_stride     SPM 步长，硬件位宽 16-bit。
+     * @param dram_stride     DRAM 步长，硬件位宽 32-bit。
+     * @param precision       输入精度，寄存器位宽 2-bit；当前 Runtime 固定写 1（该入参暂不生效）。
+     * @param input_type      输入类型，寄存器位宽 2-bit：0=IFM, 1=WEIGHT, 2=BIAS。
+     * @param dest            目的地，寄存器位宽 1-bit：0=SPM, 1=ACC。
+     * @param is_bias         是否走 bias 路径，寄存器位宽 1-bit：0/1。
+     * @param is_quant        是否量化，寄存器位宽 1-bit：0/1。
+     * @param quant_zero      量化零点，寄存器位宽 32-bit。
+     * @param quant_scale     量化 scale，寄存器位宽 16-bit。
+     * @param quant_shift     量化 shift，寄存器位宽 16-bit。
+     */
     void npu_dma_mvin(
         void* host_ptr,
         uint32_t sram_addr,
@@ -382,6 +421,23 @@ extern "C" {
         uint16_t quant_shift
     );
 
+    /**
+     * @brief SPM/ACC -> DRAM（MVOUT）
+     *
+     * @param host_ptr        DDR 映射区内虚拟地址（32-bit 物理地址会在内部换算）。
+     * @param sram_addr       源 SPM/ACC 地址，硬件位宽 32-bit。
+     * @param col_num         传输列数，硬件位宽 32-bit（按硬件协议填写，当前实现直接透传）。
+     * @param row_num         传输行数，硬件位宽 32-bit（按硬件协议填写，当前实现直接透传）。
+     * @param sram_stride     SPM 步长，硬件位宽 16-bit。
+     * @param dram_stride     DRAM 步长，硬件位宽 32-bit。
+     * @param precision       输出精度，寄存器位宽 2-bit；当前 Runtime 固定写 1（该入参暂不生效）。
+     * @param output_type     输出类型，寄存器位宽 2-bit：0=int8(SPM), 1=int32(ACC)。
+     * @param source          数据源，寄存器位宽 1-bit：0=SPM, 1=ACC。
+     * @param is_quant        是否量化，寄存器位宽 1-bit：0/1。
+     * @param quant_zero      量化零点，寄存器位宽 32-bit。
+     * @param quant_scale     量化 scale，寄存器位宽 16-bit。
+     * @param quant_shift     量化 shift，寄存器位宽 16-bit。
+     */
     void npu_dma_mvout(
         void* host_ptr,
         uint32_t sram_addr,
@@ -398,7 +454,27 @@ extern "C" {
         uint16_t quant_shift
     );
 
+    // ---------------------------------------------------------------------
     // SFU Operations
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief 通用 SFU 计算（softmax/gelu/layernorm/transpose/resample 等）
+     *
+     * @param op_type             操作码，硬件位宽 6-bit。
+     * @param int_type            数据类型，硬件位宽 2-bit（常用 0=int8）。
+     * @param is_quant            是否量化，硬件位宽 1-bit。
+     * @param input_sram_addr     输入地址，硬件位宽 32-bit。
+     * @param input_col_num       输入列数，硬件位宽 16-bit（多数场景填写 width-1）。
+     * @param input_row_num       输入行数，硬件位宽 16-bit（多数场景填写 height-1）。
+     * @param output_sram_addr    输出地址，硬件位宽 32-bit。
+     * @param input_zeropoint     输入零点，硬件位宽 32-bit。
+     * @param output_zeropoint    输出零点，硬件位宽 16-bit。
+     * @param input_scale         输入 scale，硬件位宽 16-bit。
+     * @param input_scale_shift   输入 shift，硬件位宽 16-bit。
+     * @param output_scale        输出 scale，硬件位宽 16-bit。
+     * @param output_scale_shift  输出 shift，硬件位宽 16-bit。
+     */
     void npu_sfu_run(
         uint8_t  op_type,
         uint8_t  int_type,
@@ -415,7 +491,55 @@ extern "C" {
         uint16_t output_scale_shift
     );
 
+    // ---------------------------------------------------------------------
     // Convolution (SA)
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief 卷积/SA 执行接口（直接对应硬件寄存器）
+     *
+     * Padding / Weight / Compute
+     * @param pad_top             上 padding，硬件位宽 2-bit，范围 0~3。
+     * @param pad_bottom          下 padding，硬件位宽 2-bit，范围 0~3。
+     * @param pad_left            左 padding，硬件位宽 2-bit，范围 0~3。
+     * @param pad_right           右 padding，硬件位宽 2-bit，范围 0~3。
+     * @param pad_mode            padding 模式，硬件位宽 2-bit（常用 0=zero）。
+     * @param weight_shape_m1     卷积核尺寸-1，硬件位宽 4-bit（如 3x3 填 2）。
+     * @param weight_stride_m1    步长-1，硬件位宽 2-bit（如 stride=1 填 0）。
+     * @param weight_dilation_m1  膨胀-1，硬件位宽 5-bit（如 dilation=1 填 0）。
+     * @param is_group_conv       分组卷积使能，硬件位宽 1-bit。
+     * @param int_type            数据类型，硬件位宽 2-bit（常用 0=int8）。
+     * @param op_type             操作类型，硬件位宽 2-bit（0=GEMM,1=Conv,2=GEMV）。
+     * @param dataflow_mode       数据流，硬件位宽 1-bit（0=im2col+OS,1=OS）。
+     * @param accout_dest         输出去向，硬件位宽 1-bit（0=SPM,1=ACC）。
+     * @param input_a_zeropoint   输入 A 零点，硬件位宽 16-bit。
+     * @param input_b_zeropoint   输入 B 零点，硬件位宽 16-bit。
+     *
+     * SA 输入
+     * @param input_a_addr        输入 A 地址，硬件位宽 32-bit。
+     * @param input_a_col_num_m1  输入 A 列数-1，硬件位宽 11-bit。
+     * @param input_a_row_num_m1  输入 A 行数-1，硬件位宽 5-bit。
+     * @param input_a_stride      输入 A 步长，硬件位宽 16-bit。
+     * @param input_b_addr        输入 B 地址，硬件位宽 32-bit。
+     * @param input_b_col_num_m1  输入 B 列数-1，硬件位宽 5-bit。
+     * @param input_b_row_num_m1  输入 B 行数-1，硬件位宽 11-bit。
+     * @param input_b_stride      输入 B 步长，硬件位宽 16-bit。
+     *
+     * Accumulator / 输出
+     * @param biaspsum_width      输出宽度，硬件位宽 8-bit（建议填写实际值，不减 1）。
+     * @param biaspsum_height     输出高度，硬件位宽 8-bit（建议填写实际值，不减 1）。
+     * @param biaspsum_addr       bias/psum 地址，硬件位宽 32-bit。
+     * @param biaspsum_stride     bias/psum 步长，硬件位宽 16-bit。
+     * @param output_addr         输出地址，硬件位宽 32-bit。
+     * @param output_stride       输出步长，硬件位宽 16-bit。
+     * @param is_accumulate       是否累加 psum，硬件位宽 1-bit。
+     * @param relu_enable         是否启用激活，硬件位宽 1-bit。
+     * @param relu_type           激活类型，硬件位宽 3-bit（0=relu,1=relu6,2/3/4=leaky）。
+     * @param is_bias             是否累加 bias 寄存器，硬件位宽 1-bit。
+     * @param output_zeropoint    输出零点，硬件位宽 32-bit。
+     * @param quant_scale         输出量化 scale，硬件位宽 16-bit。
+     * @param quant_scaleshift    输出量化 shift，硬件位宽 16-bit。
+     */
     void npu_conv_run(
         uint8_t pad_top,           // 2-bit
         uint8_t pad_bottom,        // 2-bit
@@ -456,7 +580,37 @@ extern "C" {
     );
 
 
+    // ---------------------------------------------------------------------
     // Micro-tiling conv tile
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief 单个 cout block 的 micro-tile 卷积内核
+     *
+     * 该接口主要是软件调度参数（`int32_t` 维度为软件位宽，不等于寄存器位宽），
+     * 内部会拆分并调用 `npu_conv_run()`。
+     *
+     * @param sram_addr_ifm      IFM 基地址（SPM, 32-bit）。
+     * @param sram_addr_weight   Weight 基地址（SPM, 32-bit）。
+     * @param sram_addr_ofm      OFM 基地址（SPM, 32-bit）。
+     * @param acc_addr_psum      中间 psum 基地址（ACC, 32-bit）。
+     * @param c_in               全局输入通道（建议 pad 到 32 的倍数）。
+     * @param k_h                卷积核高（建议 >=1）。
+     * @param k_w                卷积核宽（建议 >=1）。
+     * @param stride             步长（建议 >=1）。
+     * @param dilation           膨胀（建议 >=1）。
+     * @param i_cin              当前 cin 起始索引（建议 32 对齐）。
+     * @param t_cout             当前 tile cout（硬件 SA_SIZE=32，建议 <=32 且 32 对齐）。
+     * @param t_h_out            当前 tile 输出高（建议 >0）。
+     * @param t_w_out            当前 tile 输出宽（建议 >0）。
+     * @param t_cin              当前 tile cin（建议 32 对齐）。
+     * @param quant_scale        最终输出量化 scale（16-bit）。
+     * @param quant_scaleshift   最终输出量化 shift（16-bit）。
+     * @param relu_enable        是否启用 ReLU（1-bit）。
+     * @param relu_type          ReLU 类型（3-bit，定义同 `npu_conv_run`）。
+     * @param bias_enable        是否启用 bias（1-bit，仅首轮 cin 有效）。
+     * @param is_group_conv      是否分组卷积（1-bit）。
+     */
     void npu_conv_tile_run(
         uint32_t sram_addr_ifm,
         uint32_t sram_addr_weight,
@@ -480,6 +634,37 @@ extern "C" {
         bool     is_group_conv
     );
 
+    /**
+     * @brief GEMM 接口（矩阵乘）
+     *
+     * @param dataflow           数据流，硬件位宽 1-bit（0=im2col+OS,1=OS）。
+     * @param int_type           数据类型，硬件位宽 2-bit（常用 0=int8）。
+     * @param optype             操作类型，硬件位宽 2-bit（通常 GEMM 填 0）。
+     * @param accout_dest        输出去向，硬件位宽 1-bit（0=SPM,1=ACC）。
+     * @param input_a_zeropoint  输入 A 零点，硬件位宽 16-bit。
+     * @param input_b_zeropoint  输入 B 零点，硬件位宽 16-bit。
+     * @param output_zeropoint   输出零点，硬件位宽 32-bit。
+     * @param output_scale       输出量化 scale，硬件位宽 16-bit。
+     * @param output_scaleshift  输出量化 shift，硬件位宽 16-bit。
+     * @param biaspsum_addr      bias/psum 地址，硬件位宽 32-bit。
+     * @param biaspsum_stride    bias/psum 步长，硬件位宽 16-bit。
+     * @param biaspsum_width     输出宽度，硬件位宽 8-bit（建议实际值）。
+     * @param biaspsum_height    输出高度，硬件位宽 8-bit（建议实际值）。
+     * @param output_addr        输出地址，硬件位宽 32-bit。
+     * @param output_stride      输出步长，硬件位宽 16-bit。
+     * @param isaccu             是否累加，硬件位宽 1-bit。
+     * @param relu               是否启用 ReLU，硬件位宽 1-bit。
+     * @param relu_type          ReLU 类型，硬件位宽 3-bit。
+     * @param is_bias            是否加 bias，硬件位宽 1-bit。
+     * @param input_a_addr       输入 A 地址，硬件位宽 32-bit。
+     * @param input_a_col_num    输入 A 列数，硬件位宽 11-bit（当前实现透传）。
+     * @param input_a_row_num    输入 A 行数，硬件位宽 5-bit（当前实现透传）。
+     * @param input_a_stride     输入 A 步长，硬件位宽 16-bit。
+     * @param input_b_addr       输入 B 地址，硬件位宽 32-bit。
+     * @param input_b_col_num    输入 B 列数，硬件位宽 5-bit（当前实现透传）。
+     * @param input_b_row_num    输入 B 行数，硬件位宽 11-bit（当前实现透传）。
+     * @param input_b_stride     输入 B 步长，硬件位宽 16-bit。
+     */
     void npu_gemm_run(
         bool     dataflow,         // 1-bit: 0=im2col & OS, 1=OS only
         uint8_t  int_type,         // 2-bit
@@ -510,7 +695,22 @@ extern "C" {
         uint16_t input_b_stride
     );
 
+    // ---------------------------------------------------------------------
     // MATADD Operations
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief 两个矩阵相加（通常在 ACC）并量化输出到 SPM
+     *
+     * @param input_a_addr       输入 A 地址，硬件位宽 32-bit。
+     * @param input_b_addr       输入 B 地址，硬件位宽 32-bit。
+     * @param output_addr        输出地址，硬件位宽 32-bit。
+     * @param col_num            列数，硬件位宽 8-bit（建议填写实际列数，1~255）。
+     * @param row_num            行数，硬件位宽 8-bit（建议填写实际行数，1~255）。
+     * @param output_zeropoint   输出零点，硬件位宽 32-bit。
+     * @param output_scale       输出量化 scale，硬件位宽 16-bit。
+     * @param output_scaleshift  输出量化 shift，硬件位宽 16-bit。
+     */
     void npu_matadd_run(
         uint32_t input_a_addr,
         uint32_t input_b_addr,
@@ -522,7 +722,20 @@ extern "C" {
         uint16_t output_scaleshift
     );
 
+    // ---------------------------------------------------------------------
     // Transpose Operation (via SFU)
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief 矩阵转置
+     *
+     * @param input_sram_addr    输入地址，硬件位宽 32-bit。
+     * @param output_sram_addr   输出地址，硬件位宽 32-bit。
+     * @param col_num            输入列数-1，硬件位宽 16-bit。
+     * @param row_num            输入行数-1，硬件位宽 16-bit。
+     * @param out_padding_row    输出行方向补零，硬件位宽 1-bit（0/1）。
+     * @param out_padding_col    输出列方向补零，硬件位宽 1-bit（0/1）。
+     */
     void npu_transpose_run(
         uint32_t input_sram_addr,   // 输入矩阵在 SPM 中的地址
         uint32_t output_sram_addr,  // 输出矩阵在 SPM 中的地址
@@ -532,9 +745,22 @@ extern "C" {
         bool     out_padding_col    // 输出列方向是否补零
     );
 
+    // ---------------------------------------------------------------------
     // Resample Operation (via SFU)
-    // resample_type: 0=downsample, 1=upsample, 2=pooling
-    // resample_op: 0=max/nearest, 1=avg/bilinear
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief 2x 重采样（下采样/上采样/池化）
+     *
+     * @param resample_type      采样类型：0=downsample, 1=upsample, 2=pooling。
+     *                           软件入参位宽 8-bit，内部映射到 SFU OP(6-bit)。
+     * @param resample_op        操作：0=max/nearest, 1=avg/bilinear（上采样双线性暂不支持）。
+     *                           软件入参位宽 8-bit。
+     * @param input_sram_addr    输入地址，硬件位宽 32-bit。
+     * @param output_sram_addr   输出地址，硬件位宽 32-bit。
+     * @param input_col_num      输入列数-1，硬件位宽 16-bit。
+     * @param input_row_num      输入行数-1，硬件位宽 16-bit。
+     */
     void npu_resample_run(
         uint8_t  resample_type,     // 采样类型
         uint8_t  resample_op,       // 采样操作
@@ -544,7 +770,19 @@ extern "C" {
         uint16_t input_row_num      // 输入行数 (Height - 1)
     );
 
+    // ---------------------------------------------------------------------
     // Layout Convert (NCHW <-> NCHWC32 / NHWC)
+    // ---------------------------------------------------------------------
+
+    /**
+     * @brief NCHW -> NCHWC32
+     * @param sram_addr          输入地址（SPM，32-bit）。
+     * @param output_addr        输出地址（SPM，32-bit）。
+     * @param n                  batch，软件入参 16-bit（建议 >=1）。
+     * @param c                  channel，软件入参 16-bit（建议 >=1）。
+     * @param h                  height，软件入参 16-bit（建议 >=1）。
+     * @param w                  width，软件入参 16-bit（建议 >=1）。
+     */
     void npu_layout_nchw_to_nchwc32(
         uint32_t sram_addr,
         uint32_t output_addr,
@@ -554,6 +792,15 @@ extern "C" {
         uint16_t w
     );
 
+    /**
+     * @brief NCHWC32 -> NCHW
+     * @param sram_addr          输入地址（SPM，32-bit）。
+     * @param output_addr        输出地址（SPM，32-bit）。
+     * @param n                  batch，软件入参 16-bit（建议 >=1）。
+     * @param c                  channel，软件入参 16-bit（建议 >=1）。
+     * @param h                  height，软件入参 16-bit（建议 >=1）。
+     * @param w                  width，软件入参 16-bit（建议 >=1）。
+     */
     void npu_layout_nchwc32_to_nchw(
         uint32_t sram_addr,
         uint32_t output_addr,
@@ -563,7 +810,11 @@ extern "C" {
         uint16_t w
     );
 
+    // ---------------------------------------------------------------------
     // Test Interface
+    // ---------------------------------------------------------------------
+
+    // 测试接口：参数定义、推荐取值、位宽与 npu_dma_mvin() 完全一致。
     void npu_dma_mvin_test(
         void* host_ptr,
         uint32_t sram_addr,
@@ -581,6 +832,7 @@ extern "C" {
         uint16_t quant_shift
     );
 
+    // 测试接口：参数定义、推荐取值、位宽与 npu_dma_mvout() 完全一致。
     void npu_dma_mvout_test(
         void* host_ptr,
         uint32_t sram_addr,
