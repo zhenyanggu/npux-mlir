@@ -248,6 +248,8 @@ private:
     if (!isSpatialOnly && rank > 4) {
       sizes[4] = 1;     // Cin_c
     }
+    llvm::errs() << "[Spliting] Conv: Tile=[OH:" << sizes[2] 
+                 << ", OW:" << sizes[3] << "]\n";
 
     return sizes;
   }

@@ -12,6 +12,7 @@
 #include "src/Dialect/Npux/NpuxOps.hpp"
 
 #include <cmath>
+#include <cstdint>
 
 using namespace mlir;
 using namespace npux;
@@ -286,14 +287,21 @@ public:
       pad_mode_val = getIntAttr(op, "pad_mode", 0);
       is_group = (getIntAttr(op, "group", 1) > 1);
     } else {
-      if (inAShape.size() >= 2 && outShape.size() >= 2) {
-        a_row = inAShape[0];
-        a_col = inAShape[1];
-        b_row = inAShape[1];
-        b_col = outShape[1];
-        out_height = a_row;
-        out_width = b_col;
-      }
+        int64_t rankA= inAShape.size();
+        int64_t rankB= inBShape.size();
+        int64_t rankOut= outShape.size();
+
+        a_row = inAShape[rankA-2];
+        a_col = inAShape[rankA-1];
+        a_stride = inAStrides[rankA-2];
+
+        b_row = inBShape[rankB-2];
+        b_col = inBShape[rankB-1];
+        b_stride = inBStrides[rankB-2];
+
+        out_height = outShape[rankOut-2];
+        out_width = outShape[rankOut-1];
+        out_stride = outStrides[rankOut-2];
     }
 
     // 6. Create Constants
@@ -310,7 +318,7 @@ public:
     // --- Operation Control ---
     auto opTypeAttr = ComputeOpTypeAttr::get(rewriter.getContext(), opType);
     auto dataflowModeAttr =
-        DataflowModeAttr::get(rewriter.getContext(), DataflowMode::ws);
+        DataflowModeAttr::get(rewriter.getContext(), DataflowMode::os);
     auto accoutDestAttr = AccoutDestAttr::get(rewriter.getContext(), accDest);
     Value vIntType = c8(0);
 
