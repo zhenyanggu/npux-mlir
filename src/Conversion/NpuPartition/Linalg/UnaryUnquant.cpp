@@ -148,7 +148,7 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
     if (!outputType) return failure();
     auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
     if (!inputType || inputType.getRank() != 4 || outputType.getRank() != 4) {
-      op.emitWarning() << "ONNXMaxPool lowering to NPU resample requires NCHW (4D) tensors.";
+      op.emitWarning() << "ONNXMaxPool lowering requires NCHW (4D) tensors.";
       return failure();
     }
 
@@ -157,30 +157,87 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
         return failure();
     }
 
-    int64_t rank = outputType.getRank();
-    SmallVector<AffineExpr> inputExprs;
-    for (int i = 0; i < rank; ++i) {
-      auto expr = rewriter.getAffineDimExpr(i);
-      if (i >= 2) {
-        expr = expr * 2;
-      }
-      inputExprs.push_back(expr);
+    int64_t strideH = mlir::cast<IntegerAttr>((*strides)[0]).getInt();
+    int64_t strideW = mlir::cast<IntegerAttr>((*strides)[1]).getInt();
+    // 提取 Kernel 尺寸
+    int64_t kH = mlir::cast<IntegerAttr>((kernelShape)[0]).getInt();
+    int64_t kW = mlir::cast<IntegerAttr>((kernelShape)[1]).getInt();
+
+    SmallVector<utils::IteratorType> iteratorTypes = {
+        utils::IteratorType::parallel,  // d0: N
+        utils::IteratorType::parallel,  // d1: C
+        utils::IteratorType::parallel,  // d2: H_out
+        utils::IteratorType::parallel,  // d3: W_out
+        utils::IteratorType::reduction, // d4: Kernel_H
+        utils::IteratorType::reduction  // d5: Kernel_W
+    };
+
+    int64_t loopRank = 6;
+    auto n  = rewriter.getAffineDimExpr(0);
+    auto c  = rewriter.getAffineDimExpr(1);
+    auto oh = rewriter.getAffineDimExpr(2);
+    auto ow = rewriter.getAffineDimExpr(3);
+    auto kh = rewriter.getAffineDimExpr(4);
+    auto kw = rewriter.getAffineDimExpr(5);
+
+    // Input Map: (n, c, oh, ow, kh, kw) -> (n, c, oh * strideH + kh, ow * strideW + kw)
+    SmallVector<AffineExpr> inputExprs = {n, c, oh * strideH + kh, ow * strideW + kw};
+    auto inputMap = AffineMap::get(loopRank, 0, inputExprs, rewriter.getContext());
+
+    // Window Map: (n, c, oh, ow, kh, kw) -> (kh, kw)
+    SmallVector<AffineExpr> windowExprs = {kh, kw};
+    auto windowMap = AffineMap::get(loopRank, 0, windowExprs, rewriter.getContext());
+
+    // Output Map: (n, c, oh, ow, kh, kw) -> (n, c, oh, ow)
+    SmallVector<AffineExpr> outputExprs = {n, c, oh, ow};
+    auto outputMap = AffineMap::get(loopRank, 0, outputExprs, rewriter.getContext());
+
+    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(op.getLoc(), ctx.finalOutputType);
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.createBlock(&executeRegion.getRegion());
+
+      // 1. 创建 Dummy Window Tensor，用于给 Linalg 提供 KH 和 KW 的边界大小
+      auto dummyWindowType = RankedTensorType::get({kH, kW}, ctx.finalOutputType.getElementType());
+      Value dummyWindow = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), dummyWindowType, ValueRange{});
+
+      // 2. 创建 Result Tensor
+      SmallVector<Value> dynSizes = getDynamicSizes(rewriter, op.getLoc(), ctx.finalInput, ctx.finalOutputType.getShape());
+      Value resultInit = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), ctx.finalOutputType, dynSizes);
+
+      // 现在有 3 个 Map：输入、Dummy 窗口、输出
+      SmallVector<AffineMap, 3> indexingMaps = {inputMap, windowMap, outputMap};
+      
+      auto linalgOp = rewriter.create<linalg::GenericOp>(op.getLoc(),
+          ctx.finalOutputType, 
+          ValueRange{ctx.finalInput, dummyWindow}, // <-- 传入真实输入和 Dummy 窗口
+          resultInit, 
+          indexingMaps, 
+          iteratorTypes,
+          [&](OpBuilder &b, Location loc, ValueRange args) {
+              Value in = args[0];
+              // Value dummy_win = args[1]; // 纯属占位，直接忽略
+              Value acc = args[2];
+              
+              Value res;
+              if (mlir::isa<FloatType>(in.getType())) {
+                  res = b.create<arith::MaximumFOp>(loc, in, acc);
+              } else {
+                  res = b.create<arith::MaxSIOp>(loc, in, acc);
+              }
+              b.create<linalg::YieldOp>(loc, res);
+          }); 
+
+      linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_maxpool"));
+      linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+
+      rewriter.create<scf::YieldOp>(op.getLoc(), linalgOp.getResults());
     }
 
-    auto inputMap = AffineMap::get(rank, 0, inputExprs, rewriter.getContext());
-    auto outputMap = rewriter.getMultiDimIdentityMap(rank);
-
-    Value result = createResampleOp(rewriter, op.getLoc(), 
-        ctx.finalInput, 
-        mlir::cast<RankedTensorType>(ctx.finalInput.getType()), 
-        ctx.finalOutputType, 
-        "npu_maxpool", inputMap, outputMap);
-
-    ctx.handleOutputReplacement(result, rewriter);
+    ctx.handleOutputReplacement(executeRegion.getResults()[0], rewriter);
     return success();
   }
 };
-
 // ============================================================================
 // 4. AveragePool Pattern (保持不变，依赖新的 context 逻辑)
 // ============================================================================

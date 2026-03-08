@@ -6,18 +6,59 @@
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "src/Pass/Passes.hpp"
-#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 
 using namespace mlir;
 
 namespace {
+
+static LogicalResult peelForLoopLastIteration(
+    RewriterBase &b, scf::ForOp forOp, scf::ForOp &lastIteration) {
+  RewriterBase::InsertionGuard guard(b);
+  auto lbInt = getConstantIntValue(forOp.getLowerBound());
+  auto ubInt = getConstantIntValue(forOp.getUpperBound());
+  auto stepInt = getConstantIntValue(forOp.getStep());
+
+  if (lbInt && ubInt && stepInt &&
+      std::ceil((double)(*ubInt - *lbInt) / *stepInt) <= 1) {
+    return failure();
+  }
+
+  AffineExpr ubSymbol, stepSymbol;
+  bindSymbols(b.getContext(), ubSymbol, stepSymbol);
+  auto splitMap = AffineMap::get(0, 2, {ubSymbol - stepSymbol});
+  b.setInsertionPoint(forOp);
+  auto loc = forOp.getLoc();
+  Value splitBound = b.createOrFold<affine::AffineApplyOp>(
+      loc, splitMap, ValueRange{forOp.getUpperBound(), forOp.getStep()});
+
+  IRMapping map;
+  map.map(forOp.getLowerBound(), splitBound);
+  b.setInsertionPointAfter(forOp);
+  lastIteration = cast<scf::ForOp>(b.clone(*forOp.getOperation(), map));
+
+  b.modifyOpInPlace(
+      forOp, [&]() { forOp.getUpperBoundMutable().assign(splitBound); });
+
+  if (forOp.getNumResults() > 0) {
+    b.modifyOpInPlace(lastIteration, [&]() {
+      lastIteration.getInitArgsMutable().assign(forOp.getResults());
+    });
+  }
+  b.replaceOpUsesWithIf(forOp, lastIteration->getResults(),
+      [&](OpOperand &use) { return use.getOwner() != lastIteration; });
+
+  return success();
+}
 
 //=============================================================================
 // Pattern 1: NpuDmaTilingPattern
@@ -26,53 +67,56 @@ namespace {
 struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(linalg::GenericOp op,
-                                PatternRewriter &rewriter) const override {
-    
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+
     // 1. 防止递归
-    if (op->hasAttr("npu.split_done")) return failure();
+    if (op->hasAttr("npu.split_done"))
+      return failure();
 
     auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCallAttr) return failure();
+    if (!libCallAttr)
+      return failure();
     StringRef libName = libCallAttr.getValue();
 
     bool isMvin = libName.starts_with("npu_dma_mvin");
     bool isMvout = libName.starts_with("npu_dma_mvout");
 
-    if (!isMvin && !isMvout) return failure();
+    if (!isMvin && !isMvout)
+      return failure();
 
     // 2. 获取 DMA 类型属性
     StringRef dmaType = "";
     if (auto typeAttr = op->getAttrOfType<StringAttr>("npu.dma_type")) {
-        dmaType = typeAttr.getValue();
+      dmaType = typeAttr.getValue();
     }
 
     // ==============================================================
     // 逻辑：分块条件过滤
     // ==============================================================
-    
+
     // 条件 1: 如果是 weight，不需要分块
     if (isMvin && dmaType == "weight") {
-        op->setAttr("npu.split_done", rewriter.getUnitAttr());
-        return failure();
+      op->setAttr("npu.split_done", rewriter.getUnitAttr());
+      return failure();
     }
 
     // 条件 2: 对于 MVIN (Input)，检查其输入源是否为 tensor.extract_slice
     if (isMvin && dmaType == "input") {
-        Value mvinSource = op.getInputs()[0];
-        if (!mvinSource.getDefiningOp<tensor::ExtractSliceOp>()) {
-            op->setAttr("npu.split_done", rewriter.getUnitAttr());
-            return failure();
-        }
+      Value mvinSource = op.getInputs()[0];
+      if (!mvinSource.getDefiningOp<tensor::ExtractSliceOp>()) {
+        op->setAttr("npu.split_done", rewriter.getUnitAttr());
+        return failure();
+      }
     }
 
     // 条件 3: 对于 MVOUT，检查其输出目标是否为 tensor.extract_slice
     if (isMvout) {
-        Value mvoutDest = op.getOutputs()[0];
-        if (!mvoutDest.getDefiningOp<tensor::ExtractSliceOp>()) {
-            op->setAttr("npu.split_done", rewriter.getUnitAttr());
-            return failure();
-        }
+      Value mvoutDest = op.getOutputs()[0];
+      if (!mvoutDest.getDefiningOp<tensor::ExtractSliceOp>()) {
+        op->setAttr("npu.split_done", rewriter.getUnitAttr());
+        return failure();
+      }
     }
 
     // ==============================================================
@@ -80,19 +124,19 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     // ==============================================================
     auto inputType = cast<RankedTensorType>(op.getInputs()[0].getType());
     int rank = inputType.getRank();
-    
+
     int splitDim = -1;
 
     if (rank == 4) {
-        // 四维：对最高维（第0维）分块
-        splitDim = 1;
+      // 四维：对最高维（第0维）分块
+      splitDim = 1;
     } else if (rank == 5) {
-        // 五维：对第二位（第1维）分块
-        splitDim = 1;
+      // 五维：对第二位（第1维）分块
+      splitDim = 1;
     } else {
-        // 其他维度暂不处理
-        op->setAttr("npu.split_done", rewriter.getUnitAttr());
-        return failure();
+      // 其他维度暂不处理
+      op->setAttr("npu.split_done", rewriter.getUnitAttr());
+      return failure();
     }
 
     // 3. 执行分块 (Tiling)
@@ -106,14 +150,15 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     FailureOr<scf::SCFTilingResult> tilingResult = scf::tileUsingSCF(
         rewriter, cast<TilingInterface>(op.getOperation()), options);
 
-    if (failed(tilingResult)) return failure();
+    if (failed(tilingResult))
+      return failure();
 
     // 4. 替换并标记完成
     // 注意：linalg::GenericOp 通常只有一个输出结果
     rewriter.replaceOp(op, tilingResult->loops.front()->getResults());
 
     for (auto *tiledOp : tilingResult->tiledOps) {
-        tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+      tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
     }
 
     return success();
@@ -127,38 +172,41 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
-  LogicalResult matchAndRewrite(linalg::GenericOp op,
-                                PatternRewriter &rewriter) const override {
-    
-    if (op->hasAttr("npu.split_done")) return failure();
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+
+    if (op->hasAttr("npu.split_done"))
+      return failure();
 
     auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCallAttr) return failure();
+    if (!libCallAttr)
+      return failure();
     StringRef libName = libCallAttr.getValue();
 
     // ==============================================================================
     // 1. 逻辑分叉点
     // ==============================================================================
-    
     if (libName == "mv_acc_to_spm") {
-        // -----------------------------------------------------------
-        // 场景 A: Tail / Single 阶段 (进行融合分块)
-        // -----------------------------------------------------------
-        return handleTailFusion(op, rewriter);
-    } 
-    
+      OpOperand *inputOperand = &op->getOpOperand(0);
+      auto producerOp = inputOperand->get().getDefiningOp<linalg::GenericOp>();
+      if (!producerOp)
+        return failure();
+      auto prodLibCall = producerOp->getAttrOfType<StringAttr>("library_call");
+      if (!prodLibCall || prodLibCall.getValue() != "npu_conv") {
+        return failure();
+      }
+      return handleTailFusion(op, producerOp, rewriter);
+    }
+
     if (libName == "npu_conv") {
-        // -----------------------------------------------------------
-        // 场景 B: Head / Body 阶段 (仅对 Conv 分块)
-        // -----------------------------------------------------------
-        for (Operation *user : op.getResult(0).getUsers()) {
-            if (auto genericUser = dyn_cast<linalg::GenericOp>(user)) {
-                auto attr = genericUser->getAttrOfType<StringAttr>("library_call");
-                if (attr && attr.getValue() == "mv_acc_to_spm")
-                    return failure(); 
-            }
+      for (Operation *user : op.getResult(0).getUsers()) {
+        if (auto genericUser = dyn_cast<linalg::GenericOp>(user)) {
+          auto attr = genericUser->getAttrOfType<StringAttr>("library_call");
+          if (attr && attr.getValue() == "mv_acc_to_spm")
+            return failure();
         }
-        return handleSimpleConvTiling(op, rewriter);
+      }
+      return handleSimpleConvTiling(op, rewriter);
     }
 
     return failure();
@@ -166,122 +214,440 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
 private:
   // ----------------------------------------------------------------------------
-  // 场景 B 的实现：仅对 npu_conv 进行分块
+  // 辅助函数：根据 H * W <= 32 规则，动态生成切分大小
   // ----------------------------------------------------------------------------
-  LogicalResult handleSimpleConvTiling(linalg::GenericOp op, PatternRewriter &rewriter) const {
-    SmallVector<int64_t> staticTileSizes = {0, 1, 0, 0, 0};
-    SmallVector<OpFoldResult> tileSizes = getAsIndexOpFoldResult(rewriter.getContext(), staticTileSizes);
+  SmallVector<int64_t> getDynamicTileSizes(linalg::GenericOp op, bool isSpatialOnly) const {
+    auto loopRanges = op.getStaticLoopRanges();
+    int64_t rank = loopRanges.size();
+    SmallVector<int64_t> sizes(rank, 0);
 
-    auto type = cast<RankedTensorType>(op.getOutputs()[0].getType());
-    if (type.getDimSize(0) <= 1) {
-        op->setAttr("npu.split_done", rewriter.getUnitAttr());
-        return failure();
+    if (rank < 4) return sizes;
+
+    int64_t h_orig = loopRanges[2];
+    int64_t w_orig = loopRanges[3];
+
+    int64_t h_tile = h_orig;
+    int64_t w_tile = w_orig;
+
+    if (h_orig * w_orig > 32) {
+      if (w_orig <= 32) {
+        h_tile = 32 / w_orig; // 优先切碎 H
+        w_tile = w_orig;      // 保持 W 不变
+        if (h_tile == 0) h_tile = 1; 
+      } else {
+        h_tile = 1;
+        w_tile = 32;          // 被迫切 W
+      }
     }
 
+    sizes[1] = 1;       // Cout_c
+    sizes[2] = h_tile;  // H
+    sizes[3] = w_tile;  // W
+
+    // 如果不是仅空间切分(即切分9D Conv)，则带上 Cin_c
+    if (!isSpatialOnly && rank > 4) {
+      sizes[4] = 1;     // Cin_c
+    }
+
+    return sizes;
+  }
+
+  // ----------------------------------------------------------------------------
+  // 辅助函数：统一打标签
+  // ----------------------------------------------------------------------------
+  void labelGeneratedLoops(ArrayRef<LoopLikeOpInterface> loops, StringRef libCall, 
+                           PatternRewriter &rewriter) const {
+    SmallVector<StringRef> labels = {"cout", "H", "W"};
+    if (libCall == "npu_conv") {
+      labels.push_back("cin");
+    }
+    for (size_t i = 0; i < loops.size() && i < labels.size(); ++i) {
+      loops[i]->setAttr("npu.split_dim", rewriter.getStringAttr(labels[i]));
+    }
+  }
+
+  bool needsSplit(linalg::GenericOp op, ArrayRef<int64_t> tileSizes) const {
+    auto loopRanges = op.getStaticLoopRanges();
+    for (size_t i = 0; i < loopRanges.size(); ++i) {
+      if (tileSizes[i] > 0 && loopRanges[i] > tileSizes[i])
+        return true;
+    }
+    return false;
+  }
+
+  // ----------------------------------------------------------------------------
+  // 辅助函数：继承 Loop 属性，防止 Peel 出来的 Tail 循环丢失 Label
+  // ----------------------------------------------------------------------------
+  void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) const {
+    if (!source || !target) return;
+    if (auto attr = source->getAttr("npu.split_dim"))
+      target->setAttr("npu.split_dim", attr);
+    if (auto attr = source->getAttr("npu.target"))
+      target->setAttr("npu.target", attr);
+  }
+
+  // ----------------------------------------------------------------------------
+  // 场景 B 的实现：直接切分 npu_conv (4维全切)
+  // ----------------------------------------------------------------------------
+  LogicalResult handleSimpleConvTiling(
+      linalg::GenericOp op, PatternRewriter &rewriter) const {
+    SmallVector<int64_t> staticTileSizes = getDynamicTileSizes(op, false);
+
+    if (!needsSplit(op, staticTileSizes)) {
+      op->setAttr("npu.split_done", rewriter.getUnitAttr());
+      return failure();
+    }
+
+    SmallVector<OpFoldResult> tileSizes =
+        getAsIndexOpFoldResult(rewriter.getContext(), staticTileSizes);
     auto tilingOptions = scf::SCFTilingOptions().setTileSizes(tileSizes);
+
     FailureOr<scf::SCFTilingResult> tilingResult = scf::tileUsingSCF(
         rewriter, cast<TilingInterface>(op.getOperation()), tilingOptions);
 
     if (failed(tilingResult)) return failure();
 
+    labelGeneratedLoops(tilingResult->loops, "npu_conv", rewriter);
+
     rewriter.replaceOp(op, tilingResult->loops.front()->getResults());
     for (auto *tiledOp : tilingResult->tiledOps) {
-        tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+      tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+    }
+
+    // [新增]: 对生成的空间循环进行边界剥离，消除动态维度 '?'
+    auto loops = tilingResult->loops;
+    for (int i = (int)loops.size() - 1; i >= 0; --i) {
+      auto loopOp = cast<scf::ForOp>(loops[i].getOperation());
+      scf::ForOp partialLoop;
+      if (succeeded(scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialLoop))) {
+        inheritNpuAttributes(loopOp, partialLoop);
+      }
+    }
+
+    return success();
+  }
+
+  // ----------------------------------------------------------------------------
+  // 场景 A 的实现：两段式切分 + Cin 尾块剥离 + 空间尾块剥离
+  // ----------------------------------------------------------------------------
+  LogicalResult handleTailFusion(linalg::GenericOp consumerOp,
+      linalg::GenericOp producerOp, PatternRewriter &rewriter) const {
+    
+    // Phase 1: 外层空间切分 (Cout, H, W)
+    SmallVector<int64_t> spatialTileSizes = getDynamicTileSizes(consumerOp, true);
+
+    if (!needsSplit(consumerOp, spatialTileSizes)) {
+      consumerOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+      return failure();
+    }
+
+    SmallVector<OpFoldResult> tileSizes =
+        getAsIndexOpFoldResult(rewriter.getContext(), spatialTileSizes);
+
+    auto consumerTilingInterface = cast<TilingInterface>(consumerOp.getOperation());
+    scf::SCFTileAndFuseOptions fuseOptions;
+    fuseOptions.tilingOptions.setTileSizes(tileSizes);
+
+    Operation *targetOpPtr = producerOp.getOperation();
+    fuseOptions.setFusionControlFn(
+        [targetOpPtr](tensor::ExtractSliceOp candidateSliceOp,
+            OpResult originalProducer, bool isDestinationOperand)
+            -> std::optional<scf::SCFTileAndFuseOptions::ControlFnResult> {
+          if (originalProducer.getOwner() == targetOpPtr) {
+            scf::SCFTileAndFuseOptions::ControlFnResult ctrlResult;
+            ctrlResult.yieldProducerReplacement = true;
+            return ctrlResult;
+          }
+          return std::nullopt;
+        });
+
+    FailureOr<scf::SCFTileAndFuseResult> fuseResult =
+        scf::tileConsumerAndFuseProducersUsingSCF(
+            rewriter, consumerTilingInterface, fuseOptions);
+
+    if (failed(fuseResult)) return failure();
+
+    labelGeneratedLoops(fuseResult->loops, "mv_acc_to_spm", rewriter);
+
+    // Phase 2: 获取融合进内层的 npu_conv
+    linalg::GenericOp fusedConv = nullptr;
+    for (auto op : fuseResult->tiledAndFusedOps) {
+      if (auto genericOp = dyn_cast<linalg::GenericOp>(op)) {
+        auto libCall = genericOp->getAttrOfType<StringAttr>("library_call");
+        if (libCall && libCall.getValue() == "npu_conv") {
+          fusedConv = genericOp;
+        } else {
+          genericOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+        }
+      }
+    }
+
+    if (!fusedConv) return failure();
+
+    // Phase 3: 内层单独切分 Cin
+    SmallVector<int64_t> cinTileSizes = {0, 0, 0, 0, 1}; 
+    SmallVector<OpFoldResult> cinTileSizesOFR = 
+        getAsIndexOpFoldResult(rewriter.getContext(), cinTileSizes);
+    auto cinTilingOptions = scf::SCFTilingOptions().setTileSizes(cinTileSizesOFR);
+
+    rewriter.setInsertionPoint(fusedConv);
+    FailureOr<scf::SCFTilingResult> cinTilingResult = scf::tileUsingSCF(
+        rewriter, cast<TilingInterface>(fusedConv.getOperation()), cinTilingOptions);
+
+    if (failed(cinTilingResult) || cinTilingResult->loops.empty()) {
+        fusedConv->setAttr("npu.split_done", rewriter.getUnitAttr());
+        return success();
+    }
+
+    scf::ForOp cinLoop = cast<scf::ForOp>(cinTilingResult->loops.front().getOperation());
+    cinLoop->setAttr("npu.split_dim", rewriter.getStringAttr("cin"));
+
+    // Phase 4: Cin Last-Iteration Peeling (尾块剥离)
+    scf::ForOp lastIterationConv;
+    SmallVector<Value> finalCinResults = cinTilingResult->replacements;
+
+    // 尝试剥离最后一次迭代
+    if (succeeded(peelForLoopLastIteration(rewriter, cinLoop, lastIterationConv))) {
+      // 【核心保命逻辑】：如果成功剥离了尾块，必须把输出指向尾块的结果！
+      // 这样外层的 mv_acc_to_spm 才能顺着 Use-Def 链找到它，防止它被 DCE 删掉。
+      if (lastIterationConv.getNumResults() > 0) {
+        finalCinResults = lastIterationConv.getResults();
+      }
+    } 
+
+    // 给所有生成的内部 Conv 算子打上完成标签
+    for (auto *op : cinTilingResult->tiledOps) {
+         op->setAttr("npu.split_done", rewriter.getUnitAttr());
+         // 如果你的其他 Pass 还需要 npu.tiled 属性来识别，可以解除下面这行的注释
+         // op->setAttr("npu.tiled", rewriter.getUnitAttr());
+    }
+
+    // Phase 5: Final Replacement (使用更新后的 finalCinResults 替换内部 Conv)
+    rewriter.replaceOp(fusedConv, finalCinResults);
+    
+    // 替换外层 consumer (mv_acc_to_spm) 的输出
+    if (fuseResult->replacements.count(consumerOp->getResult(0))) {
+      rewriter.replaceOp(
+          consumerOp, fuseResult->replacements[consumerOp->getResult(0)]);
+    }
+
+    // Phase 6: 空间循环边界清理 (Spatial Peeling)
+    auto spatialLoops = fuseResult->loops;
+    for (int i = (int)spatialLoops.size() - 1; i >= 0; --i) {
+      auto loopOp = cast<scf::ForOp>(spatialLoops[i].getOperation());
+      scf::ForOp partialLoop;
+      if (succeeded(scf::peelForLoopAndSimplifyBounds(
+              rewriter, loopOp, partialLoop))) {
+        inheritNpuAttributes(loopOp, partialLoop);
+      }
+    }
+
+    return success();
+  }
+};
+
+struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+
+    if (op->hasAttr("npu.split_done"))
+      return failure();
+
+    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
+    if (!libCallAttr)
+      return failure();
+    StringRef libName = libCallAttr.getValue();
+
+    // ==============================================================================
+    // 1. 逻辑分叉点
+    // ==============================================================================
+    if (libName == "mv_acc_to_spm") {
+      // 检查其 Producer 是否是 gemm/matmul
+      OpOperand *inputOperand = &op->getOpOperand(0);
+      auto producerOp = inputOperand->get().getDefiningOp<linalg::GenericOp>();
+      if (!producerOp)
+        return failure();
+      auto prodLibCall = producerOp->getAttrOfType<StringAttr>("library_call");
+      if (!prodLibCall || (prodLibCall.getValue() != "npu_gemm" &&
+                              prodLibCall.getValue() != "npu_matmul")) {
+        return failure();
+      }
+      // -----------------------------------------------------------
+      // 场景 A: Tail / Single 阶段 (进行融合分块)
+      // -----------------------------------------------------------
+      return handleTailFusion(op, producerOp, rewriter);
+    }
+
+    if (libName == "npu_gemm" || libName == "npu_matmul") {
+      // -----------------------------------------------------------
+      // 场景 B: Head / Body 阶段 (仅对 Gemm 分块)
+      // -----------------------------------------------------------
+      for (Operation *user : op.getResult(0).getUsers()) {
+        if (auto genericUser = dyn_cast<linalg::GenericOp>(user)) {
+          auto attr = genericUser->getAttrOfType<StringAttr>("library_call");
+          if (attr && attr.getValue() == "mv_acc_to_spm")
+            return failure();
+        }
+      }
+      return handleSimpleGemmTiling(op, rewriter);
+    }
+
+    return failure();
+  }
+
+private:
+  // ----------------------------------------------------------------------------
+  // 辅助函数：根据算子的 Rank 动态生成 [N, M] 分块大小
+  // ----------------------------------------------------------------------------
+  SmallVector<int64_t> getGemmSplitSizes(linalg::GenericOp op) const {
+    int64_t rank = op.getNumLoops();
+    SmallVector<int64_t> sizes(rank, 0);
+
+    auto libCall = op->getAttrOfType<StringAttr>("library_call").getValue();
+
+    if (libCall == "mv_acc_to_spm") {
+      // mv_acc_to_spm 迭代空间是 [N, M] (Rank 2) 或 [B, N, M] (Rank 3)
+      if (rank == 2) {
+        sizes[0] = 32; // N
+        sizes[1] = 32; // M
+      } else if (rank == 3) {
+        sizes[1] = 32; // N
+        sizes[2] = 32; // M
+      }
+    } else {
+      // npu_gemm 迭代空间是 [N, M, K] (Rank 3) 或 [B, N, M, K] (Rank 4)
+      if (rank == 3) {
+        sizes[0] = 32; // N
+        sizes[1] = 32; // M
+      } else if (rank == 4) {
+        sizes[1] = 32; // N
+        sizes[2] = 32; // M
+      }
+    }
+    return sizes;
+  }
+
+  // ----------------------------------------------------------------------------
+  // 辅助函数：检查是否真的需要切分 (如果 N 和 M 都 <= 32，就不切)
+  // ----------------------------------------------------------------------------
+  bool needsSplit(linalg::GenericOp op, ArrayRef<int64_t> tileSizes) const {
+    auto loopRanges = op.getStaticLoopRanges();
+    for (size_t i = 0; i < loopRanges.size(); ++i) {
+      if (tileSizes[i] > 0 && loopRanges[i] > tileSizes[i])
+        return true;
+    }
+    return false;
+  }
+
+  // ----------------------------------------------------------------------------
+  // 场景 B 的实现：仅对 npu_gemm / npu_matmul 进行分块
+  // ----------------------------------------------------------------------------
+  LogicalResult handleSimpleGemmTiling(
+      linalg::GenericOp op, PatternRewriter &rewriter) const {
+    SmallVector<int64_t> staticTileSizes = getGemmSplitSizes(op);
+
+    if (!needsSplit(op, staticTileSizes)) {
+      op->setAttr("npu.split_done", rewriter.getUnitAttr());
+      return failure();
+    }
+
+    SmallVector<OpFoldResult> tileSizes =
+        getAsIndexOpFoldResult(rewriter.getContext(), staticTileSizes);
+    auto tilingOptions = scf::SCFTilingOptions().setTileSizes(tileSizes);
+
+    FailureOr<scf::SCFTilingResult> tilingResult = scf::tileUsingSCF(
+        rewriter, cast<TilingInterface>(op.getOperation()), tilingOptions);
+
+    if (failed(tilingResult))
+      return failure();
+
+    auto loops = tilingResult->loops;
+    if (loops.size() >= 1) {
+      loops[0]->setAttr("npu.split_dim", rewriter.getStringAttr("N"));
+    }
+    if (loops.size() >= 2) {
+      loops[1]->setAttr("npu.split_dim", rewriter.getStringAttr("M"));
+    }
+
+    rewriter.replaceOp(op, tilingResult->loops.front()->getResults());
+    for (auto *tiledOp : tilingResult->tiledOps) {
+      tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
     }
     return success();
   }
 
   // ----------------------------------------------------------------------------
-  // 场景 A 的实现：mv_acc_to_spm + npu_conv 融合分块 (你原来的复杂逻辑)
+  // 场景 A 的实现：mv_acc_to_spm + gemm 融合分块
   // ----------------------------------------------------------------------------
-  LogicalResult handleTailFusion(linalg::GenericOp consumerOp, PatternRewriter &rewriter) const {
-    OpOperand *inputOperand = &consumerOp->getOpOperand(0); 
-    auto producerOp = inputOperand->get().getDefiningOp<linalg::GenericOp>();
-    if (!producerOp) return failure();
-    
-    auto prodLibCall = producerOp->getAttrOfType<StringAttr>("library_call");
-    if (!prodLibCall || prodLibCall.getValue() != "npu_conv") return failure();
+  LogicalResult handleTailFusion(linalg::GenericOp consumerOp,
+      linalg::GenericOp producerOp, PatternRewriter &rewriter) const {
+    SmallVector<int64_t> staticTileSizes = getGemmSplitSizes(consumerOp);
 
-    SmallVector<int64_t> staticTileSizes = {0, 1, 0, 0, 0};
-    SmallVector<OpFoldResult> tileSizes = getAsIndexOpFoldResult(rewriter.getContext(), staticTileSizes);
-
-    auto type = cast<RankedTensorType>(consumerOp.getOutputs()[0].getType());
-    if (type.getDimSize(0) <= 1) { 
-        consumerOp->setAttr("npu.split_done", rewriter.getUnitAttr());
-        return failure();
+    // 如果维度已经满足 <= 32，打上标签并跳过
+    if (!needsSplit(consumerOp, staticTileSizes)) {
+      consumerOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+      return failure();
     }
 
-    auto tilingOptions = scf::SCFTilingOptions().setTileSizes(tileSizes);
+    SmallVector<OpFoldResult> tileSizes =
+        getAsIndexOpFoldResult(rewriter.getContext(), staticTileSizes);
 
-    // 5. 对 Consumer 分块
-    FailureOr<scf::SCFTilingResult> tilingResult = scf::tileUsingSCF(
-        rewriter, cast<TilingInterface>(consumerOp.getOperation()), tilingOptions);
-    if (failed(tilingResult)) return failure();
+    // 1. 初始化 Tile & Fuse 选项
+    auto consumerTilingInterface =
+        cast<TilingInterface>(consumerOp.getOperation());
+    scf::SCFTileAndFuseOptions fuseOptions;
+    fuseOptions.tilingOptions.setTileSizes(tileSizes);
 
-    // 6. 融合 Producer
-    Operation *tiledConsumerOp = tilingResult->tiledOps.back();
-    OpOperand &opOperandToFuse = tiledConsumerOp->getOpOperand(0);
-    FailureOr<linalg::FusionInfo> fusionResult = linalg::fuseProducerOfTensor(rewriter, opOperandToFuse);
-    if (failed(fusionResult)) return failure();
+    // 2. 告诉 MLIR 引擎：只要遇到我们的 producerOp (npu_gemm)，就把它融合进循环
+    Operation *targetOpPtr = producerOp.getOperation();
+    fuseOptions.setFusionControlFn(
+        [targetOpPtr](tensor::ExtractSliceOp candidateSliceOp,
+            OpResult originalProducer, bool isDestinationOperand)
+            -> std::optional<scf::SCFTileAndFuseOptions::ControlFnResult> {
+          if (originalProducer.getOwner() == targetOpPtr) {
+            scf::SCFTileAndFuseOptions::ControlFnResult ctrlResult;
+            ctrlResult.yieldProducerReplacement = true;
+            return ctrlResult;
+          }
+          return std::nullopt;
+        });
 
-    // 标记 Done
-    for (auto *tiledOp : tilingResult->tiledOps) {
-        tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+    // 3. 一键执行：自动生成 2 层
+    // scf.for，自动执行融合，完美处理所有数据流传递！
+    FailureOr<scf::SCFTileAndFuseResult> fuseResult =
+        scf::tileConsumerAndFuseProducersUsingSCF(
+            rewriter, consumerTilingInterface, fuseOptions);
+
+    if (failed(fuseResult))
+      return failure();
+
+    auto loops = fuseResult->loops;
+    if (loops.size() >= 1) {
+      // 最外层生成的一定是 N 的切分循环
+      loops[0]->setAttr("npu.split_dim", rewriter.getStringAttr("N"));
     }
-    fusionResult->fusedProducer->setAttr("npu.split_done", rewriter.getUnitAttr());
-
-    // 7. 重建 Loop 以添加 Accumulator (保持你原来的代码逻辑...)
-    scf::ForOp oldLoop = cast<scf::ForOp>(tilingResult->loops.front());
-    linalg::GenericOp fusedProducer = cast<linalg::GenericOp>(fusionResult->fusedProducer);
-    
-    SmallVector<Value> newInitArgs = llvm::to_vector(oldLoop.getInitArgs());
-    Value accInitTensor = producerOp.getOutputs()[0]; 
-    newInitArgs.push_back(accInitTensor);
-
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPoint(oldLoop);
-
-    auto newLoop = rewriter.create<scf::ForOp>(
-        oldLoop.getLoc(), oldLoop.getLowerBound(), oldLoop.getUpperBound(), oldLoop.getStep(), newInitArgs);
-
-    Block *oldBody = oldLoop.getBody();
-    Block *newBody = newLoop.getBody();
-    SmallVector<Value> argMapping;
-    argMapping.push_back(newBody->getArgument(0));
-    for (size_t i = 0; i < oldLoop.getNumRegionIterArgs(); ++i) {
-        argMapping.push_back(newBody->getArgument(1 + i));
+    if (loops.size() >= 2) {
+      // 内层生成的一定是 M 的切分循环
+      loops[1]->setAttr("npu.split_dim", rewriter.getStringAttr("M"));
     }
-    rewriter.mergeBlocks(oldBody, newBody, argMapping);
 
-    // 修正数据流
-    OpOperand *outOperand = fusedProducer.getDpsInitOperand(0);
-    auto accExtractOp = outOperand->get().getDefiningOp<tensor::ExtractSliceOp>();
-    if (!accExtractOp) return failure();
+    // 4. 给新生成的算子打上完成标签
+    for (auto op : fuseResult->tiledAndFusedOps) {
+      if (auto genericOp = dyn_cast<linalg::GenericOp>(op)) {
+        genericOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+      }
+    }
 
-    Value newAccIterArg = newBody->getArguments().back();
-    rewriter.setInsertionPoint(accExtractOp);
-    auto newAccExtractOp = rewriter.create<tensor::ExtractSliceOp>(
-        accExtractOp.getLoc(), newAccIterArg, 
-        accExtractOp.getMixedOffsets(), accExtractOp.getMixedSizes(), accExtractOp.getMixedStrides());
-    rewriter.replaceOp(accExtractOp, newAccExtractOp.getResult());
+    // 5. 替换外层的 Consumer 输出
+    if (fuseResult->replacements.count(consumerOp->getResult(0))) {
+      rewriter.replaceOp(
+          consumerOp, fuseResult->replacements[consumerOp->getResult(0)]);
+    }
 
-    // 修正 Yield
-    Operation *oldYield = newBody->getTerminator();
-    rewriter.setInsertionPoint(oldYield);
-    auto accInsertOp = rewriter.create<tensor::InsertSliceOp>(
-        fusedProducer.getLoc(), fusedProducer.getResult(0), newAccIterArg,
-        newAccExtractOp.getMixedOffsets(), newAccExtractOp.getMixedSizes(), newAccExtractOp.getMixedStrides());
-
-    SmallVector<Value> newYields = llvm::to_vector(oldYield->getOperands());
-    newYields.push_back(accInsertOp.getResult());
-    rewriter.create<scf::YieldOp>(oldYield->getLoc(), newYields);
-    rewriter.eraseOp(oldYield);
-
-    // 替换
-    rewriter.replaceOp(consumerOp, newLoop.getResult(0));
-    rewriter.replaceOp(producerOp, newLoop.getResult(1));
-    rewriter.eraseOp(oldLoop); 
-
+    // 注: Producer(npu_gemm) 如果没有其他下游算子使用了，MLIR
+    // 稍后会自动把它作为死代码(DCE)清理掉
     return success();
   }
 };
@@ -302,11 +668,13 @@ struct NpuOpSplittingPass
 
     patterns.add<NpuDmaTilingPattern>(context);
     patterns.add<NpuConvTilingPattern>(context);
+    patterns.add<NpuGemmTilingPattern>(context);
 
     GreedyRewriteConfig config;
     config.setUseTopDownTraversal(true);
-    
-    if (failed(applyPatternsGreedily(getOperation(), std::move(patterns), config))) {
+
+    if (failed(applyPatternsGreedily(
+            getOperation(), std::move(patterns), config))) {
       signalPassFailure();
     }
   }

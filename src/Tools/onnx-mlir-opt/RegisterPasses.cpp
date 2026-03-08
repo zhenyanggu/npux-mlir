@@ -259,6 +259,10 @@ void registerNpuPasses() {
     return npux::createNpuRemoveRedundantDmaPass();
   });
 
+  mlir::registerPass([]()->std::unique_ptr<mlir::Pass>{
+    return npux::createRemoveDuplicateMvinBiasPass();
+  });
+
   npux::registerBufferDeallocTest();
 }
 

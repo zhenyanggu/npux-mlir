@@ -1,5 +1,5 @@
 //==============================================================
-// src/Conversion/NpuPartition/Linalg/MatMul.cpp
+// src/Conversion/NpuPartition/Linalg/Gemm.cpp
 // This file implements the conversion of Gemm and QLinearMatMul
 // to linalg operations for NPU partitioning.
 //==============================================================
@@ -179,68 +179,85 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
   int32_t withBiasAttr = hasBias ? 1 : 0;
 
   // ==============================================================================
-  // Helper Lambda: 负责构建纯 2D 的 GEMM (Linalg Generic) 及后续的 SPM 转换
-  // 参数接收的 lhs2D, rhs2D 必须是已经被降维到 2D 的 Tensor (或者 1D Bias)
+  // Helper Lambda
   // ==============================================================================
-  auto build2DGemm = [&](OpBuilder &b, Location loc, Value lhs2D, Value rhs2D,
-                         Value bias2D) -> Value {
-    auto lhsType = mlir::cast<RankedTensorType>(lhs2D.getType());
-    auto rhsType = mlir::cast<RankedTensorType>(rhs2D.getType());
+  auto buildGemm = [&](OpBuilder &b, Location loc, Value lhs, Value rhs,
+                       Value bias, SmallVector<Value> dynSizes) -> Value {
+    int64_t outRank = outType.getRank();
+    assert((outRank == 2 || outRank == 3) && "Only 2D and 3D MatMul are supported here");
 
-    int64_t M = lhsType.getShape()[0];
-    int64_t N = rhsType.getShape()[1];
+    // 1. 分配中间 i32 累加器 Buffer (NPU Accumulator)
+    auto i32Type = RankedTensorType::get(outType.getShape(), b.getI32Type());
+    Value i32Alloc = b.create<bufferization::AllocTensorOp>(loc, i32Type, dynSizes);
 
-    // 1. 获取动态尺寸（处理形状为 ? 的情况）
-    SmallVector<Value> dynSizesI32;
-    if (M == ShapedType::kDynamic)
-      dynSizesI32.push_back(b.create<tensor::DimOp>(loc, lhs2D, 0).getResult());
-    if (N == ShapedType::kDynamic)
-      dynSizesI32.push_back(b.create<tensor::DimOp>(loc, rhs2D, 1).getResult());
+    // 2. 构建 Iterators (保证 N, M, K 顺序，3D 时最外层为 B)
+    SmallVector<utils::IteratorType> iteratorTypes;
+    if (outRank == 2) {
+      iteratorTypes = {
+          utils::IteratorType::parallel, // N (对应 d0)
+          utils::IteratorType::parallel, // M (对应 d1)
+          utils::IteratorType::reduction // K (对应 d2)
+      };
+    } else {
+      iteratorTypes = {
+          utils::IteratorType::parallel, // B (对应 d0)
+          utils::IteratorType::parallel, // N (对应 d1)
+          utils::IteratorType::parallel, // M (对应 d2)
+          utils::IteratorType::reduction // K (对应 d3)
+      };
+    }
 
-    // 2. 分配中间 i32 累加器 Buffer (NPU Accumulator)
-    auto i32Type = RankedTensorType::get({M, N}, b.getI32Type());
-    Value i32Alloc =
-        b.create<bufferization::AllocTensorOp>(loc, i32Type, dynSizesI32);
-
-    // 3. 构建 2D GEMM Indexing Maps
-    SmallVector<utils::IteratorType> iteratorTypes = {
-        utils::IteratorType::parallel, // M
-        utils::IteratorType::parallel, // N
-        utils::IteratorType::reduction // K
-    };
-
-    auto get2DMap = [&](bool isA, bool isB, bool isC,
-                        Value val = Value()) -> AffineMap {
-      auto m = b.getAffineDimExpr(0);
-      auto n = b.getAffineDimExpr(1);
-      auto k = b.getAffineDimExpr(2);
-      if (isA)
-        return AffineMap::get(3, 0, {m, k}, b.getContext());
-      if (isB)
-        return AffineMap::get(3, 0, {k, n}, b.getContext());
-      if (isC) {
-        int64_t biasRank =
-            mlir::cast<RankedTensorType>(val.getType()).getRank();
-        // 如果 Bias 是 1D，映射到列方向 {n}，否则映射到 {m, n}
-        if (biasRank == 1)
-          return AffineMap::get(3, 0, {n}, b.getContext());
-        return AffineMap::get(3, 0, {m, n}, b.getContext());
+    // 3. 构建 Indexing Maps
+    auto getMap = [&](Value val, bool isA, bool isB, bool isOut) -> AffineMap {
+      int64_t rank = val ? mlir::cast<RankedTensorType>(val.getType()).getRank() : outRank;
+      SmallVector<AffineExpr> exprs;
+      
+      if (outRank == 2) {
+        auto n = b.getAffineDimExpr(0);
+        auto m = b.getAffineDimExpr(1);
+        auto k = b.getAffineDimExpr(2);
+        if (isA) exprs = {m, k};
+        else if (isB) exprs = {k, n};
+        else if (isOut) exprs = {m, n};
+        else { // Bias (C)
+          if (rank == 1) exprs = {n};
+          else exprs = {m, n};
+        }
+      } else { // outRank == 3
+        auto b_dim = b.getAffineDimExpr(0);
+        auto n = b.getAffineDimExpr(1);
+        auto m = b.getAffineDimExpr(2);
+        auto k = b.getAffineDimExpr(3);
+        
+        if (isA) {
+          // 兼容 A 可能是 2D Broadcast 的情况
+          if (rank == 3) exprs = {b_dim, m, k};
+          else exprs = {m, k};
+        } else if (isB) {
+          // 兼容 B 可能是 2D Broadcast 的情况
+          if (rank == 3) exprs = {b_dim, k, n};
+          else exprs = {k, n};
+        } else if (isOut) {
+          exprs = {b_dim, m, n};
+        } else { // Bias (C)
+          if (rank == 1) exprs = {n};
+          else if (rank == 2) exprs = {m, n};
+          else exprs = {b_dim, m, n};
+        }
       }
-      return AffineMap::get(3, 0, {m, n}, b.getContext());
+      return AffineMap::get(outRank + 1, 0, exprs, b.getContext());
     };
 
     SmallVector<AffineMap> gemmMaps;
-    gemmMaps.push_back(get2DMap(true, false, false)); // A
-    gemmMaps.push_back(get2DMap(false, true, false)); // B
-    if (bias2D)
-      gemmMaps.push_back(get2DMap(false, false, true, bias2D)); // C
-    gemmMaps.push_back(get2DMap(false, false, false));          // Out (i32)
+    gemmMaps.push_back(getMap(lhs, true, false, false)); // A
+    gemmMaps.push_back(getMap(rhs, false, true, false)); // B
+    if (bias) gemmMaps.push_back(getMap(bias, false, false, false)); // C
+    gemmMaps.push_back(getMap(nullptr, false, false, true)); // Out (i32)
 
-    SmallVector<Value> gemmInputs = {lhs2D, rhs2D};
-    if (bias2D)
-      gemmInputs.push_back(bias2D);
+    SmallVector<Value> gemmInputs = {lhs, rhs};
+    if (bias) gemmInputs.push_back(bias);
 
-    // 4. 创建 GenericOp (2D GEMM -> i32)
+    // 4. 创建 GenericOp (GEMM -> i32)
     auto gemmOp = b.create<linalg::GenericOp>(loc,
         /*resultTypes=*/i32Type,
         /*inputs=*/gemmInputs,
@@ -257,7 +274,6 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
     gemmOp->setAttr("out_zp", b.getIntegerAttr(b.getI32Type(), outZp));
     gemmOp->setAttr("with_bias", b.getI32IntegerAttr(withBiasAttr));
 
-    // 写 Relu Fusion 属性
     gemmOp->setAttr("do_relu", b.getI32IntegerAttr(do_relu));
     if (do_relu == 1) {
       gemmOp->setAttr("relu_type", b.getI32IntegerAttr(relu_type));
@@ -265,29 +281,42 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
 
     // 5. SPM 阶段：i32 -> 最终类型 (通常为 i8)
     Type finalElemType = outType.getElementType();
-    auto out2DType = RankedTensorType::get({M, N}, finalElemType);
-    Value out2DAlloc =
-        b.create<bufferization::AllocTensorOp>(loc, out2DType, dynSizesI32);
+    Value outAlloc = b.create<bufferization::AllocTensorOp>(loc, outType, dynSizes);
 
-    SmallVector<AffineMap> identityMaps(2, b.getMultiDimIdentityMap(2));
-    SmallVector<utils::IteratorType> parallelIters(
-        2, utils::IteratorType::parallel);
+    SmallVector<AffineMap> quantMaps;
+    if (outRank == 2) {
+      // 迭代空间: [N, M] (即 d0=N, d1=M)
+      // Tensor 物理形状: [M, N]
+      // 映射关系: (d0, d1) -> (d1, d0)
+      auto d0 = b.getAffineDimExpr(0);
+      auto d1 = b.getAffineDimExpr(1);
+      auto map = AffineMap::get(2, 0, {d1, d0}, b.getContext());
+      quantMaps = {map, map}; // input (i32) 和 output (i8) 的形状相同，Map 也相同
+    } else {
+      // 迭代空间: [B, N, M] (即 d0=B, d1=N, d2=M)
+      // Tensor 物理形状: [B, M, N]
+      // 映射关系: (d0, d1, d2) -> (d0, d2, d1)
+      auto d0 = b.getAffineDimExpr(0);
+      auto d1 = b.getAffineDimExpr(1);
+      auto d2 = b.getAffineDimExpr(2);
+      auto map = AffineMap::get(3, 0, {d0, d2, d1}, b.getContext());
+      quantMaps = {map, map};
+    }
+    SmallVector<utils::IteratorType> parallelIters(outRank, utils::IteratorType::parallel);
 
     auto quantOp = b.create<linalg::GenericOp>(loc,
-        /*resultTypes=*/out2DType,
+        /*resultTypes=*/outType,
         /*inputs=*/ValueRange{gemmOp.getResult(0)},
-        /*outputs=*/ValueRange{out2DAlloc}, identityMaps, parallelIters,
+        /*outputs=*/ValueRange{outAlloc}, quantMaps, parallelIters,
         [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
           Value inI32 = args[0];
           Value res;
           if (finalElemType.isInteger(32)) {
             res = inI32;
           } else if (finalElemType.isInteger(8)) {
-            res = nestedB.create<arith::TruncIOp>(
-                nestedLoc, finalElemType, inI32);
+            res = nestedB.create<arith::TruncIOp>(nestedLoc, finalElemType, inI32);
           } else if (mlir::isa<FloatType>(finalElemType)) {
-            res = nestedB.create<arith::SIToFPOp>(
-                nestedLoc, finalElemType, inI32);
+            res = nestedB.create<arith::SIToFPOp>(nestedLoc, finalElemType, inI32);
           } else {
             res = inI32;
           }
@@ -301,7 +330,7 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
   };
 
   // ==============================================================================
-  // 主干逻辑：根据 Rank 选择是否包裹 scf.for
+  // 主干逻辑
   // ==============================================================================
   auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outType);
   {
@@ -323,120 +352,15 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
       processedInputs.push_back(inputs[2]);
     }
 
+    // 获取输出的动态尺寸
     SmallVector<Value> dynamicSizes =
         getDynamicSizes(rewriter, loc, processedInputs[0], outType.getShape());
 
-    if (outRank == 2) {
-      // --- 纯 2D MatMul，直接调用 2D 构建器 ---
-      Value biasVal = hasBias ? processedInputs[2] : nullptr;
-      Value res2D = build2DGemm(rewriter, loc, processedInputs[0], processedInputs[1], biasVal);
-      rewriter.create<scf::YieldOp>(loc, res2D);
-    } else if (outRank == 3) {
-      // --- 3D Batched MatMul，在外层 (Batch) 循环并做 Slice ---
-      int64_t B = outType.getShape()[0];
-      Value finalAlloc = rewriter.create<bufferization::AllocTensorOp>(
-          loc, outType, dynamicSizes);
-
-      Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-      Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
-
-      Value bUpper;
-      if (B == ShapedType::kDynamic) {
-        bUpper = rewriter.create<tensor::DimOp>(loc, finalAlloc, 0).getResult();
-      } else {
-        bUpper = rewriter.create<arith::ConstantIndexOp>(loc, B);
-      }
-
-      // 获取 OpFoldResult 类型的尺寸 (兼顾静态与动态)
-      auto getDimOpFoldResult = [&](OpBuilder &builder, Value tensor,
-                                    int dim) -> OpFoldResult {
-        auto shape = mlir::cast<RankedTensorType>(tensor.getType()).getShape();
-        if (shape[dim] == ShapedType::kDynamic)
-          return builder.create<tensor::DimOp>(loc, tensor, dim).getResult();
-        return builder.getIndexAttr(shape[dim]);
-      };
-
-      auto bLoop = rewriter.create<scf::ForOp>(loc, zero, bUpper, one,
-          ValueRange{finalAlloc},
-           [&](OpBuilder &b, Location loc, Value iv, ValueRange iterArgs) {
-            Value outAccum = iterArgs[0];
-
-            OpFoldResult ivAttr = iv;
-            OpFoldResult zeroAttr = b.getIndexAttr(0);
-            OpFoldResult oneAttr = b.getIndexAttr(1);
-
-            // 1. 提取 LHS 的 2D 切片 (Rank-Reduction: 3D -> 2D)
-            Value lhs2D = processedInputs[0];
-            auto lhsType = mlir::cast<RankedTensorType>(lhs2D.getType());
-            if (lhsType.getRank() == 3) {
-              OpFoldResult mSize = getDimOpFoldResult(b, lhs2D, 1);
-              OpFoldResult kSize = getDimOpFoldResult(b, lhs2D, 2);
-              SmallVector<OpFoldResult> offsets = {ivAttr, zeroAttr, zeroAttr};
-              SmallVector<OpFoldResult> sizes = {oneAttr, mSize, kSize};
-              SmallVector<OpFoldResult> strides = {oneAttr, oneAttr, oneAttr};
-
-              auto lhs2DType = RankedTensorType::get(
-                  {lhsType.getShape()[1], lhsType.getShape()[2]},
-                  lhsType.getElementType());
-              lhs2D = b.create<tensor::ExtractSliceOp>(
-                  loc, lhs2DType, processedInputs[0], offsets, sizes, strides);
-            }
-
-            // 2. 提取 RHS 的 2D 切片 (兼容 Broadcast, 例如 RHS 本来就是 2D)
-            Value rhs2D = processedInputs[1];
-            auto rhsType = mlir::cast<RankedTensorType>(rhs2D.getType());
-            if (rhsType.getRank() == 3) {
-              OpFoldResult kSize = getDimOpFoldResult(b, rhs2D, 1);
-              OpFoldResult nSize = getDimOpFoldResult(b, rhs2D, 2);
-              SmallVector<OpFoldResult> offsets = {ivAttr, zeroAttr, zeroAttr};
-              SmallVector<OpFoldResult> sizes = {oneAttr, kSize, nSize};
-              SmallVector<OpFoldResult> strides = {oneAttr, oneAttr, oneAttr};
-
-              auto rhs2DType = RankedTensorType::get(
-                  {rhsType.getShape()[1], rhsType.getShape()[2]},
-                  rhsType.getElementType());
-              rhs2D = b.create<tensor::ExtractSliceOp>(
-                  loc, rhs2DType, processedInputs[1], offsets, sizes, strides);
-            }
-
-            // 3. 提取 Bias (如果有，且恰好也是 Batched 的 3D)
-            Value biasSlice = nullptr;
-            if (hasBias) {
-              biasSlice = processedInputs[2];
-              auto biasType = mlir::cast<RankedTensorType>(biasSlice.getType());
-              if (biasType.getRank() == 3) {
-                OpFoldResult mSize = getDimOpFoldResult(b, biasSlice, 1);
-                OpFoldResult nSize = getDimOpFoldResult(b, biasSlice, 2);
-                SmallVector<OpFoldResult> offsets = {
-                    ivAttr, zeroAttr, zeroAttr};
-                SmallVector<OpFoldResult> sizes = {oneAttr, mSize, nSize};
-                SmallVector<OpFoldResult> strides = {oneAttr, oneAttr, oneAttr};
-
-                auto bias2DType = RankedTensorType::get(
-                    {biasType.getShape()[1], biasType.getShape()[2]},
-                    biasType.getElementType());
-                biasSlice = b.create<tensor::ExtractSliceOp>(
-                    loc, bias2DType, processedInputs[2], offsets, sizes, strides);
-              }
-            }
-
-            // 4. 计算 2D GEMM (调用 Lambda 返回 2D)
-            Value res2D = build2DGemm(b, loc, lhs2D, rhs2D, biasSlice);
-
-            // 5. 塞回 3D 结果容器 (Rank-Up: 2D 插入回 3D 的某个切片)
-            OpFoldResult mSizeOut = getDimOpFoldResult(b, outAccum, 1);
-            OpFoldResult nSizeOut = getDimOpFoldResult(b, outAccum, 2);
-            SmallVector<OpFoldResult> offsetsOut = {ivAttr, zeroAttr, zeroAttr};
-            SmallVector<OpFoldResult> sizesOut = {oneAttr, mSizeOut, nSizeOut};
-            SmallVector<OpFoldResult> stridesOut = {oneAttr, oneAttr, oneAttr};
-
-            Value updatedAccum = b.create<tensor::InsertSliceOp>(
-                loc, res2D, outAccum, offsetsOut, sizesOut, stridesOut);
-            b.create<scf::YieldOp>(loc, updatedAccum);
-          });
-
-      rewriter.create<scf::YieldOp>(loc, bLoop.getResult(0));
-    }
+    // --- 1. 直接调用通用构建器生成 Linalg 算子 ---
+    Value biasVal = hasBias ? processedInputs[2] : nullptr;
+    Value result = buildGemm(rewriter, loc, processedInputs[0], processedInputs[1], biasVal, dynamicSizes);
+    
+    rewriter.create<scf::YieldOp>(loc, result);
   }
   return executeRegion.getResults()[0];
 }

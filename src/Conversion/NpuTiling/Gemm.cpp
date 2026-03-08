@@ -106,93 +106,77 @@ static LogicalResult peelForLoopLastIteration(
 static SmallVector<int64_t, 3> calculateAutoGemmTile(
     int64_t M, int64_t N, int64_t K, int64_t spmSize, int64_t accSize) {
 
-  // 硬件对齐参数
+  // 硬件参数
   const int64_t arraySizeH = 32;
   const int64_t arraySizeW = 32;
-  const int64_t inputDtypeBytes = 1;  // int8 (输入)
-  const int64_t outputDtypeBytes = 1; // int8 (输出到SPM也是int8)
-  const int64_t accDtypeBytes = 4;    // int32 (ACC累加)
+  const int64_t inputDtypeBytes = 1;  // int8 (A 和 B 输入)
+  const int64_t outputDtypeBytes = 1; // int8 (输出到 SPM)
+  const int64_t accDtypeBytes = 4;    // int32 (ACC 累加器)
+
+  // 辅助 Lambda：向下取整到 32 的倍数，但最小不低于 32
+  auto align_down_32 = [&](int64_t val) -> int64_t {
+    return std::max<int64_t>(32, (val / 32) * 32);
+  };
+
+  int64_t m_aligned = align_down_32(M);
+  int64_t n_aligned = align_down_32(N);
 
   // ---------------------------------------------------------
-  // Step 1: 初始估计 Tm 和 Tn (基于 ACC 容量)
+  // 核心策略: 优先最大化 K，然后 M，最后 N 
+  // 目标: 尽可能将 A 矩阵 (M x K) 完整驻留在 SPM 中
   // ---------------------------------------------------------
-  int64_t maxAccElem = accSize / accDtypeBytes;
 
-  int64_t targetDim = std::floor(std::sqrt(maxAccElem));
-
-  // M 维度初步分块
-  int64_t t_m = std::min(M, targetDim);
-  if (t_m >= arraySizeH)
-    t_m = (t_m / arraySizeH) * arraySizeH;
-  else
-    t_m = arraySizeH;
-
-  // N 维度初步分块
-  int64_t t_n = std::min(N, maxAccElem / t_m);
-  if (t_n >= arraySizeW)
-    t_n = (t_n / arraySizeW) * arraySizeW;
-  else
-    t_n = arraySizeW;
-
-  // ---------------------------------------------------------
-  // Step 2: 联合调整 Tm, Tn, Tk (基于 ACC 和 SPM 容量)
-  // ---------------------------------------------------------
-  // 这里需要循环，因为如果 SPM 放不下 (Input + Output)，
-  // 我们需要缩小 Tm/Tn 来腾出空间。
-  int64_t t_k = arraySizeH; // 初始设为最小对齐单位
-
-  while (true) {
-    // 1. 检查 ACC 限制 (Accumulator overflow check)
-    // ---------------------------------------------
-    bool accFits = (t_m * t_n * accDtypeBytes) <= accSize;
-
-    // 2. 检查 SPM 限制 (SPM overflow check)
-    // ---------------------------------------------
-    // Output 占用: Tm * Tn * 1 byte
-    int64_t outputSpmBytes = t_m * t_n * outputDtypeBytes;
-
-    // Input 单位 K 占用: (Tm + Tn) * 1 byte
-    int64_t inputBytesPerK = (t_m + t_n) * inputDtypeBytes;
-
-    // 计算 SPM 中剩余给 Input 的空间
-    int64_t remainingSpmForInput = spmSize - outputSpmBytes;
-
-    // 至少要能放下一个最小单位的 Tk (arraySizeH)
-    bool spmFits = (remainingSpmForInput >= (inputBytesPerK * arraySizeH));
-
-    // 3. 如果 ACC 或 SPM 爆了，缩小 Tm/Tn
-    // ---------------------------------------------
-    if (!accFits || !spmFits) {
-      t_n -= arraySizeW; // 优先缩减 N
-      if (t_n < arraySizeW) {
-        t_n = arraySizeW;
-        t_m -= arraySizeH; // N 缩无可缩，缩 M
-      }
-
-      // 保护机制：如果连最小块都放不下（极少见），强制退出
-      if (t_m < arraySizeH) {
-        t_m = arraySizeH;
-        t_n = arraySizeW;
-        break;
-      }
-      continue; // 重新检查新的 Tm/Tn
-    }
-
-    // 4. 计算最终的 Tk
-    // ---------------------------------------------
-    // 到这里说明 Tm, Tn 既符合 ACC，也给 SPM 留出了至少 32*K 的空间
-    int64_t maxTk = remainingSpmForInput / inputBytesPerK;
-    t_k = std::min(K, maxTk);
-
-    // Tk 对齐
-    if (t_k >= arraySizeH)
-      t_k = (t_k / arraySizeH) * arraySizeH;
-    else
-      t_k = arraySizeH;
-
-    // 成功找到合适的分块
-    break;
+  // ==========================================
+  // Step 1: 最大化 Tk (K 维度无 32 对齐约束)
+  // ==========================================
+  // 为了探求 Tk 的绝对物理上限，我们假设 Tm 和 Tn 取硬件支持的最小值 (32x32)
+  // SPM 约束公式: Tm*Tn*1 + Tk*(Tm+Tn)*1 <= spmSize
+  int64_t min_tm = arraySizeH;
+  int64_t min_tn = arraySizeW;
+  int64_t base_out_spm = min_tm * min_tn * outputDtypeBytes;
+  
+  int64_t max_tk_spm = 1;
+  if (spmSize > base_out_spm) {
+    max_tk_spm = (spmSize - base_out_spm) / ((min_tm + min_tn) * inputDtypeBytes);
   }
+  // Tk 尽可能取到 K，且无需对齐
+  int64_t t_k = std::max<int64_t>(1, std::min(K, max_tk_spm));
+
+  // ==========================================
+  // Step 2: 在固定 Tk 的前提下，最大化 Tm (必须是 32 的倍数)
+  // ==========================================
+  // 同样，为了让 Tm 最大，我们假设优先级最低的 Tn 取最小值 (32)
+  // 1. ACC 约束: Tm * 32 * 4 <= accSize
+  int64_t max_tm_acc = accSize / (min_tn * accDtypeBytes);
+  
+  // 2. SPM 约束: Tm*32*out + Tk*(Tm+32)*in <= spmSize
+  // 推导 -> Tm * (32*out + Tk*in) <= spmSize - 32 * Tk * in
+  int64_t max_tm_spm = arraySizeH; 
+  int64_t spm_rem_for_m = spmSize - min_tn * t_k * inputDtypeBytes; 
+  if (spm_rem_for_m > 0) {
+    max_tm_spm = spm_rem_for_m / (min_tn * outputDtypeBytes + t_k * inputDtypeBytes);
+  }
+  
+  // 综合 M 自身大小、ACC 限制和 SPM 限制
+  int64_t t_m = std::min({m_aligned, max_tm_acc, max_tm_spm});
+  t_m = align_down_32(t_m);
+
+  // ==========================================
+  // Step 3: 在固定 Tk 和 Tm 的前提下，计算剩余的 Tn (必须是 32 的倍数)
+  // ==========================================
+  // 1. ACC 约束: Tm * Tn * 4 <= accSize
+  int64_t max_tn_acc = accSize / (t_m * accDtypeBytes);
+  
+  // 2. SPM 约束: Tm*Tn*out + Tk*(Tm+Tn)*in <= spmSize
+  // 推导 -> Tn * (Tm*out + Tk*in) <= spmSize - Tk * Tm * in
+  int64_t max_tn_spm = arraySizeW;
+  int64_t spm_rem_for_n = spmSize - t_k * t_m * inputDtypeBytes;
+  if (spm_rem_for_n > 0) {
+    max_tn_spm = spm_rem_for_n / (t_m * outputDtypeBytes + t_k * inputDtypeBytes);
+  }
+
+  int64_t t_n = std::min({n_aligned, max_tn_acc, max_tn_spm});
+  t_n = align_down_32(t_n);
 
   return {t_m, t_n, t_k};
 }
@@ -200,21 +184,22 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
 SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
   auto &config = npux::NPUConfig::getInstance();
 
-  // 1. 获取手动配置
+  // 1. 获取手动配置 (这里假设用户的配置还是按 Tm, Tn, Tk 填写的)
   std::vector<int64_t> manualSizes = config.getMatMulTileSize();
 
   // 2. 获取 Loop Ranges
   SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
-  int64_t rank = loopRanges.size();
+  int64_t rank = loopRanges.size(); // 2D Gemm 为 3，3D Batched Gemm 为 4
 
-  if (rank < 3) {
+  if (rank != 3 && rank != 4) {
     return {};
   }
 
-  // 提取 M, N, K
+  // 根据新的迭代器顺序 [Batch, N, M, K] 或 [N, M, K] 提取维度
   int64_t K = loopRanges[rank - 1];
-  int64_t N = loopRanges[rank - 2];
-  int64_t M = loopRanges[rank - 3];
+  int64_t M = loopRanges[rank - 2];
+  int64_t N = loopRanges[rank - 3];
+  int64_t B = (rank == 4) ? loopRanges[0] : 1; // 如果是 3D 的，提取 Batch
 
   SmallVector<int64_t, 3> computedSizes;
   bool isManual = false;
@@ -225,13 +210,14 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
   } else {
     int64_t spmSize = config.getSpmSize();
     int64_t accSize = config.getAccSize();
+    // 自动分块逻辑依然基于 M, N, K 计算 Tm, Tn, Tk，无需改变
     computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize);
   }
 
   std::string msg;
   llvm::raw_string_ostream os(msg);
   os << "Tiling [Gemm] (" << (isManual ? "Manual" : "Auto") << "): "
-     << "Problem=[M:" << M << ", N:" << N << ", K:" << K << "] "
+     << "Problem=[B:" << B << ", N:" << N << ", M:" << M << ", K:" << K << "] "
      << "-> Tile=[Tm:" << computedSizes[0] << ", Tn:" << computedSizes[1]
      << ", Tk:" << computedSizes[2] << "]\n";
   llvm::errs() << os.str();
@@ -239,10 +225,17 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
   // 3. 构建最终的 Tile Sizes 数组
   SmallVector<int64_t> finalTileSizes(rank, 0);
 
-  // [..., tm, tn, tk]
-  finalTileSizes[rank - 3] = computedSizes[0]; // M -> tm
-  finalTileSizes[rank - 2] = computedSizes[1]; // N -> tn
-  finalTileSizes[rank - 1] = computedSizes[2]; // K -> tk
+  // 按照 Linalg Generic Iterator 的顺序填充分块大小
+  if (rank == 4) {
+    finalTileSizes[0] = 1;                // Batch 永远按 1 分块
+    finalTileSizes[1] = computedSizes[1]; // N -> tn
+    finalTileSizes[2] = computedSizes[0]; // M -> tm
+    finalTileSizes[3] = computedSizes[2]; // K -> tk
+  } else {
+    finalTileSizes[0] = computedSizes[1]; // N -> tn
+    finalTileSizes[1] = computedSizes[0]; // M -> tm
+    finalTileSizes[2] = computedSizes[2]; // K -> tk
+  }
 
   return finalTileSizes;
 }
@@ -350,11 +343,15 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       if (currentLoopIdx >= spatialLoops.size())
         break;
 
-      StringRef label = "Batch";
-      if (dimIdx == rank - 2)
-        label = "N";
-      else if (dimIdx == rank - 3)
-        label = "M";
+      StringRef label;
+      if (rank == 4) { // [Batch, N, M, K]
+        if (dimIdx == 0) label = "Batch";
+        else if (dimIdx == 1) label = "N";
+        else if (dimIdx == 2) label = "M";
+      } else { // rank == 3, [N, M, K]
+        if (dimIdx == 0) label = "N";
+        else if (dimIdx == 1) label = "M";
+      }
 
       spatialLoops[currentLoopIdx]->setAttr(
           "npu.loop_dim", rewriter.getStringAttr(label));

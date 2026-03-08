@@ -5,6 +5,7 @@
 //=======================================
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/PatternMatch.h"
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
@@ -91,14 +92,6 @@ public:
     Location loc = op.getLoc();
 
     // 2. Get Operands & Logic Selection
-    // ---------------------------------------------------------
-    // Case 1: 3 Inputs (Input, Weight, Bias)
-    //    -> Action: Emit MvinBiasOp, ComputeOp(Input, Weight), acc_bias=True,
-    //    accum=False
-    // Case 2: 2 Inputs (Input, Weight)
-    //    -> Action: ComputeOp(Input, Weight, Psum=Output), acc_bias=False,
-    //    accum=True
-
     if (op.getInputs().size() < 2 || op.getOutputs().size() != 1) {
       return failure();
     }
@@ -123,43 +116,116 @@ public:
 
       if (loopStage == "head" || loopStage == "single") {
         // === Case 1: Head / Single (Bias Logic) ===
+        
+        // 使用 InsertionGuard 保存当前的插入点
+        OpBuilder::InsertionGuard guard(rewriter);
+        
+        scf::ForOp hoistAnchor = nullptr;
+
+        if (opType == ComputeOpType::gemm) {
+          // GEMM 的 MvinBias 逻辑保持不变
+          auto parentFor = op->getParentOfType<scf::ForOp>();
+          while (parentFor) {
+            if (auto splitDim = parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
+              if (splitDim.getValue() == "M") {
+                hoistAnchor = parentFor;
+                break;
+              }
+            }
+            parentFor = parentFor->getParentOfType<scf::ForOp>();
+          }
+        } else if (opType == ComputeOpType::conv) {
+          // Conv 的 MvinBias 逻辑
+          scf::ForOp coutLoop = nullptr;
+          scf::ForOp outermostFor = nullptr;
+          auto parentFor = op->getParentOfType<scf::ForOp>();
+          
+          while (parentFor) {
+            outermostFor = parentFor; // 一路记录，直到最外层
+            if (auto splitDim = parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
+              StringRef dimVal = splitDim.getValue();
+              // 兼容可能的 Cout 标签命名
+              if (dimVal == "cout" || dimVal == "Cout_c" || dimVal == "Cout") {
+                coutLoop = parentFor;
+              }
+            }
+            parentFor = parentFor->getParentOfType<scf::ForOp>();
+          }
+          
+          if (coutLoop) {
+            // 放到 Cout_c 这一层：即 cout 循环的内部，紧贴着下级内层循环（H）的外面
+            scf::ForOp child = op->getParentOfType<scf::ForOp>();
+            while (child && child->getParentOp() != coutLoop) {
+              child = child->getParentOfType<scf::ForOp>();
+            }
+            hoistAnchor = child; 
+          } else {
+            // 如果没有任何 Cout_c 标签，放到最外层循环的外面
+            hoistAnchor = outermostFor;
+          }
+        }
+
+        if (hoistAnchor) {
+          // ========================================================
+          // 【核心修复】：消除 Dominance 错误
+          // 将 thirdInput 的定义指令（及其依赖）连根拔起，一起提到锚点循环外
+          // ========================================================
+          std::function<void(Operation*)> hoistOps = [&](Operation* opToHoist) {
+            for (Value operand : opToHoist->getOperands()) {
+              if (Operation *defOp = operand.getDefiningOp()) {
+                // 如果依赖的指令也在锚点循环内部，递归提取它
+                if (hoistAnchor->isAncestor(defOp)) {
+                  hoistOps(defOp);
+                }
+              }
+            }
+            // 将该指令移动到锚点循环之前
+            opToHoist->moveBefore(hoistAnchor);
+          };
+          
+          if (Operation *thirdDef = thirdInput.getDefiningOp()) {
+            if (hoistAnchor->isAncestor(thirdDef)) {
+              hoistOps(thirdDef);
+            }
+          }
+
+          // 设置插入点为锚点循环前方
+          rewriter.setInsertionPoint(hoistAnchor);
+        }
+        
         // 1. Create the dedicated MvinBiasOp
         rewriter.create<MvinBiasOp>(loc, thirdInput);
 
+        // Guard 生命周期结束，插入点自动恢复到原来的 GenericOp 处
+        // 后续的 ComputeRunOp 依然会正确生成在最内层
+
         // 2. Configure ComputeOp Flags
-        psumMemRefForOp =
-            nullptr;         // Bias 已经在寄存器里了，不需要传入 psum buffer
+        psumMemRefForOp = nullptr;   // Bias 已经在寄存器里了，不需要传入 psum buffer
         flagAccBias = true;  // 启用加偏置
         flagDoAccum = false; // 不做 Psum 累加
       } else if (loopStage == "body" || loopStage == "tail") {
         // === Case 2: Body / Tail (Accumulation Logic) ===
-        // 第三个输入是上一个阶段传过来的 Psum
         psumMemRefForOp = outputMemRef;
         flagAccBias = false; // 偏置已经在 head 阶段加过了
         flagDoAccum = true;  // 开启 Psum 累加模式
       } else {
-        return failure(); // 遇到了未知的 loop_stage
+        return failure(); 
       }
     }
 
     // 4. Memory Space Validation & Destination Inference
     auto checkSpace = [&](Value v, int expectedSpace) {
       if (!v)
-        return true; // Skip null values
+        return true; 
       auto type = mlir::dyn_cast<MemRefType>(v.getType());
       return type && type.getMemorySpaceAsInt() == expectedSpace;
     };
 
     if (!checkSpace(inputAMemRef, 2))
-      return failure(); // Input A -> SRAM
+      return failure(); 
     if (!checkSpace(inputBMemRef, 2))
-      return failure(); // Input B -> SRAM
+      return failure(); 
 
-    // Note: We don't check space for psumMemRefForOp strictly here
-    // because if it is outputMemRef, it follows output's rules.
-
-    // Determine accout_dest based on Output Memory Space
-    // Space 2 = SRAM (SPM), Space 3 = ACC
     auto outType = mlir::cast<MemRefType>(outputMemRef.getType());
     int outSpace = outType.getMemorySpaceAsInt();
 
@@ -169,17 +235,30 @@ public:
     } else if (outSpace == 2) {
       accDest = AccoutDest::spm;
     } else {
-      return failure(); // Output must be in SRAM or ACC
+      return failure(); 
     }
 
     // 5. Parse Geometry (Shapes & Strides)
-    // ... (这部分代码保持不变，负责解析 shape) ...
     auto inAType = mlir::cast<MemRefType>(inputAMemRef.getType());
     auto inBType = mlir::cast<MemRefType>(inputBMemRef.getType());
     ArrayRef<int64_t> inAShape = inAType.getShape();
     ArrayRef<int64_t> inBShape = inBType.getShape();
     ArrayRef<int64_t> outShape = outType.getShape();
 
+    SmallVector<int64_t, 4> inAStrides ;
+    SmallVector<int64_t, 4> inBStrides ;
+    SmallVector<int64_t, 4> outStrides ;
+    int64_t inAoffset, inBoffset, outOffset;
+
+    if(failed(inAType.getStridesAndOffset(inAStrides,inAoffset))) {
+      return failure();
+    }
+    if(failed(inBType.getStridesAndOffset(inBStrides,inBoffset))) {
+      return failure();
+    }
+    if(failed(outType.getStridesAndOffset(outStrides,outOffset))) {
+      return failure();
+    }
     int64_t a_col = 1, a_row = 1, a_stride = 0;
     int64_t b_col = 1, b_row = 1, b_stride = 0;
     int64_t out_width = 1, out_height = 1, out_stride = 0;
@@ -191,21 +270,22 @@ public:
     if (opType == ComputeOpType::conv) {
       a_row = inAShape[2];
       a_col = inAShape[3];
-      b_row = inBShape[2];
-      b_col = inBShape[3];
+      a_stride = inAStrides[2]/inAStrides[3];
+
+      b_row = inBShape[4];
+      b_col = inBShape[5];
+
       out_height = outShape[2];
       out_width = outShape[3];
+      out_stride = outStrides[2]/outStrides[3];
 
-      kernel_sz = getArrayAttr(op, "kernel_shape", 0, 1);
+      kernel_sz = outShape[2] ;
       stride_val = getArrayAttr(op, "strides", 0, 1);
       dilation_val = getArrayAttr(op, "dilations", 0, 1);
 
-      // Fix: get pads array properly if needed
-      // ... (pads logic same as before)
       pad_mode_val = getIntAttr(op, "pad_mode", 0);
       is_group = (getIntAttr(op, "group", 1) > 1);
     } else {
-      // GEMM Logic
       if (inAShape.size() >= 2 && outShape.size() >= 2) {
         a_row = inAShape[0];
         a_col = inAShape[1];
@@ -256,12 +336,11 @@ public:
 
     Value vBiasPsumWidth = c32(out_width);
     Value vBiasPsumHeight = c32(out_height);
-    Value vBiasPsumStride = c32(0);
+    Value vBiasPsumStride = c32(out_stride);
 
     Value vOutputStride = c32(out_stride);
 
     // 7. Quantization Params
-    // ... (Quantization Logic 保持不变) ...
     double realMultiplier = 1.0;
     int64_t inZp = 0;
     int64_t wZp = 0;
@@ -287,12 +366,9 @@ public:
     Value vOutZp = c32(outZp);
 
     // 8. Flags (Accumulate, ReLU, Bias)
-    // ---------------------------------------------------------
-    // Use the flags determined in Step 2
     Value vDoAccum = c1(flagDoAccum);
     Value vAccBias = c1(flagAccBias);
 
-    // Activation
     bool doRelu = (getIntAttr(op, "do_relu", 0) != 0);
     int64_t reluTypeVal = getIntAttr(op, "relu_type", 0);
     ActivationType actType = static_cast<ActivationType>(reluTypeVal);
@@ -303,12 +379,11 @@ public:
     auto reluTypeAttr = ActivationTypeAttr::get(rewriter.getContext(), actType);
 
     // 9. Create ComputeRunOp
-    // ---------------------------------------------------------
     rewriter.replaceOpWithNewOp<ComputeRunOp>(op, opTypeAttr, dataflowModeAttr,
         accoutDestAttr, vIntType,
 
         inputAMemRef, inputBMemRef,
-        psumMemRefForOp, // Passed Logic-based Psum (Null or Output)
+        psumMemRefForOp,
         outputMemRef,
 
         vPadT, vPadB, vPadL, vPadR, vPadMode,
@@ -323,9 +398,9 @@ public:
 
         vOutputStride,
 
-        vDoAccum, // Controlled by logic
+        vDoAccum, 
         vReluEnable, reluTypeAttr,
-        vAccBias, // Controlled by logic
+        vAccBias, 
 
         vOutZp, vQuantScale, vQuantShift, 
         vInAZp, vInBZp);

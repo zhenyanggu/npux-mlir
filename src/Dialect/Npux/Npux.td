@@ -361,7 +361,7 @@ def Npux_ComputeRunOp : Npux_Op<"compute_run"> {
     `shape_a` `(` $input_a_col_num_m1 `x` $input_a_row_num_m1 `)` `stride` $input_a_stride
     `shape_b` `(` $input_b_col_num_m1 `x` $input_b_row_num_m1 `)` `stride` $input_b_stride
     
-    `loop_shape` `(` $biaspsum_width `x` $biaspsum_height `)` 
+    `biaspsum_shape` `(` $biaspsum_width `x` $biaspsum_height `)` 
     `strides` `(` `bias` $biaspsum_stride `,` `out` $output_stride `)`
     
     `conv` `(` 

@@ -669,151 +669,235 @@ public:
       args.push_back(castToI16(loc, adaptor.getInputBStride(), rewriter));
 
     } else {
-      funcName = "npu_conv_tile_run";
+      // funcName = "npu_conv_tile_run";
+
+      // // ==========================================
+      // // 1. 准备辅助变量和类型
+      // // ==========================================
+      // auto weightType = cast<MemRefType>(op.getInputB().getType());
+      // auto outType = cast<MemRefType>(op.getOutput().getType());
+      // auto inType = cast<MemRefType>(op.getInputA().getType());
+
+      // // ==========================================
+      // // 2. 提取维度信息 (Layout Reads)
+      // // ==========================================
+
+      // // Weight Layout: [C/32, C/32, k, k, 32, 32] -> indices 2, 3 correspond
+      // to
+      // // k_h, k_w
+      // int64_t kh_val = weightType.getDimSize(2);
+      // int64_t kw_val = weightType.getDimSize(3);
+
+      // // Output Layout: [N, C/32, H, W, 32] -> indices 2, 3 correspond to H,
+      // W int64_t th_out_val = outType.getDimSize(2); int64_t tw_out_val =
+      // outType.getDimSize(3);
+
+      // int64_t tcout_val = outType.getDimSize(1) * outType.getDimSize(4);
+
+      // // t_cin 逻辑: 输入的第二个维度(index 1) 乘 最里面的维度(index 4)
+      // int64_t tcin_val = inType.getDimSize(1) * inType.getDimSize(4);
+
+      // // ==========================================
+      // // 3. 构建参数列表 (Strict Order)
+      // // ==========================================
+
+      // // --- Address Pointers ---
+      // // uint32_t sram_addr_ifm (Input A)
+      // args.push_back(addrA);
+
+      // // uint32_t sram_addr_weight (Input B / Weight)
+      // args.push_back(addrB);
+
+      // // uint32_t sram_addr_ofm (Output)
+      // args.push_back(addrOut);
+
+      // // uint32_t acc_addr_psum (Bias/Psum)
+      // args.push_back(addrPsum);
+
+      // // --- Logic: i_cin & c_in ---
+      // // 逻辑: i_cin 的取值, 当 isbias=1 (acc_bias) 时, i_cin=0
+      // // 注意: 这里假设默认 i_cin 为 0 (因为 op 中似乎没有直接的 tile index
+      // // 参数), 如果 op 中有对应的属性(例如 input_a_col_num
+      // // 用于切分)，请在此处修改 default_icin。
+      // Value i_cin = rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(32));
+
+      // // 如果 acc_bias (isbias) 为 true, i_cin 必须为 0
+      // // 可以在运行时用 select
+      // // 指令，也可以在编译时判断(如果是常量)。这里使用运行时的 Select
+      // // 确保逻辑正确。
+      // Value constZero = rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(0));
+      // Value isBiasVal = adaptor.getAccBias(); // i1
+      // // 如果 isBias 为 true, 选 0, 否则选 i_cin (原值)
+      // i_cin = rewriter.create<LLVM::SelectOp>(loc, isBiasVal, constZero,
+      // i_cin);
+
+      // // 逻辑: c_in 的取值
+      // // 默认 c_in (这里设为0或者t_cin? 根据描述"取值不重要",
+      // 只有特定情况重要) Value c_in = rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(64));
+
+      // // 当输出 dest 是 spm 时, c_in = i_cin
+      // // 判断 dest 是否为 SPM (Enum value 0)
+      // bool isDestSpm = (op.getAccoutDest() == npux::AccoutDest::spm);
+      // if (isDestSpm) {
+      //   i_cin = c_in;
+      // }
+
+      // // int32_t c_in
+      // args.push_back(c_in);
+
+      // // --- Convolution Parameters ---
+      // // int32_t k_h
+      // args.push_back(rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(kh_val)));
+
+      // // int32_t k_w
+      // args.push_back(rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(kw_val)));
+
+      // Value convParamOne = rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(1));
+
+      // // int32_t stride (CAPI 需要原始值，因此对 *_m1 做 +1)
+      // args.push_back(rewriter.create<LLVM::AddOp>(
+      //     loc, adaptor.getWeightStrideM1(), convParamOne));
+
+      // // int32_t dilation (CAPI 需要原始值，因此对 *_m1 做 +1)
+      // args.push_back(rewriter.create<LLVM::AddOp>(
+      //     loc, adaptor.getWeightDilationM1(), convParamOne));
+
+      // // [注意] Padding 在你提供的新列表中被注释掉了，如果 CAPI 确实移除了
+      // // padding 参数，这里就不传。 如果需要
+      // // padding，请解开以下注释并按顺序加入:
+      // /*
+      // args.push_back(adaptor.getPadTop());
+      // args.push_back(adaptor.getPadBottom());
+      // args.push_back(adaptor.getPadLeft());
+      // args.push_back(adaptor.getPadRight());
+      // */
+
+      // // --- Macro Tile / Computed Geometry ---
+      // // int32_t i_cin
+      // args.push_back(i_cin);
+
+      // // int32_t t_cout
+      // args.push_back(rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(tcout_val)));
+
+      // // int32_t t_h_out
+      // args.push_back(rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(th_out_val)));
+
+      // // int32_t t_w_out
+      // args.push_back(rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(tw_out_val)));
+
+      // // int32_t t_cin
+      // args.push_back(rewriter.create<LLVM::ConstantOp>(
+      //     loc, i32Type, rewriter.getI32IntegerAttr(tcin_val)));
+
+      // // --- Quantization / Activation ---
+      //   // uint16_t quant_scale
+      // args.push_back(castToI16(loc, adaptor.getQuantScale(), rewriter));
+
+      // // uint16_t quant_scaleshift
+      // args.push_back(castToI16(loc, adaptor.getQuantScaleshift(), rewriter));
+
+      // // bool relu_enable
+      // args.push_back(adaptor.getReluEnable());
+
+      // // uint8_t relu_type (3bit -> i8)
+      // args.push_back(getEnumI8(loc, op.getReluType(), rewriter));
+
+      //   // bool bias_enable
+      //   args.push_back(adaptor.getAccBias());
+
+      // // bool is_group_conv
+      // args.push_back(adaptor.getIsGroupConv());
+
+      funcName = "npu_conv_run";
+      SmallVector<Value, 36> args;
 
       // ==========================================
-      // 1. 准备辅助变量和类型
+      // 1-5. Padding 相关 (uint8_t)
       // ==========================================
-      auto weightType = cast<MemRefType>(op.getInputB().getType());
-      auto outType = cast<MemRefType>(op.getOutput().getType());
-      auto inType = cast<MemRefType>(op.getInputA().getType());
-
-      // ==========================================
-      // 2. 提取维度信息 (Layout Reads)
-      // ==========================================
-
-      // Weight Layout: [C/32, C/32, k, k, 32, 32] -> indices 2, 3 correspond to
-      // k_h, k_w
-      int64_t kh_val = weightType.getDimSize(2);
-      int64_t kw_val = weightType.getDimSize(3);
-
-      // Output Layout: [N, C/32, H, W, 32] -> indices 2, 3 correspond to H, W
-      int64_t th_out_val = outType.getDimSize(2);
-      int64_t tw_out_val = outType.getDimSize(3);
-
-      int64_t tcout_val = outType.getDimSize(1) * outType.getDimSize(4);
-
-      // t_cin 逻辑: 输入的第二个维度(index 1) 乘 最里面的维度(index 4)
-      int64_t tcin_val = inType.getDimSize(1) * inType.getDimSize(4);
+      args.push_back(castToI8(loc, adaptor.getPadTop(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getPadBottom(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getPadLeft(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getPadRight(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getPadMode(), rewriter));
 
       // ==========================================
-      // 3. 构建参数列表 (Strict Order)
+      // 6-9. Weight/Kernel 相关 (uint8_t, bool)
       // ==========================================
+      args.push_back(castToI8(loc, adaptor.getWeightShapeM1(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getWeightStrideM1(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getWeightDilationM1(), rewriter));
+      args.push_back(adaptor.getIsGroupConv()); // bool (i1)
 
-      // --- Address Pointers ---
-      // uint32_t sram_addr_ifm (Input A)
-      args.push_back(addrA);
+      // ==========================================
+      // 10-13. 基础控制 (uint8_t, bool)
+      // ==========================================
+      args.push_back(castToI8(loc, adaptor.getIntType(), rewriter));
+      args.push_back(getEnumI8(loc, op.getOpType(), rewriter));
 
-      // uint32_t sram_addr_weight (Input B / Weight)
-      args.push_back(addrB);
+      args.push_back(
+          getEnumBool(loc, op.getDataflowMode(), rewriter)); // WS/OS -> i1
+      args.push_back(
+          getEnumBool(loc, op.getAccoutDest(), rewriter)); // SPM/ACC -> i1
 
-      // uint32_t sram_addr_ofm (Output)
-      args.push_back(addrOut);
+      // ==========================================
+      // 14-15. ZeroPoints (uint16_t)
+      // ==========================================
+      args.push_back(castToI16(loc, adaptor.getInputAZeropoint(), rewriter));
+      args.push_back(castToI16(loc, adaptor.getInputBZeropoint(), rewriter));
 
-      // uint32_t acc_addr_psum (Bias/Psum)
-      args.push_back(addrPsum);
+      // ==========================================
+      // 16-19. Input A (addr, col, row, stride)
+      // ==========================================
+      args.push_back(addrA); // uint32_t
+      args.push_back(castToI16(loc, adaptor.getInputAColNumM1(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getInputARowNumM1(), rewriter));
+      args.push_back(castToI16(loc, adaptor.getInputAStride(), rewriter));
 
-      // --- Logic: i_cin & c_in ---
-      // 逻辑: i_cin 的取值, 当 isbias=1 (acc_bias) 时, i_cin=0
-      // 注意: 这里假设默认 i_cin 为 0 (因为 op 中似乎没有直接的 tile index
-      // 参数), 如果 op 中有对应的属性(例如 input_a_col_num
-      // 用于切分)，请在此处修改 default_icin。
-      Value i_cin = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(32));
+      // ==========================================
+      // 20-23. Input B (addr, col, row, stride)
+      // ==========================================
+      args.push_back(addrB); // uint32_t
+      args.push_back(castToI8(loc, adaptor.getInputBColNumM1(), rewriter));
+      args.push_back(castToI16(loc, adaptor.getInputBRowNumM1(), rewriter));
+      args.push_back(castToI16(loc, adaptor.getInputBStride(), rewriter));
 
-      // 如果 acc_bias (isbias) 为 true, i_cin 必须为 0
-      // 可以在运行时用 select
-      // 指令，也可以在编译时判断(如果是常量)。这里使用运行时的 Select
-      // 确保逻辑正确。
-      Value constZero = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(0));
-      Value isBiasVal = adaptor.getAccBias(); // i1
-      // 如果 isBias 为 true, 选 0, 否则选 i_cin (原值)
-      i_cin = rewriter.create<LLVM::SelectOp>(loc, isBiasVal, constZero, i_cin);
+      // ==========================================
+      // 24-27. Bias/Psum (width, height, addr, stride)
+      // ==========================================
+      args.push_back(castToI8(loc, adaptor.getBiaspsumWidth(), rewriter));
+      args.push_back(castToI8(loc, adaptor.getBiaspsumHeight(), rewriter));
+      args.push_back(addrPsum); // uint32_t
+      args.push_back(castToI16(loc, adaptor.getBiaspsumStride(), rewriter));
 
-      // 逻辑: c_in 的取值
-      // 默认 c_in (这里设为0或者t_cin? 根据描述"取值不重要", 只有特定情况重要)
-      Value c_in = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(64));
+      // ==========================================
+      // 28-29. Output (addr, stride)
+      // ==========================================
+      args.push_back(addrOut); // uint32_t
+      args.push_back(castToI16(loc, adaptor.getOutputStride(), rewriter));
 
-      // 当输出 dest 是 spm 时, c_in = i_cin
-      // 判断 dest 是否为 SPM (Enum value 0)
-      bool isDestSpm = (op.getAccoutDest() == npux::AccoutDest::spm);
-      if (isDestSpm) {
-        i_cin = c_in;
-      }
-
-      // int32_t c_in
-      args.push_back(c_in);
-
-      // --- Convolution Parameters ---
-      // int32_t k_h
-      args.push_back(rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(kh_val)));
-
-      // int32_t k_w
-      args.push_back(rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(kw_val)));
-
-      Value convParamOne = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(1));
-
-      // int32_t stride (CAPI 需要原始值，因此对 *_m1 做 +1)
-      args.push_back(rewriter.create<LLVM::AddOp>(
-          loc, adaptor.getWeightStrideM1(), convParamOne));
-
-      // int32_t dilation (CAPI 需要原始值，因此对 *_m1 做 +1)
-      args.push_back(rewriter.create<LLVM::AddOp>(
-          loc, adaptor.getWeightDilationM1(), convParamOne));
-
-      // [注意] Padding 在你提供的新列表中被注释掉了，如果 CAPI 确实移除了
-      // padding 参数，这里就不传。 如果需要
-      // padding，请解开以下注释并按顺序加入:
-      /*
-      args.push_back(adaptor.getPadTop());
-      args.push_back(adaptor.getPadBottom());
-      args.push_back(adaptor.getPadLeft());
-      args.push_back(adaptor.getPadRight());
-      */
-
-      // --- Macro Tile / Computed Geometry ---
-      // int32_t i_cin
-      args.push_back(i_cin);
-
-      // int32_t t_cout
-      args.push_back(rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(tcout_val)));
-
-      // int32_t t_h_out
-      args.push_back(rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(th_out_val)));
-
-      // int32_t t_w_out
-      args.push_back(rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(tw_out_val)));
-
-      // int32_t t_cin
-      args.push_back(rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(tcin_val)));
-
-      // --- Quantization / Activation ---
-        // uint16_t quant_scale
-      args.push_back(castToI16(loc, adaptor.getQuantScale(), rewriter));
-
-      // uint16_t quant_scaleshift
-      args.push_back(castToI16(loc, adaptor.getQuantScaleshift(), rewriter));
-
-      // bool relu_enable
-      args.push_back(adaptor.getReluEnable());
-
-      // uint8_t relu_type (3bit -> i8)
+      // ==========================================
+      // 30-33. Post-Processing (bool, uint8_t)
+      // ==========================================
+      args.push_back(adaptor.getIsAccumulate()); // bool
+      args.push_back(adaptor.getReluEnable());   // bool
       args.push_back(getEnumI8(loc, op.getReluType(), rewriter));
+      args.push_back(adaptor.getAccBias()); // is_bias (bool)
 
-        // bool bias_enable
-        args.push_back(adaptor.getAccBias());
-
-      // bool is_group_conv
-      args.push_back(adaptor.getIsGroupConv());
+      // ==========================================
+      // 34-36. Final Quant (uint32, uint16, uint16)
+      // ==========================================
+      args.push_back(adaptor.getOutputZeropoint()); // uint32_t
+      args.push_back(castToI16(loc, adaptor.getQuantScale(), rewriter));
+      args.push_back(castToI16(loc, adaptor.getQuantScaleshift(), rewriter));
     }
     auto module = op->getParentOfType<ModuleOp>();
     auto voidType = LLVM::LLVMVoidType::get(getContext());
@@ -835,7 +919,7 @@ public:
   using ConvertOpToLLVMPattern<npux::TransposeOp>::ConvertOpToLLVMPattern;
 
   LogicalResult matchAndRewrite(npux::TransposeOp op, OpAdaptor adaptor,
-                                ConversionPatternRewriter &rewriter) const override {
+      ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
 
     // 1. 获取地址 (保持不变)
@@ -864,14 +948,14 @@ public:
     // 在 LLVM Dialect 中，bool 通常对应 i1
     Value falseVal = rewriter.create<LLVM::ConstantOp>(
         loc, rewriter.getI1Type(), rewriter.getBoolAttr(false));
-    
+
     args.push_back(falseVal); // out_padding_row = 0
     args.push_back(falseVal); // out_padding_col = 0
 
     // 4. 获取函数并生成调用
     auto module = op->getParentOfType<ModuleOp>();
     auto voidType = LLVM::LLVMVoidType::get(rewriter.getContext());
-    
+
     // 更新参数类型列表
     SmallVector<Type> argTypes;
     for (auto v : args)
@@ -879,7 +963,7 @@ public:
 
     FlatSymbolRefAttr fnRef = getOrInsertExternFunc(
         rewriter, module, "npu_transpose_run", voidType, argTypes);
-    
+
     rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
     return success();
   }

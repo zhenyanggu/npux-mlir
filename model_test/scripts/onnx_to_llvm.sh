@@ -150,9 +150,9 @@ run_pass "Op Splitting " \
 # ------------------------------------------------
 enter_stage "NpuBufferization"
 
-run_pass "Pack&UnPack Lower" \
-         "--npu-lower-pack" \
-         "NpuLowerPack.mlir"
+# run_pass "Pack&UnPack Lower" \
+#          "--npu-lower-pack" \
+#          "NpuLowerPack.mlir"
 
 # 这是一个很长的命令，现在写起来很清爽
 run_pass "Bufferize" \
@@ -205,7 +205,7 @@ run_pass "fold-memref-alias-ops" \
         "fold-memref-alias-ops.mlir"      
 
 run_pass "Npux Conversion" \
-         "--convert-linalg-to-npux --canonicalize" \
+         "--convert-linalg-to-npux --cse --canonicalize --npu-remove-duplicate-mvin-bias" \
          "ConvertLinalgToNpux.mlir"
 
 # run_pass "Npux SFU 5D Shape Patch" \

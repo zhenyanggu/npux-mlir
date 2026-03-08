@@ -190,6 +190,8 @@ std::unique_ptr<mlir::Pass> createRestoreAllocSpacePass();
 
 std::unique_ptr<mlir::Pass> createNpuRemoveRedundantDmaPass();
 
+std::unique_ptr<mlir::Pass> createRemoveDuplicateMvinBiasPass();
+
 void registerBufferDeallocTest();
 }// namespace npux
 

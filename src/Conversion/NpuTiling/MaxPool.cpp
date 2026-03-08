@@ -21,8 +21,8 @@ SmallVector<int64_t> calculateAutoMaxPoolTileNCHW(
     linalg::GenericOp op, int64_t spmSize) {
   
   auto loopRanges = op.getStaticLoopRanges();
-  // 安全检查：NCHW 迭代空间为 Rank 4 [N, C, H_out, W_out]
-  if (loopRanges.size() != 4) return {1, 1, 1, 1}; 
+  // 【修改1】现在我们的迭代空间是 6D [N, C, H_out, W_out, K_h, K_w]
+  if (loopRanges.size() != 6) return {1, 1, 1, 1, 0, 0}; 
 
   int64_t N = loopRanges[0];
   int64_t C = loopRanges[1];
@@ -33,35 +33,35 @@ SmallVector<int64_t> calculateAutoMaxPoolTileNCHW(
   int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
   int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
 
-  // 核心内存计算 (针对 2x2 MaxPool, stride=2):
-  // 1 个 Output 元素对应 2x2 = 4 个 Input 元素
-  // 暂存这 1 个输出像素的计算，SRAM 需要的空间为 1(Out) + 4(In) = 5 个元素大小
+  // 核心内存计算保持不变
   int64_t bytesPerOutPixel = 5 * bytesPerElem;
   int64_t maxPixels = spmSize / bytesPerOutPixel;
 
-  if (maxPixels <= 0) return {1, 1, 1, 1}; // SPM极度受限的保护
+  // 【修改2】失败时返回 6 个维度的默认值
+  if (maxPixels <= 0) return {1, 1, 1, 1, 0, 0}; 
 
   // 初始化 Tiling Sizes
   int64_t t_c = 1, t_h = 1, t_w = 1;
   int64_t remaining_pixels = maxPixels;
 
-  // 1. 优先填满 W 维度 (NCHW 下 W 是最内侧维度，连续 DMA 效率最高)
+  // 1. 优先填满 W 维度
   t_w = std::min<int64_t>(W_out, remaining_pixels);
   remaining_pixels /= t_w;
 
-  // 2. 尝试填满 H 维度 (获取完整的特征图平面)
+  // 2. 尝试填满 H 维度
   if (remaining_pixels > 0) {
       t_h = std::min<int64_t>(H_out, remaining_pixels);
       remaining_pixels /= t_h;
   }
 
-  // 3. 最后利用剩余空间切分 C 维度 (Channel)
+  // 3. 最后利用剩余空间切分 C 维度
   if (remaining_pixels > 0) {
       t_c = std::min<int64_t>(C, remaining_pixels);
   }
 
-  // 返回对应 [N, C, H, W] 的分块配置
-  return {1, t_c, t_h, t_w};
+  // 【修改3】返回对应 [N, C, H, W, KH, KW] 的分块配置
+  // 后两个 0 代表不切分 Kernel 维度（将完整的 2x2 窗口保留在内层）
+  return {1, t_c, t_h, t_w, 0, 0};
 }
 
 SmallVector<int64_t> getMaxPoolTileSizes(linalg::GenericOp op, StringRef opName) {
@@ -74,7 +74,8 @@ SmallVector<int64_t> getMaxPoolTileSizes(linalg::GenericOp op, StringRef opName)
   std::string msg;
   llvm::raw_string_ostream os(msg);
 
-  if (opName == "npu_maxpool" && loopRanges.size() == 4) {
+  // 【修改4】这里要匹配 6D 的 loopRanges
+  if (opName == "npu_maxpool" && loopRanges.size() == 6) {
     tileSizes = calculateAutoMaxPoolTileNCHW(op, spmSize);
 
     os << "Tiling [MaxPool 2x2 NCHW] (Auto): SPM=" << spmSize 
@@ -107,17 +108,6 @@ struct NpuMaxPoolTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     SmallVector<int64_t> rawTileSizes = getMaxPoolTileSizes(op, libCall.getValue());
     if (rawTileSizes.empty()) return failure();
 
-    // MaxPool 当前是通过 output->input 的缩放 map 来表达 2x2/stride=2，
-    // 通用 tileUsingSCF 在“整块不切分”场景下仍会物化 input slice，
-    // 但它无法为 pooling window 自动补 halo，最终会把 56x56 错切成 55x55。
-    // 因此当 TileSize 已经覆盖完整迭代空间时，直接打标记跳过实际 tiling。
-    auto loopRanges = op.getStaticLoopRanges();
-    if (!isTilingNecessary(rawTileSizes, loopRanges)) {
-      op->setAttr("npu.tiled", rewriter.getUnitAttr());
-      op->setAttr("npu.trivial_tiling", rewriter.getUnitAttr());
-      return success();
-    }
-
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
     SmallVector<OpFoldResult> tileSizes = getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
     
@@ -130,16 +120,59 @@ struct NpuMaxPoolTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
     if (failed(tilingResult)) return failure();
 
-    // 赋予下游所需的 NPU Attributes
+    // =========================================================================
+    // 【核心新增】：过河拆桥！将切分后的 6D MaxPool 降维回 4D，断开 Dummy Window 依赖
+    // =========================================================================
+    for (Operation *tiledOp : tilingResult->tiledOps) {
+      auto genericOp = dyn_cast<linalg::GenericOp>(tiledOp);
+      if (!genericOp || genericOp.getNumDpsInputs() != 2) continue;
+
+      rewriter.setInsertionPoint(genericOp);
+      Value realInput = genericOp.getInputs()[0];   // 切好的真实特征图切片
+      Value outInit = genericOp.getOutputs()[0];    // 切好的输出切片
+
+      // 构建 4D 迭代器 (全部 parallel)
+      SmallVector<utils::IteratorType> iteratorTypes(4, utils::IteratorType::parallel);
+      
+      // 构建 4D AffineMap: 重新使用 stride=2 的映射，保证 4D 也能通过 MLIR 校验
+      auto n = rewriter.getAffineDimExpr(0);
+      auto c = rewriter.getAffineDimExpr(1);
+      auto oh = rewriter.getAffineDimExpr(2);
+      auto ow = rewriter.getAffineDimExpr(3);
+      auto inputMap = AffineMap::get(4, 0, {n, c, oh * 2, ow * 2}, rewriter.getContext());
+      auto outputMap = rewriter.getMultiDimIdentityMap(4);
+
+      // 创建崭新的单输入 4D linalg.generic
+      auto new4DOp = rewriter.create<linalg::GenericOp>(
+          genericOp.getLoc(),
+          outInit.getType(),
+          ValueRange{realInput}, // 只有真实输入，抛弃 Dummy Window
+          ValueRange{outInit},
+          ArrayRef<AffineMap>{inputMap, outputMap},
+          iteratorTypes,
+          [&](OpBuilder &b, Location loc, ValueRange args) {
+              // 填一个合法的纯输出，因为 NPU Backend 只认 library_call，里面写啥无所谓
+              b.create<linalg::YieldOp>(loc, args[0]); 
+          });
+
+      // 继承 NPU Attributes
+      new4DOp->setAttr("library_call", rewriter.getStringAttr("npu_maxpool"));
+      new4DOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+      new4DOp->setAttr("npu.tiled", rewriter.getUnitAttr());
+
+      // 替换掉带 dummy 的 6D op
+      rewriter.replaceOp(genericOp, new4DOp.getResults());
+    }
+    // =========================================================================
+
+    // 赋予下游所需的 NPU Attributes 给 loops
     for (auto loop : tilingResult->loops) {
       loop->setAttr("npu.target", rewriter.getStringAttr("npu"));
     }
 
-    for (Operation *tiledOp : tilingResult->tiledOps) {
-      tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
-    }
+    // 注意：这里删除了对 tiledOps 遍历 setAttr 的原逻辑，因为我们在上面 new4DOp 时已经设好了
 
-    // 3. Peeling 处理 Tail 边界情况（处理特征图无法被完美整除的情况）
+    // 3. Peeling 处理 Tail 边界情况（保持不变）
     auto loops = tilingResult->loops;
     SmallVector<Value> finalResults = tilingResult->replacements;
 
@@ -151,7 +184,6 @@ struct NpuMaxPoolTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       LogicalResult status = scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialIteration);
 
       if (succeeded(status)) {
-        // 标记尾部，方便下游降级处理不规则的尺寸
         partialIteration->setAttr("npu.peeled_tail", rewriter.getUnitAttr());
         if (i == 0) {
             finalResults = partialIteration->getResults();
