@@ -25,6 +25,26 @@ struct VerificationSummary {
 
 struct ErrorItem { int64_t index; float actual; float golden; float absDiff; };
 
+int64_t envToInt64(const char *name, int64_t defaultValue) {
+  const char *v = std::getenv(name);
+  if (!v || *v == '\0') return defaultValue;
+  try {
+    return std::stoll(v);
+  } catch (...) {
+    return defaultValue;
+  }
+}
+
+float envToFloat(const char *name, float defaultValue) {
+  const char *v = std::getenv(name);
+  if (!v || *v == '\0') return defaultValue;
+  try {
+    return std::stof(v);
+  } catch (...) {
+    return defaultValue;
+  }
+}
+
 bool endsWith(const std::string &value, const std::string &suffix) {
   if (value.size() < suffix.size()) return false;
   return value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
@@ -69,20 +89,42 @@ std::vector<float> loadBinaryFloatFile(const std::string &filename, int64_t expe
 }
 
 VerificationSummary compareOutputs(const float *actual,
-  const std::vector<float> &golden, int64_t count, float threshold = 0.1f,
-  int64_t topK = 10) {
+  const std::vector<float> &golden, int64_t count,
+  int64_t rows,
+  int64_t cols,
+  float threshold = 0.1f,
+  int64_t topK = 10,
+  bool printLayoutStats = true) {
   float maxAbsError = 0.0f;
   double mse = 0.0;
   int64_t errorCount = 0;
   std::vector<ErrorItem> errors;
   errors.reserve(static_cast<size_t>(count));
 
+  std::vector<int64_t> rowErrorCounts;
+  std::vector<int64_t> colBlockErrorCounts;
+  std::vector<int64_t> laneErrorCounts;
+  if (rows > 0 && cols > 0) {
+    rowErrorCounts.assign(static_cast<size_t>(rows), 0);
+    colBlockErrorCounts.assign(static_cast<size_t>((cols + 31) / 32), 0);
+    laneErrorCounts.assign(32, 0);
+  }
+
   for (int64_t i = 0; i < count; ++i) {
     const float diff = std::abs(actual[i] - golden[static_cast<size_t>(i)]);
     maxAbsError = std::max(maxAbsError, diff);
     mse += static_cast<double>(diff) * static_cast<double>(diff);
-    if (diff > threshold)
+    if (diff > threshold) {
       ++errorCount;
+
+      if (rows > 0 && cols > 0 && i < rows * cols) {
+        const int64_t r = i / cols;
+        const int64_t c = i % cols;
+        rowErrorCounts[static_cast<size_t>(r)]++;
+        colBlockErrorCounts[static_cast<size_t>(c / 32)]++;
+        laneErrorCounts[static_cast<size_t>(c % 32)]++;
+      }
+    }
     errors.push_back({i, actual[i], golden[static_cast<size_t>(i)], diff});
   }
   mse /= static_cast<double>(count);
@@ -111,6 +153,63 @@ VerificationSummary compareOutputs(const float *actual,
   std::cout << "Mean Squared Error: " << mse << std::endl;
   std::cout << "Error Count (错误点数量/总点数量): " << errorCount << "/" << count
             << std::endl;
+
+  if (printLayoutStats && errorCount > 0 && rows > 0 && cols > 0) {
+    std::vector<std::pair<int64_t, int64_t>> rowRank;
+    rowRank.reserve(static_cast<size_t>(rows));
+    for (int64_t r = 0; r < rows; ++r)
+      rowRank.push_back({r, rowErrorCounts[static_cast<size_t>(r)]});
+    std::partial_sort(
+        rowRank.begin(),
+        rowRank.begin() + std::min<int64_t>(5, static_cast<int64_t>(rowRank.size())),
+        rowRank.end(),
+        [](const auto &a, const auto &b) { return a.second > b.second; });
+
+    std::vector<std::pair<int64_t, int64_t>> blockRank;
+    blockRank.reserve(colBlockErrorCounts.size());
+    for (int64_t b = 0; b < static_cast<int64_t>(colBlockErrorCounts.size()); ++b)
+      blockRank.push_back({b, colBlockErrorCounts[static_cast<size_t>(b)]});
+    std::partial_sort(
+        blockRank.begin(),
+        blockRank.begin() + std::min<int64_t>(8, static_cast<int64_t>(blockRank.size())),
+        blockRank.end(),
+        [](const auto &a, const auto &b) { return a.second > b.second; });
+
+    std::vector<std::pair<int64_t, int64_t>> laneRank;
+    laneRank.reserve(32);
+    for (int64_t lane = 0; lane < 32; ++lane)
+      laneRank.push_back({lane, laneErrorCounts[static_cast<size_t>(lane)]});
+    std::partial_sort(
+        laneRank.begin(),
+        laneRank.begin() + std::min<int64_t>(8, static_cast<int64_t>(laneRank.size())),
+        laneRank.end(),
+        [](const auto &a, const auto &b) { return a.second > b.second; });
+
+    std::cout << "[Error Layout] Top rows by error count:";
+    for (int64_t i = 0; i < std::min<int64_t>(5, static_cast<int64_t>(rowRank.size())); ++i) {
+      if (rowRank[static_cast<size_t>(i)].second == 0) break;
+      std::cout << " r" << rowRank[static_cast<size_t>(i)].first
+                << ":" << rowRank[static_cast<size_t>(i)].second;
+    }
+    std::cout << std::endl;
+
+    std::cout << "[Error Layout] Top col blocks (block=col/32):";
+    for (int64_t i = 0; i < std::min<int64_t>(8, static_cast<int64_t>(blockRank.size())); ++i) {
+      if (blockRank[static_cast<size_t>(i)].second == 0) break;
+      std::cout << " b" << blockRank[static_cast<size_t>(i)].first
+                << ":" << blockRank[static_cast<size_t>(i)].second;
+    }
+    std::cout << std::endl;
+
+    std::cout << "[Error Layout] Top lanes (lane=col%32):";
+    for (int64_t i = 0; i < std::min<int64_t>(8, static_cast<int64_t>(laneRank.size())); ++i) {
+      if (laneRank[static_cast<size_t>(i)].second == 0) break;
+      std::cout << " l" << laneRank[static_cast<size_t>(i)].first
+                << ":" << laneRank[static_cast<size_t>(i)].second;
+    }
+    std::cout << std::endl;
+  }
+
   const bool passed = (errorCount == 0);
   std::cout << "Threshold Result: " << (passed ? "PASS" : "FAIL") << std::endl;
   return {maxAbsError, mse, errorCount, count, passed};
@@ -161,9 +260,20 @@ int main(int argc, char **argv) {
   int64_t outputElements = 1;
   for (int64_t i = 0; i < rank; ++i) outputElements *= shape[i];
 
+    const float threshold = envToFloat("GEMM_THRESHOLD", 0.1f);
+    const int64_t topK = std::max<int64_t>(1, envToInt64("GEMM_TOPK", 10));
+    const bool printLayoutStats = envToInt64("GEMM_LAYOUT_STATS", 1) != 0;
+
+    std::cout << "[Verify Config] threshold=" << threshold
+        << ", topK=" << topK
+        << ", layoutStats=" << (printLayoutStats ? "on" : "off")
+        << std::endl;
+
   std::vector<float> golden = loadBinaryFloatFile(goldenFile, outputElements);
-  const VerificationSummary summary =
-      compareOutputs(outputData, golden, outputElements);
+    const int64_t rows = (rank >= 2) ? shape[0] : 0;
+    const int64_t cols = (rank >= 2) ? shape[1] : 0;
+    const VerificationSummary summary = compareOutputs(
+      outputData, golden, outputElements, rows, cols, threshold, topK, printLayoutStats);
   verifyShape(shape, rank);
 
   omTensorListDestroy(inputList);

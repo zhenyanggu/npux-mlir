@@ -6,6 +6,8 @@ SHELL := /bin/bash
 #   4. 构建所有模型：make
 #   5. 清理所有模型：make clean
 #   6. 清理指定模型：make clean gelu
+#   7. 临时跳过部分模型：make SKIP_MODELS="gelu resize"
+#   8. 持久跳过某个模型：touch models/gelu/.disabled
 PYTHON ?= python3
 ONNX_MLIR ?= onnx-mlir
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -17,21 +19,27 @@ BUILD_DIR := $(ROOT_DIR)/build
 SPM_KB ?= 512
 ACC_KB ?= 256
 SHAPE ?=
+SKIP_MODELS ?=
+MODEL_PY_ARGS ?=
 
 # 仅收集模型目录，避免把 models 下的 md 文件当作 testcase
 MODEL_DIRS := $(wildcard $(MODELS_DIR)/*/)
-MODEL_NAMES := $(notdir $(patsubst %/,%,$(MODEL_DIRS)))
-SELECTIVE_CLEAN_MODELS := $(filter $(MODEL_NAMES),$(filter-out clean,$(MAKECMDGOALS)))
+ALL_MODEL_NAMES := $(notdir $(patsubst %/,%,$(MODEL_DIRS)))
+DISABLED_MODEL_MARKERS := $(wildcard $(MODELS_DIR)/*/.disabled)
+DISABLED_MODEL_NAMES_FROM_MARKERS := $(notdir $(patsubst %/,%,$(dir $(DISABLED_MODEL_MARKERS))))
+DISABLED_MODEL_NAMES := $(sort $(filter $(ALL_MODEL_NAMES),$(DISABLED_MODEL_NAMES_FROM_MARKERS) $(SKIP_MODELS)))
+MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(ALL_MODEL_NAMES))
+SELECTIVE_CLEAN_MODELS := $(filter $(ALL_MODEL_NAMES),$(filter-out clean,$(MAKECMDGOALS)))
 
 .PHONY: all init run_one clean list check_model \
 	prepare tile mlir llvm zcu102 rebuild \
-	$(MODEL_NAMES)
+	$(ALL_MODEL_NAMES)
 
-MODEL_PREPARE_TARGETS := $(addsuffix .prepare,$(MODEL_NAMES))
-MODEL_TILE_TARGETS := $(addsuffix .tile,$(MODEL_NAMES))
-MODEL_MLIR_TARGETS := $(addsuffix .mlir,$(MODEL_NAMES))
-MODEL_LLVM_TARGETS := $(addsuffix .llvm,$(MODEL_NAMES))
-MODEL_ZCU102_TARGETS := $(addsuffix .zcu102,$(MODEL_NAMES))
+MODEL_PREPARE_TARGETS := $(addsuffix .prepare,$(ALL_MODEL_NAMES))
+MODEL_TILE_TARGETS := $(addsuffix .tile,$(ALL_MODEL_NAMES))
+MODEL_MLIR_TARGETS := $(addsuffix .mlir,$(ALL_MODEL_NAMES))
+MODEL_LLVM_TARGETS := $(addsuffix .llvm,$(ALL_MODEL_NAMES))
+MODEL_ZCU102_TARGETS := $(addsuffix .zcu102,$(ALL_MODEL_NAMES))
 
 .PHONY: $(MODEL_PREPARE_TARGETS) $(MODEL_TILE_TARGETS) $(MODEL_MLIR_TARGETS) $(MODEL_LLVM_TARGETS) $(MODEL_ZCU102_TARGETS)
 
@@ -63,10 +71,10 @@ rebuild: check_model
 	@$(MAKE) run_one MODEL=$(MODEL)
 
 ifneq (,$(filter clean,$(MAKECMDGOALS)))
-$(MODEL_NAMES):
+$(ALL_MODEL_NAMES):
 	@:
 else
-$(MODEL_NAMES): %: $(BUILD_DIR)/%/.zcu102.stamp
+$(ALL_MODEL_NAMES): %: $(BUILD_DIR)/%/.zcu102.stamp
 endif
 
 $(MODEL_PREPARE_TARGETS): %.prepare: $(BUILD_DIR)/%/.prepare.stamp
@@ -91,8 +99,8 @@ $(BUILD_DIR)/%/.prepare.stamp: | init
 	echo "[mkdir] $$work_dir"; \
 	if [[ -f "$$src_dir/model.py" ]]; then \
 		cp -f "$$src_dir/model.py" "$$work_dir/model.py"; \
-		echo "[gen] python $$work_dir/model.py"; \
-		(cd "$$work_dir" && $(PYTHON) model.py) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
+		echo "[gen] python $$work_dir/model.py $(MODEL_PY_ARGS)"; \
+		(cd "$$work_dir" && $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
 	elif [[ -f "$$src_dir/model.onnx" ]]; then \
 		cp -f "$$src_dir/model.onnx" "$$work_dir/model.onnx"; \
 		echo "[copy] $$src_dir/model.onnx -> $$work_dir/model.onnx"; \
@@ -193,8 +201,11 @@ $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 	touch "$@"
 
 list:
-	@echo "models: $(MODEL_NAMES)"
+	@echo "enabled models: $(MODEL_NAMES)"
+	@echo "disabled models: $(DISABLED_MODEL_NAMES)"
 	@echo "usage: make gelu | make gelu.tile | make run_one MODEL=gelu | make zcu102 MODEL=gelu | make tile MODEL=gelu | make llvm MODEL=gelu"
+	@echo "skip temporarily: make SKIP_MODELS=\"gelu resize\""
+	@echo "skip persistently: touch models/<model>/.disabled"
 
 clean:
 	@if [[ -n "$(SELECTIVE_CLEAN_MODELS)" ]]; then \
