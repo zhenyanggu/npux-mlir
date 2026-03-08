@@ -130,7 +130,7 @@ void verifyShape(const int64_t *shape, int64_t rank) {
 } // namespace
 
 int main(int argc, char **argv) {
-  constexpr int64_t d0 = 1, d1 = 128, d2 = 768;
+  constexpr int64_t d0 = 1, d1 = 128, d2 = 512;
   constexpr int64_t inputElements = d0 * d1 * d2;
 
   const fs::path exePath = (argc > 0) ? fs::path(argv[0]) : fs::path();

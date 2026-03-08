@@ -659,13 +659,13 @@ public:
 
       // Inputs
       args.push_back(addrA);
-      args.push_back(castToI8(loc, adaptor.getInputAColNumM1(), rewriter));
+      args.push_back(castToI16(loc, adaptor.getInputAColNumM1(), rewriter));
       args.push_back(castToI8(loc, adaptor.getInputARowNumM1(), rewriter));
       args.push_back(castToI16(loc, adaptor.getInputAStride(), rewriter));
 
       args.push_back(addrB);
       args.push_back(castToI8(loc, adaptor.getInputBColNumM1(), rewriter));
-      args.push_back(castToI8(loc, adaptor.getInputBRowNumM1(), rewriter));
+      args.push_back(castToI16(loc, adaptor.getInputBRowNumM1(), rewriter));
       args.push_back(castToI16(loc, adaptor.getInputBStride(), rewriter));
 
     } else {
