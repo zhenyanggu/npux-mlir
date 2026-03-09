@@ -422,6 +422,9 @@ public:
     Value hostPtr = getFlatPtrFromMemRef(
         loc, adaptor.getSource(), memRefType.getElementType(), rewriter);
 
+    auto shape = op.getSource().getType().getShape();
+    auto col = shape[shape.size() - 1];
+
     // 2. 创建 Dummy/默认常量
     // 根据你提供的 CAPI 参数顺序和类型进行填充
     Value c0_i1 =
@@ -436,13 +439,13 @@ public:
         rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI16Type(), 0);
     Value c0_i32 =
         rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(), 0);
-    Value c31_i32 =
-        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(), 31);
+    Value Vcol_m1 =
+        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(), col-1);
     SmallVector<Value> args;
     // 参数顺序参考你提供的 DmaMvinLowering 逻辑
     args.push_back(hostPtr); // hostPtr (来自 source)
     args.push_back(c0_i32);  // dstAddr: 因为写到专用寄存器，传 0 即可
-    args.push_back(c31_i32);  // colNum
+    args.push_back(Vcol_m1);  // colNum
     args.push_back(c0_i32);  // rowNum
     args.push_back(c0_i16);  // sramStride
     args.push_back(c0_i32);  // dramStride
