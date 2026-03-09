@@ -115,6 +115,17 @@ Value getNpuOffsetAddress(
 
     // 2.2 获取 Source MemRef 的 Strides 信息
     auto sourceMemRefType = cast<MemRefType>(subviewOp.getSource().getType());
+    Type sourceElemType = sourceMemRefType.getElementType();
+    int64_t elemBytes = 1;
+    if (sourceElemType.isIndex()) {
+      elemBytes = 8;
+    } else if (sourceElemType.isIntOrFloat()) {
+      int64_t bitWidth = sourceElemType.getIntOrFloatBitWidth();
+      elemBytes = (bitWidth + 7) / 8;
+      if (elemBytes <= 0)
+        elemBytes = 1;
+    }
+
     SmallVector<int64_t> strides;
     int64_t offset;
     // NPU 场景通常是 Static Shape
@@ -127,8 +138,8 @@ Value getNpuOffsetAddress(
     auto dynamicOffsets = subviewOp.getOffsets();
 
     for (size_t i = 0; i < dynamicOffsets.size(); ++i) {
-      int64_t strideVal = strides[i];
-      if (strideVal == 0)
+      int64_t strideBytes = strides[i] * elemBytes;
+      if (strideBytes == 0)
         continue;
 
       Value dimOffset = dynamicOffsets[i];
@@ -140,7 +151,7 @@ Value getNpuOffsetAddress(
           rewriter.create<LLVM::TruncOp>(loc, i32Type, dimOffsetI64);
 
       Value strideConst = rewriter.create<LLVM::ConstantOp>(
-          loc, i32Type, rewriter.getI32IntegerAttr(strideVal));
+          loc, i32Type, rewriter.getI32IntegerAttr(strideBytes));
 
       Value offsetBytes =
           rewriter.create<LLVM::MulOp>(loc, dimOffsetI32, strideConst);
@@ -425,12 +436,13 @@ public:
         rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI16Type(), 0);
     Value c0_i32 =
         rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(), 0);
-
+    Value c31_i32 =
+        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(), 31);
     SmallVector<Value> args;
     // 参数顺序参考你提供的 DmaMvinLowering 逻辑
     args.push_back(hostPtr); // hostPtr (来自 source)
     args.push_back(c0_i32);  // dstAddr: 因为写到专用寄存器，传 0 即可
-    args.push_back(c0_i32);  // colNum
+    args.push_back(c31_i32);  // colNum
     args.push_back(c0_i32);  // rowNum
     args.push_back(c0_i16);  // sramStride
     args.push_back(c0_i32);  // dramStride

@@ -338,8 +338,10 @@ public:
 
     // --- Operation Control ---
     auto opTypeAttr = ComputeOpTypeAttr::get(rewriter.getContext(), opType);
+    auto dataflowMode =
+      (opType == ComputeOpType::conv) ? DataflowMode::ws : DataflowMode::os;
     auto dataflowModeAttr =
-        DataflowModeAttr::get(rewriter.getContext(), DataflowMode::os);
+      DataflowModeAttr::get(rewriter.getContext(), dataflowMode);
     auto accoutDestAttr = AccoutDestAttr::get(rewriter.getContext(), accDest);
     Value vIntType = c8(0);
 
@@ -378,8 +380,10 @@ public:
     outZp = getIntAttr(op, "out_zp", 0);
     if (opType == ComputeOpType::conv) {
       double inScale = getFloatAttr(op, "in_scale", 1.0);
+      double wScale = getFloatAttr(op, "w_scale", 1.0);
       inZp = getIntAttr(op, "in_zp", 0);
-      realMultiplier = inScale / outScaleTarget;
+      wZp = getIntAttr(op, "w_zp", 0);
+      realMultiplier = (inScale * wScale) / outScaleTarget;
     } else {
       inZp = getIntAttr(op, "lhs_zp", 0);
       wZp = getIntAttr(op, "rhs_zp", 0);

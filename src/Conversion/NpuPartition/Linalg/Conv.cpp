@@ -265,21 +265,24 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
 
     double inScale = 1.0;
     int64_t inZp = 0;
+    double wScale = 1.0;
+    int64_t wZp = 0;
 
-    auto stripDequant = [&](Value &val, bool extractParams = false) {
+    auto stripDequant =
+        [&](Value &val, double *scaleOut = nullptr, int64_t *zpOut = nullptr) {
       if (auto dequantOp = val.getDefiningOp<ONNXDequantizeLinearOp>()) {
         val = dequantOp.getX();
-        if (extractParams) {
+        if (scaleOut && zpOut) {
           auto params = getScalarQuantParams(dequantOp);
-          inScale = params.scale;
-          inZp = params.zeroPoint;
+          *scaleOut = params.scale;
+          *zpOut = params.zeroPoint;
         }
         opsToErase.push_back(dequantOp);
       }
     };
 
-    stripDequant(originInput, true);
-    stripDequant(weightInput);
+    stripDequant(originInput, &inScale, &inZp);
+    stripDequant(weightInput, &wScale, &wZp);
     if (!mlir::isa<NoneType>(biasInput.getType())) {
       stripDequant(biasInput);
     }
@@ -552,6 +555,9 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
       convOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
       convOp->setAttr(
           "in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
+        convOp->setAttr("w_scale", rewriter.getF32FloatAttr(wScale));
+        convOp->setAttr(
+          "w_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), wZp));
       convOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
       convOp->setAttr("out_zp",
           rewriter.getIntegerAttr(rewriter.getI16Type(), outZp));
