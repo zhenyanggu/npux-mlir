@@ -21,6 +21,26 @@ using namespace mlir;
 
 namespace {
 
+static int64_t getStaticTripCount(scf::ForOp forOp) {
+  std::optional<int64_t> lb = getConstantIntValue(forOp.getLowerBound());
+  std::optional<int64_t> ub = getConstantIntValue(forOp.getUpperBound());
+  std::optional<int64_t> step = getConstantIntValue(forOp.getStep());
+
+  if (lb && ub && step) {
+    return (int64_t)std::ceil((double)(*ub - *lb) / *step);
+  }
+  return -1;
+}
+
+static void tagInnerComputeOp(
+    Operation *containerOp, StringRef phase, RewriterBase &rewriter) {
+  containerOp->walk([&](Operation *op) {
+    if (op->hasAttr("npu.split_done")) {
+      // 按照要求修改了 Tag 名字
+      op->setAttr("npu.split_stage", rewriter.getStringAttr(phase));
+    }
+  });
+}
 static LogicalResult peelForLoopLastIteration(
     RewriterBase &b, scf::ForOp forOp, scf::ForOp &lastIteration) {
   RewriterBase::InsertionGuard guard(b);
@@ -401,27 +421,54 @@ private:
         return success();
     }
 
+    for (auto *op : cinTilingResult->tiledOps) {
+         op->setAttr("npu.split_done", rewriter.getUnitAttr());
+    }
+
     scf::ForOp cinLoop = cast<scf::ForOp>(cinTilingResult->loops.front().getOperation());
     cinLoop->setAttr("npu.split_dim", rewriter.getStringAttr("cin"));
 
-    // Phase 4: Cin Last-Iteration Peeling (尾块剥离)
-    scf::ForOp lastIterationConv;
+    // Phase 4: Cin Peeling (Head/Body/Tail) - 同步 Conv.cpp 逻辑
     SmallVector<Value> finalCinResults = cinTilingResult->replacements;
+    int64_t tripCount = getStaticTripCount(cinLoop);
 
-    // 尝试剥离最后一次迭代
-    if (succeeded(peelForLoopLastIteration(rewriter, cinLoop, lastIterationConv))) {
-      // 【核心保命逻辑】：如果成功剥离了尾块，必须把输出指向尾块的结果！
-      // 这样外层的 mv_acc_to_spm 才能顺着 Use-Def 链找到它，防止它被 DCE 删掉。
-      if (lastIterationConv.getNumResults() > 0) {
-        finalCinResults = lastIterationConv.getResults();
+    if (tripCount == 1) {
+      tagInnerComputeOp(cinLoop, "single", rewriter);
+    } else {
+      scf::ForOp restLoop = cinLoop;
+      scf::ForOp headLoop;
+      
+      // 剥离 Head
+      if (succeeded(peelForLoopFirstIteration(rewriter, cinLoop, headLoop))) {
+        inheritNpuAttributes(restLoop, headLoop);
+        tagInnerComputeOp(headLoop, "head", rewriter);
       }
-    } 
 
-    // 给所有生成的内部 Conv 算子打上完成标签
-    for (auto *op : cinTilingResult->tiledOps) {
-         op->setAttr("npu.split_done", rewriter.getUnitAttr());
-         // 如果你的其他 Pass 还需要 npu.tiled 属性来识别，可以解除下面这行的注释
-         // op->setAttr("npu.tiled", rewriter.getUnitAttr());
+      int64_t restTripCount = getStaticTripCount(restLoop);
+      if (restTripCount == 1) {
+        tagInnerComputeOp(restLoop, "tail", rewriter);
+        finalCinResults = restLoop->getResults();
+      } else {
+        scf::ForOp tailLoop;
+        bool hasTail = false;
+        
+        // 尝试剥离 Tail
+        if (succeeded(scf::peelForLoopAndSimplifyBounds(rewriter, restLoop, tailLoop))) {
+          hasTail = true;
+        } else if (succeeded(peelForLoopLastIteration(rewriter, restLoop, tailLoop))) {
+          hasTail = true;
+        }
+
+        if (hasTail) {
+          inheritNpuAttributes(restLoop, tailLoop);
+          tagInnerComputeOp(tailLoop, "tail", rewriter);
+          tagInnerComputeOp(restLoop, "body", rewriter);
+          finalCinResults = tailLoop->getResults();
+        } else {
+          tagInnerComputeOp(restLoop, "body", rewriter);
+          finalCinResults = restLoop->getResults();
+        }
+      }
     }
 
     // Phase 5: Final Replacement (使用更新后的 finalCinResults 替换内部 Conv)

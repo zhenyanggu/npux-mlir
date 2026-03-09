@@ -23,6 +23,7 @@ namespace {
 static const SmallVector<StringRef> kDimensionLabels = {
     "N", "OC", "OH", "OW", "IC"};
 
+    
 static void tagInnerComputeOp(
     Operation *containerOp, StringRef phase, RewriterBase &rewriter) {
   containerOp->walk([&](Operation *op) {

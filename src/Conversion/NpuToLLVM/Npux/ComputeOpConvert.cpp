@@ -5,8 +5,8 @@
 //=======================================
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/PatternMatch.h"
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
 #include "src/Dialect/Npux/NpuxOps.hpp"
@@ -112,19 +112,29 @@ public:
       loopStage = attr.getValue();
     }
 
+    // 获取 split_stage 标签，如果没有打标签，默认作为 single 处理
+    StringRef splitStage = "single";
+    if (auto attr = op->getAttrOfType<StringAttr>("npu.split_stage")) {
+      splitStage = attr.getValue();
+    }
+
+    // 提取判断逻辑：判断当前是否是输出块的绝对“第一次计算”
+    bool isLoopFirst = (loopStage == "head" || loopStage == "single");
+    bool isSplitFirst = (splitStage == "head" || splitStage == "single");
+    bool isFirstCalculation = (isLoopFirst && isSplitFirst);
+
     if (op.getInputs().size() >= 3) {
+      // ==========================================
+      // 场景 A：带有 Bias 的情况
+      // ==========================================
       Value thirdInput = op.getInputs()[2];
 
-      if (loopStage == "head" || loopStage == "single") {
-        // === Case 1: Head / Single (Bias Logic) ===
-        
-        // 使用 InsertionGuard 保存当前的插入点
+      if (isFirstCalculation) {
+        // === Case A1: Head / Single (Bias Logic) ===
         OpBuilder::InsertionGuard guard(rewriter);
-        
         scf::ForOp hoistAnchor = nullptr;
 
         if (opType == ComputeOpType::gemm) {
-          // GEMM 的 MvinBias 逻辑保持不变
           auto parentFor = op->getParentOfType<scf::ForOp>();
           while (parentFor) {
             if (auto splitDim = parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
@@ -136,96 +146,107 @@ public:
             parentFor = parentFor->getParentOfType<scf::ForOp>();
           }
         } else if (opType == ComputeOpType::conv) {
-          // Conv 的 MvinBias 逻辑
           scf::ForOp coutLoop = nullptr;
           scf::ForOp outermostFor = nullptr;
           auto parentFor = op->getParentOfType<scf::ForOp>();
-          
+
           while (parentFor) {
-            outermostFor = parentFor; // 一路记录，直到最外层
+            outermostFor = parentFor; 
             if (auto splitDim = parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
               StringRef dimVal = splitDim.getValue();
-              // 兼容可能的 Cout 标签命名
               if (dimVal == "cout" || dimVal == "Cout_c" || dimVal == "Cout") {
                 coutLoop = parentFor;
               }
             }
             parentFor = parentFor->getParentOfType<scf::ForOp>();
           }
-          
+
           if (coutLoop) {
-            // 放到 Cout_c 这一层：即 cout 循环的内部，紧贴着下级内层循环（H）的外面
             scf::ForOp child = op->getParentOfType<scf::ForOp>();
             while (child && child->getParentOp() != coutLoop) {
               child = child->getParentOfType<scf::ForOp>();
             }
-            hoistAnchor = child; 
+            hoistAnchor = child;
           } else {
-            // 如果没有任何 Cout_c 标签，放到最外层循环的外面
             hoistAnchor = outermostFor;
           }
         }
 
         if (hoistAnchor) {
-          // ========================================================
-          // 【核心修复】：消除 Dominance 错误
-          // 将 thirdInput 的定义指令（及其依赖）连根拔起，一起提到锚点循环外
-          // ========================================================
-          std::function<void(Operation*)> hoistOps = [&](Operation* opToHoist) {
+          std::function<void(Operation *)> hoistOps = [&](Operation *opToHoist) {
             for (Value operand : opToHoist->getOperands()) {
               if (Operation *defOp = operand.getDefiningOp()) {
-                // 如果依赖的指令也在锚点循环内部，递归提取它
                 if (hoistAnchor->isAncestor(defOp)) {
                   hoistOps(defOp);
                 }
               }
             }
-            // 将该指令移动到锚点循环之前
             opToHoist->moveBefore(hoistAnchor);
           };
-          
+
           if (Operation *thirdDef = thirdInput.getDefiningOp()) {
             if (hoistAnchor->isAncestor(thirdDef)) {
               hoistOps(thirdDef);
             }
           }
-
-          // 设置插入点为锚点循环前方
           rewriter.setInsertionPoint(hoistAnchor);
         }
-        
+
         // 1. Create the dedicated MvinBiasOp
         rewriter.create<MvinBiasOp>(loc, thirdInput);
 
-        // Guard 生命周期结束，插入点自动恢复到原来的 GenericOp 处
-        // 后续的 ComputeRunOp 依然会正确生成在最内层
-
         // 2. Configure ComputeOp Flags
-        psumMemRefForOp = nullptr;   // Bias 已经在寄存器里了，不需要传入 psum buffer
-        flagAccBias = true;  // 启用加偏置
-        flagDoAccum = false; // 不做 Psum 累加
-      } else if (loopStage == "body" || loopStage == "tail") {
-        // === Case 2: Body / Tail (Accumulation Logic) ===
+        psumMemRefForOp = nullptr; // Bias 已经在寄存器里了，不需要传入 psum buffer
+        flagAccBias = true;        // 启用加偏置
+        
+        // 【核心修改点】：因为需要加偏置，有加法操作，DoAccum 必须为 true
+        flagDoAccum = true;        
+
+      } else if (loopStage == "body" || loopStage == "tail" || 
+                 splitStage == "body" || splitStage == "tail") {
+        // === Case A2: Body / Tail (Accumulation Logic) ===
         psumMemRefForOp = outputMemRef;
         flagAccBias = false; // 偏置已经在 head 阶段加过了
         flagDoAccum = true;  // 开启 Psum 累加模式
       } else {
-        return failure(); 
+        return failure();
+      }
+
+    } else {
+      // ==========================================
+      // 场景 B：没有 Bias 的情况
+      // ==========================================
+      if (isFirstCalculation) {
+        // === Case B1: 无 Bias 且是第一次计算 ===
+        psumMemRefForOp = nullptr; 
+        flagAccBias = false;       
+        
+        // 【核心修改点】：既没有 Bias，也不需要累加 Psum，此时才是真正的 0
+        flagDoAccum = false;       
+
+      } else if (loopStage == "body" || loopStage == "tail" || 
+                 splitStage == "body" || splitStage == "tail") {
+        // === Case B2: 无 Bias 但处于 Body/Tail 累加阶段 ===
+        psumMemRefForOp = outputMemRef;
+        flagAccBias = false; 
+        flagDoAccum = true; // 虽然没 Bias，但需要把之前的 Psum 加进来，所以是 true
+      } else {
+        return failure();
       }
     }
 
     // 4. Memory Space Validation & Destination Inference
     auto checkSpace = [&](Value v, int expectedSpace) {
       if (!v)
-        return true; 
+        return true;
       auto type = mlir::dyn_cast<MemRefType>(v.getType());
       return type && type.getMemorySpaceAsInt() == expectedSpace;
     };
 
     if (!checkSpace(inputAMemRef, 2))
-      return failure(); 
+      return failure();
     if (!checkSpace(inputBMemRef, 2))
-      return failure(); 
+      return failure();
 
     auto outType = mlir::cast<MemRefType>(outputMemRef.getType());
     int outSpace = outType.getMemorySpaceAsInt();
@@ -236,7 +257,7 @@ public:
     } else if (outSpace == 2) {
       accDest = AccoutDest::spm;
     } else {
-      return failure(); 
+      return failure();
     }
 
     // 5. Parse Geometry (Shapes & Strides)
@@ -246,18 +267,18 @@ public:
     ArrayRef<int64_t> inBShape = inBType.getShape();
     ArrayRef<int64_t> outShape = outType.getShape();
 
-    SmallVector<int64_t, 4> inAStrides ;
-    SmallVector<int64_t, 4> inBStrides ;
-    SmallVector<int64_t, 4> outStrides ;
+    SmallVector<int64_t, 4> inAStrides;
+    SmallVector<int64_t, 4> inBStrides;
+    SmallVector<int64_t, 4> outStrides;
     int64_t inAoffset, inBoffset, outOffset;
 
-    if(failed(inAType.getStridesAndOffset(inAStrides,inAoffset))) {
+    if (failed(inAType.getStridesAndOffset(inAStrides, inAoffset))) {
       return failure();
     }
-    if(failed(inBType.getStridesAndOffset(inBStrides,inBoffset))) {
+    if (failed(inBType.getStridesAndOffset(inBStrides, inBoffset))) {
       return failure();
     }
-    if(failed(outType.getStridesAndOffset(outStrides,outOffset))) {
+    if (failed(outType.getStridesAndOffset(outStrides, outOffset))) {
       return failure();
     }
     int64_t a_col = 1, a_row = 1, a_stride = 0;
@@ -271,37 +292,37 @@ public:
     if (opType == ComputeOpType::conv) {
       a_row = inAShape[2];
       a_col = inAShape[3];
-      a_stride = inAStrides[2]/inAStrides[3];
+      a_stride = inAStrides[2] / inAStrides[3];
 
       b_row = inBShape[4];
       b_col = inBShape[5];
 
       out_height = outShape[2];
       out_width = outShape[3];
-      out_stride = outStrides[2]/outStrides[3];
+      out_stride = outStrides[2] / outStrides[3];
 
-      kernel_sz = outShape[2] ;
+      kernel_sz = inBShape[2];
       stride_val = getArrayAttr(op, "strides", 0, 1);
       dilation_val = getArrayAttr(op, "dilations", 0, 1);
 
       pad_mode_val = getIntAttr(op, "pad_mode", 0);
       is_group = (getIntAttr(op, "group", 1) > 1);
     } else {
-        int64_t rankA= inAShape.size();
-        int64_t rankB= inBShape.size();
-        int64_t rankOut= outShape.size();
+      int64_t rankA = inAShape.size();
+      int64_t rankB = inBShape.size();
+      int64_t rankOut = outShape.size();
 
-        a_row = inAShape[rankA-2];
-        a_col = inAShape[rankA-1];
-        a_stride = inAStrides[rankA-2];
+      a_row = inAShape[rankA - 2];
+      a_col = inAShape[rankA - 1];
+      a_stride = inAStrides[rankA - 2];
 
-        b_row = inBShape[rankB-2];
-        b_col = inBShape[rankB-1];
-        b_stride = inBStrides[rankB-2];
+      b_row = inBShape[rankB - 2];
+      b_col = inBShape[rankB - 1];
+      b_stride = inBStrides[rankB - 2];
 
-        out_height = outShape[rankOut-2];
-        out_width = outShape[rankOut-1];
-        out_stride = outStrides[rankOut-2];
+      out_height = outShape[rankOut - 2];
+      out_width = outShape[rankOut - 1];
+      out_stride = outStrides[rankOut - 2];
     }
 
     // 6. Create Constants
@@ -390,28 +411,21 @@ public:
     rewriter.replaceOpWithNewOp<ComputeRunOp>(op, opTypeAttr, dataflowModeAttr,
         accoutDestAttr, vIntType,
 
-        inputAMemRef, inputBMemRef,
-        psumMemRefForOp,
-        outputMemRef,
+        inputAMemRef, inputBMemRef, psumMemRefForOp, outputMemRef,
 
         vPadT, vPadB, vPadL, vPadR, vPadMode,
 
-        vWeightShapeM1, vWeightStrideM1, vWeightDilationM1, 
-        vIsGroup,
+        vWeightShapeM1, vWeightStrideM1, vWeightDilationM1, vIsGroup,
 
-        vInAColM1, vInARowM1, vInAStride,
-         vInBColM1, vInBRowM1, vInBStride,
+        vInAColM1, vInARowM1, vInAStride, vInBColM1, vInBRowM1, vInBStride,
 
         vBiasPsumWidth, vBiasPsumHeight, vBiasPsumStride,
 
         vOutputStride,
 
-        vDoAccum, 
-        vReluEnable, reluTypeAttr,
-        vAccBias, 
+        vDoAccum, vReluEnable, reluTypeAttr, vAccBias,
 
-        vOutZp, vQuantScale, vQuantShift, 
-        vInAZp, vInBZp);
+        vOutZp, vQuantScale, vQuantShift, vInAZp, vInBZp);
 
     return success();
   }
