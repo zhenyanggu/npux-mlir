@@ -145,6 +145,9 @@ $(BUILD_DIR)/%/.tile.stamp: $(BUILD_DIR)/%/.prepare.stamp
 	elif [[ "$$model" == "mnist" ]]; then \
 		shape_args="--shape 1,1,28,28"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,28,28"; \
+	elif [[ "$$model" == "resnet50" ]]; then \
+		shape_args="--shape 1,3,224,224"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,224,224"; \
 	fi; \
 	echo "[tile] $$onnx_file -> $$tile_json"; \
 	$(PYTHON) "$(SCRIPTS_DIR)/conv_tile.py" \
@@ -164,8 +167,13 @@ $(BUILD_DIR)/%/.mlir.stamp: $(BUILD_DIR)/%/.tile.stamp
 	work_dir="$(BUILD_DIR)/$$model"; \
 	onnx_file="$$work_dir/model.onnx"; \
 	mlir_file="$$onnx_file.mlir"; \
+	onnx_flags=""; \
+	if [[ "$$model" == "resnet50" ]]; then \
+		onnx_flags="--enable-conv-opt-pass=false"; \
+		echo "[mlir] $$model disable ConvOptPass to keep 1x1 Conv (avoid Conv->MatMul rewrite)"; \
+	fi; \
 	echo "[mlir] $$onnx_file -> $$mlir_file"; \
-	(cd "$$work_dir" && $(ONNX_MLIR) --EmitONNXIR "model.onnx") || { echo "[error] $$model ONNX 转 MLIR 失败"; exit 2; }; \
+	(cd "$$work_dir" && $(ONNX_MLIR) $$onnx_flags --EmitONNXIR "model.onnx") || { echo "[error] $$model ONNX 转 MLIR 失败"; exit 2; }; \
 	if [[ ! -f "$$mlir_file" ]]; then \
 		echo "[error] 未找到 MLIR 文件: $$mlir_file"; \
 		exit 2; \

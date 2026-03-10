@@ -6,7 +6,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -18,13 +17,14 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr int64_t kChannels = 1;
-constexpr int64_t kHeight = 28;
-constexpr int64_t kWidth = 28;
+constexpr int64_t kChannels = 3;
+constexpr int64_t kHeight = 224;
+constexpr int64_t kWidth = 224;
 constexpr int64_t kImageElements = kChannels * kHeight * kWidth;
-constexpr int64_t kNumClasses = 10;
-constexpr float kGoldenDiffThreshold = 0.1f;
-constexpr const char *kAsciiRamp = " .:-=+*#%@";
+constexpr int64_t kNumClasses = 1000;
+
+constexpr float kMean[3] = {0.485f, 0.456f, 0.406f};
+constexpr float kStd[3] = {0.229f, 0.224f, 0.225f};
 
 struct Options {
   std::string imagesFile;
@@ -32,7 +32,7 @@ struct Options {
   std::string goldenFile;
   int64_t startIndex = 0;
   int64_t count = 1;
-  bool printAscii = false;
+  float diffThreshold = 0.25f;
 };
 
 enum class ParseStatus {
@@ -52,7 +52,7 @@ std::string modelPrefixFromExecutable(const fs::path &exePath) {
   const std::string suffix = "_zcu102";
   if (endsWith(name, suffix))
     name.resize(name.size() - suffix.size());
-  return name.empty() ? "model" : name;
+  return name.empty() ? "resnet50" : name;
 }
 
 std::string resolveDataFile(const fs::path &exeDir, const std::string &modelPrefix,
@@ -66,31 +66,6 @@ std::string resolveDataFile(const fs::path &exeDir, const std::string &modelPref
     return legacy.string();
 
   return prefixed.string();
-}
-
-std::vector<float> loadFloatBin(const std::string &path) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file.is_open()) {
-    std::cerr << "Error: cannot open file: " << path << std::endl;
-    std::exit(1);
-  }
-
-  file.seekg(0, std::ios::end);
-  const std::streamsize bytes = file.tellg();
-  file.seekg(0, std::ios::beg);
-
-  if (bytes <= 0 || bytes % static_cast<std::streamsize>(sizeof(float)) != 0) {
-    std::cerr << "Error: invalid float binary size for " << path << ": " << bytes
-              << std::endl;
-    std::exit(1);
-  }
-
-  std::vector<float> data(static_cast<size_t>(bytes / sizeof(float)));
-  if (!file.read(reinterpret_cast<char *>(data.data()), bytes)) {
-    std::cerr << "Error: failed to read file: " << path << std::endl;
-    std::exit(1);
-  }
-  return data;
 }
 
 std::vector<uint8_t> loadU8Bin(const std::string &path) {
@@ -143,6 +118,31 @@ std::vector<int64_t> loadI64Bin(const std::string &path) {
   return data;
 }
 
+std::vector<float> loadF32Bin(const std::string &path) {
+  std::ifstream file(path, std::ios::binary);
+  if (!file.is_open()) {
+    std::cerr << "Error: cannot open file: " << path << std::endl;
+    std::exit(1);
+  }
+
+  file.seekg(0, std::ios::end);
+  const std::streamsize bytes = file.tellg();
+  file.seekg(0, std::ios::beg);
+
+  if (bytes <= 0 || bytes % static_cast<std::streamsize>(sizeof(float)) != 0) {
+    std::cerr << "Error: invalid float32 binary size for " << path << ": " << bytes
+              << std::endl;
+    std::exit(1);
+  }
+
+  std::vector<float> data(static_cast<size_t>(bytes / sizeof(float)));
+  if (!file.read(reinterpret_cast<char *>(data.data()), bytes)) {
+    std::cerr << "Error: failed to read file: " << path << std::endl;
+    std::exit(1);
+  }
+  return data;
+}
+
 int64_t argmax(const float *row, int64_t size) {
   int64_t idx = 0;
   float best = row[0];
@@ -153,33 +153,6 @@ int64_t argmax(const float *row, int64_t size) {
     }
   }
   return idx;
-}
-
-std::string renderAscii(const uint8_t *image) {
-  constexpr int kRampSize = 10;
-  std::ostringstream oss;
-  for (int64_t r = 0; r < kHeight; ++r) {
-    for (int64_t c = 0; c < kWidth; ++c) {
-      const int64_t idx = r * kWidth + c;
-      const int level = static_cast<int>(
-          std::round((static_cast<float>(image[idx]) / 255.0f) * (kRampSize - 1)));
-      oss << kAsciiRamp[level];
-    }
-    oss << '\n';
-  }
-  return oss.str();
-}
-
-void printUsage(const char *argv0) {
-  std::cout << "Usage: " << argv0 << " [options]\n"
-            << "Options:\n"
-            << "  --images <path>    uint8 image file, N x 28 x 28 (default: auto-detect)\n"
-            << "  --labels <path>    int64 label file with N entries (default: auto-detect)\n"
-            << "  --golden <path>    float32 logits file, N x 10 (default: auto-detect)\n"
-            << "  --index <int>      start image index (default: 0)\n"
-            << "  --count <int>      number of images to run (default: 1)\n"
-            << "  --ascii            print image in ASCII before inference\n"
-            << "  --help             show this help\n";
 }
 
 bool parseI64(const std::string &s, int64_t &value) {
@@ -195,15 +168,36 @@ bool parseI64(const std::string &s, int64_t &value) {
   }
 }
 
+bool parseFloat(const std::string &s, float &value) {
+  try {
+    size_t pos = 0;
+    const float v = std::stof(s, &pos);
+    if (pos != s.size())
+      return false;
+    value = v;
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+void printUsage(const char *argv0) {
+  std::cout << "Usage: " << argv0 << " [options]\n"
+            << "Options:\n"
+            << "  --images <path>          uint8 image file, N x 3 x 224 x 224 (default: auto-detect)\n"
+            << "  --labels <path>          int64 labels, N entries (default: auto-detect)\n"
+            << "  --golden <path>          float32 logits, N x 1000 (default: auto-detect)\n"
+            << "  --index <int>            start index (default: 0)\n"
+            << "  --count <int>            number of samples to run (default: 1)\n"
+            << "  --diff-threshold <float> per-logit abs diff threshold (default: 0.25)\n"
+            << "  --help                   show this help\n";
+}
+
 ParseStatus parseArgs(int argc, char **argv, Options &opts) {
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--help" || arg == "-h")
       return ParseStatus::kHelp;
-    if (arg == "--ascii") {
-      opts.printAscii = true;
-      continue;
-    }
 
     if (i + 1 >= argc) {
       std::cerr << "Error: missing value for argument: " << arg << std::endl;
@@ -227,6 +221,11 @@ ParseStatus parseArgs(int argc, char **argv, Options &opts) {
         std::cerr << "Error: invalid --count value: " << value << std::endl;
         return ParseStatus::kError;
       }
+    } else if (arg == "--diff-threshold") {
+      if (!parseFloat(value, opts.diffThreshold)) {
+        std::cerr << "Error: invalid --diff-threshold value: " << value << std::endl;
+        return ParseStatus::kError;
+      }
     } else {
       std::cerr << "Error: unknown argument: " << arg << std::endl;
       return ParseStatus::kError;
@@ -241,6 +240,11 @@ ParseStatus parseArgs(int argc, char **argv, Options &opts) {
     std::cerr << "Error: --count must be > 0" << std::endl;
     return ParseStatus::kError;
   }
+  if (opts.diffThreshold < 0.0f) {
+    std::cerr << "Error: --diff-threshold must be >= 0" << std::endl;
+    return ParseStatus::kError;
+  }
+
   return ParseStatus::kOk;
 }
 
@@ -275,93 +279,81 @@ int main(int argc, char **argv) {
     std::cerr << "Error: images file not found: " << opts.imagesFile << std::endl;
     return 1;
   }
+  if (!fs::exists(opts.labelsFile)) {
+    std::cerr << "Error: labels file not found: " << opts.labelsFile << std::endl;
+    return 1;
+  }
+  if (!fs::exists(opts.goldenFile)) {
+    std::cerr << "Error: golden file not found: " << opts.goldenFile << std::endl;
+    return 1;
+  }
 
   const std::vector<uint8_t> rawImages = loadU8Bin(opts.imagesFile);
   if (rawImages.size() % static_cast<size_t>(kImageElements) != 0) {
-    std::cerr << "Error: images file size is not multiple of 28x28: "
-              << rawImages.size() << std::endl;
+    std::cerr << "Error: images file size is not multiple of sample size(" << kImageElements
+              << "): " << rawImages.size() << std::endl;
     return 1;
   }
 
   const int64_t numImages =
       static_cast<int64_t>(rawImages.size() / static_cast<size_t>(kImageElements));
+  const std::vector<int64_t> labels = loadI64Bin(opts.labelsFile);
+  if (static_cast<int64_t>(labels.size()) != numImages) {
+    std::cerr << "Error: labels count mismatch, images=" << numImages
+              << ", labels=" << labels.size() << std::endl;
+    return 1;
+  }
+
+  const std::vector<float> golden = loadF32Bin(opts.goldenFile);
+  if (golden.size() % static_cast<size_t>(kNumClasses) != 0) {
+    std::cerr << "Error: golden file size is not multiple of class count(" << kNumClasses
+              << ")" << std::endl;
+    return 1;
+  }
+
+  const int64_t goldenRows =
+      static_cast<int64_t>(golden.size() / static_cast<size_t>(kNumClasses));
+  if (goldenRows != numImages) {
+    std::cerr << "Error: golden rows mismatch, images=" << numImages
+              << ", golden_rows=" << goldenRows << std::endl;
+    return 1;
+  }
+
   if (opts.startIndex >= numImages) {
     std::cerr << "Error: --index " << opts.startIndex
               << " out of range, total images=" << numImages << std::endl;
     return 1;
   }
+
   const int64_t runCount = std::min<int64_t>(opts.count, numImages - opts.startIndex);
-
-  std::vector<int64_t> labels;
-  bool hasLabels = false;
-  if (fs::exists(opts.labelsFile)) {
-    labels = loadI64Bin(opts.labelsFile);
-    if (static_cast<int64_t>(labels.size()) < opts.startIndex + runCount) {
-      std::cerr << "Error: labels count(" << labels.size()
-                << ") is smaller than requested range end(" << opts.startIndex + runCount
-                << ")" << std::endl;
-      return 1;
-    }
-    hasLabels = true;
-  } else {
-    std::cout << "Warning: labels file not found, classification accuracy will be skipped"
-              << std::endl;
-  }
-
-  std::vector<float> golden;
-  bool hasGolden = false;
-  if (fs::exists(opts.goldenFile)) {
-    golden = loadFloatBin(opts.goldenFile);
-    if (golden.size() % static_cast<size_t>(kNumClasses) != 0) {
-      std::cerr << "Error: golden file size is not multiple of class count(" << kNumClasses
-                << ")" << std::endl;
-      return 1;
-    }
-    const int64_t goldenRows =
-        static_cast<int64_t>(golden.size() / static_cast<size_t>(kNumClasses));
-    if (goldenRows < opts.startIndex + runCount) {
-      std::cerr << "Error: golden rows(" << goldenRows
-                << ") is smaller than requested range end(" << opts.startIndex + runCount
-                << ")" << std::endl;
-      return 1;
-    }
-    hasGolden = true;
-  } else {
-    std::cout << "Warning: golden file not found, output diff check will be skipped"
-              << std::endl;
-  }
-
   std::cout << "Running range: index=" << opts.startIndex << ", count=" << runCount
             << ", total_images=" << numImages << std::endl;
 
-  int64_t classifyCorrect = 0;
-  int64_t classifyTotal = 0;
-  int64_t goldenPassCount = 0;
-  int64_t goldenCheckedCount = 0;
+  int64_t labelCorrect = 0;
+  int64_t semanticErrors = 0;
+  int64_t numericErrors = 0;
+  int64_t sampleErrors = 0;
 
   for (int64_t sample = 0; sample < runCount; ++sample) {
     const int64_t imageIndex = opts.startIndex + sample;
     const uint8_t *imagePtr =
         rawImages.data() + static_cast<size_t>(imageIndex * kImageElements);
 
-    if (opts.printAscii) {
-      std::cout << "\n=== Sample " << imageIndex << " ASCII ===" << std::endl;
-      std::cout << renderAscii(imagePtr);
+    std::vector<float> inputData(static_cast<size_t>(kImageElements));
+    for (int64_t c = 0; c < kChannels; ++c) {
+      const int64_t cBase = c * kHeight * kWidth;
+      for (int64_t hw = 0; hw < kHeight * kWidth; ++hw) {
+        const float x = static_cast<float>(imagePtr[cBase + hw]) / 255.0f;
+        inputData[static_cast<size_t>(cBase + hw)] = (x - kMean[c]) / kStd[c];
+      }
     }
 
-    std::vector<float> preprocessedInput(static_cast<size_t>(kImageElements));
-    for (int64_t i = 0; i < kImageElements; ++i) {
-      preprocessedInput[static_cast<size_t>(i)] =
-          static_cast<float>(imagePtr[static_cast<size_t>(i)]) / 255.0f;
-    }
-
-    int64_t shape[4] = {1, kChannels, kHeight, kWidth};
-    OMTensor *inputTensor = omTensorCreate(preprocessedInput.data(), shape, 4, ONNX_TYPE_FLOAT);
+    int64_t inShape[4] = {1, kChannels, kHeight, kWidth};
+    OMTensor *inputTensor = omTensorCreate(inputData.data(), inShape, 4, ONNX_TYPE_FLOAT);
     if (!inputTensor) {
       std::cerr << "Error: failed to create input tensor" << std::endl;
       return 1;
     }
-
     OMTensor *inputs[] = {inputTensor};
     OMTensorList *inputList = omTensorListCreate(inputs, 1);
     if (!inputList) {
@@ -386,7 +378,7 @@ int main(int argc, char **argv) {
 
     float *out = reinterpret_cast<float *>(omTensorGetDataPtr(outTensor));
     if (!out) {
-      std::cerr << "Error: null output data pointer" << std::endl;
+      std::cerr << "Error: output data pointer is null" << std::endl;
       omTensorListDestroy(inputList);
       omTensorListDestroy(outputList);
       return 1;
@@ -394,88 +386,71 @@ int main(int argc, char **argv) {
 
     const int64_t *outShape = omTensorGetShape(outTensor);
     const int64_t outRank = omTensorGetRank(outTensor);
-    int64_t outElems = 1;
-    for (int64_t i = 0; i < outRank; ++i)
-      outElems *= outShape[i];
-    if (outElems != kNumClasses) {
-      std::cerr << "Error: expected " << kNumClasses << " classes, got " << outElems
-                << std::endl;
+    if (outRank != 2 || outShape[0] != 1 || outShape[1] != kNumClasses) {
+      std::cerr << "Error: unexpected output shape, rank=" << outRank << ", shape=[";
+      for (int64_t i = 0; i < outRank; ++i)
+        std::cerr << outShape[i] << (i + 1 == outRank ? "" : ",");
+      std::cerr << "]" << std::endl;
       omTensorListDestroy(inputList);
       omTensorListDestroy(outputList);
       return 1;
     }
 
-    std::cout << "\n=== Sample " << imageIndex << " Result ===" << std::endl;
+    const size_t goldenBase = static_cast<size_t>(imageIndex * kNumClasses);
+    const float *goldenRow = golden.data() + goldenBase;
+
     const int64_t pred = argmax(out, kNumClasses);
-    std::cout << "Predicted label: " << pred;
-    if (hasLabels) {
-      const int64_t label = labels[static_cast<size_t>(imageIndex)];
-      const bool matched = (pred == label);
-      ++classifyTotal;
-      if (matched)
-        ++classifyCorrect;
-      std::cout << ", Golden label: " << label
-                << ", Match: " << (matched ? "YES" : "NO");
+    const int64_t goldenPred = argmax(goldenRow, kNumClasses);
+    const int64_t label = labels[static_cast<size_t>(imageIndex)];
+
+    const bool semanticOk = (pred == goldenPred);
+    if (!semanticOk)
+      ++semanticErrors;
+
+    const bool labelMatch = (pred == label);
+    if (labelMatch)
+      ++labelCorrect;
+
+    float maxAbs = 0.0f;
+    double mse = 0.0;
+    int64_t diffErrors = 0;
+    for (int64_t c = 0; c < kNumClasses; ++c) {
+      const float diff = std::fabs(out[c] - goldenRow[c]);
+      maxAbs = std::max(maxAbs, diff);
+      mse += static_cast<double>(diff) * static_cast<double>(diff);
+      if (diff > opts.diffThreshold)
+        ++diffErrors;
     }
-    std::cout << std::endl;
+    mse /= static_cast<double>(kNumClasses);
 
-    if (hasGolden) {
-      const size_t goldenBase = static_cast<size_t>(imageIndex * kNumClasses);
-      float maxAbsError = 0.0f;
-      double mse = 0.0;
-      int64_t diffErrors = 0;
+    if (diffErrors > 0)
+      ++numericErrors;
 
-      std::cout << std::setw(8) << "class" << std::setw(16) << "actual"
-                << std::setw(16) << "golden" << std::setw(16) << "abs diff"
-                << std::endl;
-      for (int64_t c = 0; c < kNumClasses; ++c) {
-        const float g = golden[goldenBase + static_cast<size_t>(c)];
-        const float diff = std::fabs(out[c] - g);
-        maxAbsError = std::max(maxAbsError, diff);
-        mse += static_cast<double>(diff) * static_cast<double>(diff);
-        if (diff > kGoldenDiffThreshold)
-          ++diffErrors;
+    if (!semanticOk || diffErrors > 0)
+      ++sampleErrors;
 
-        std::cout << std::setw(8) << c << std::setw(16) << out[c] << std::setw(16)
-                  << g << std::setw(16) << diff << std::endl;
-      }
-
-      mse /= static_cast<double>(kNumClasses);
-      const bool goldenPass = (diffErrors == 0);
-      ++goldenCheckedCount;
-      if (goldenPass)
-        ++goldenPassCount;
-      std::cout << "Golden check: max_abs=" << maxAbsError << ", mse=" << mse
-                << ", diff_errors=" << diffErrors << "/" << kNumClasses
-                << ", status=" << (goldenPass ? "PASS" : "FAIL") << std::endl;
-    }
+    std::cout << "sample=" << imageIndex << " pred=" << pred << " golden_pred=" << goldenPred
+              << " label=" << label << " label_match=" << (labelMatch ? "YES" : "NO")
+              << " max_abs=" << maxAbs << " mse=" << mse
+              << " diff_errors=" << diffErrors << "/" << kNumClasses
+              << " status=" << ((semanticOk && diffErrors == 0) ? "PASS" : "FAIL")
+              << std::endl;
 
     omTensorListDestroy(inputList);
     omTensorListDestroy(outputList);
   }
 
-  std::cout << "\n=== Summary ===" << std::endl;
-  if (classifyTotal > 0) {
-    const double acc =
-        static_cast<double>(classifyCorrect) / static_cast<double>(classifyTotal);
-    std::cout << "Classification accuracy: " << classifyCorrect << "/" << classifyTotal
-              << " (" << std::fixed << std::setprecision(4) << acc * 100.0 << "%)"
-              << std::endl;
-  } else {
-    std::cout << "Classification accuracy: skipped (no labels)" << std::endl;
-  }
+  const double labelAcc =
+      static_cast<double>(labelCorrect) / static_cast<double>(runCount);
+  std::cout << "Classification accuracy: " << labelCorrect << "/" << runCount << " ("
+            << std::fixed << std::setprecision(4) << labelAcc * 100.0 << "%)" << std::endl;
+  std::cout << "Semantic check (pred==golden_pred): " << (runCount - semanticErrors)
+            << "/" << runCount << std::endl;
+  std::cout << "Numeric check (all logits <= threshold): " << (runCount - numericErrors)
+            << "/" << runCount << std::endl;
 
-  if (goldenCheckedCount > 0) {
-    std::cout << "Golden diff pass: " << goldenPassCount << "/" << goldenCheckedCount
-              << std::endl;
-  } else {
-    std::cout << "Golden diff check: skipped (no golden file)" << std::endl;
-  }
-
-  const bool pass = (classifyTotal == 0) ? true : (classifyCorrect == classifyTotal);
-  const int64_t errors = pass ? 0 : (classifyTotal - classifyCorrect);
-  const int64_t total = (classifyTotal == 0) ? runCount : classifyTotal;
-  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << errors << "/" << total
+  const bool pass = (sampleErrors == 0);
+  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << sampleErrors << "/" << runCount
             << " status=" << (pass ? "PASS" : "FAIL") << std::endl;
   return pass ? 0 : 1;
 }

@@ -48,22 +48,62 @@ class LayerParams:
     OC: int
     K_h: int
     K_w: int
-    S: int
-    P: int
+    S_h: int
+    S_w: int
+    D_h: int
+    D_w: int
+    P_top: int
+    P_bottom: int
+    P_left: int
+    P_right: int
+
+    @property
+    def K_eff_h(self) -> int:
+        return (self.K_h - 1) * self.D_h + 1
+
+    @property
+    def K_eff_w(self) -> int:
+        return (self.K_w - 1) * self.D_w + 1
 
     @property
     def OH(self) -> int: 
-        return (self.H + 2 * self.P - self.K_h) // self.S + 1
+        return (self.H + self.P_top + self.P_bottom - self.K_eff_h) // self.S_h + 1
         
     @property
     def OW(self) -> int: 
-        return (self.W + 2 * self.P - self.K_w) // self.S + 1
+        return (self.W + self.P_left + self.P_right - self.K_eff_w) // self.S_w + 1
 
 # ==========================================
 # 2. ONNX 解析器
 # ==========================================
 class OnnxModelParser:
     """用于解析 ONNX 模型并提取卷积层信息的工具类"""
+
+    @staticmethod
+    def _decode_auto_pad(attr: Dict[str, Any]) -> str:
+        if 'auto_pad' not in attr:
+            return 'NOTSET'
+        raw = attr['auto_pad'].s
+        if isinstance(raw, bytes):
+            return raw.decode('utf-8').upper()
+        if isinstance(raw, str):
+            return raw.upper()
+        return 'NOTSET'
+
+    @staticmethod
+    def _compute_same_padding(
+        in_size: int, stride: int, kernel: int, dilation: int, auto_pad: str
+    ) -> tuple:
+        out_size = math.ceil(in_size / stride)
+        effective_kernel = (kernel - 1) * dilation + 1
+        total_pad = max((out_size - 1) * stride + effective_kernel - in_size, 0)
+        if auto_pad == 'SAME_LOWER':
+            pad_before = (total_pad + 1) // 2
+            pad_after = total_pad // 2
+        else:
+            pad_before = total_pad // 2
+            pad_after = total_pad - pad_before
+        return pad_before, pad_after
     
     @staticmethod
     def parse(onnx_path: str, input_shape_override: Optional[List[int]] = None) -> List[LayerParams]:
@@ -126,9 +166,18 @@ class OnnxModelParser:
                 k_h, k_w = kernel_shape[0], kernel_shape[1]
 
             strides = attr.get('strides').ints if 'strides' in attr else [1, 1]
-            s = strides[0] if strides else 1
-            pads = attr.get('pads').ints if 'pads' in attr else [0, 0, 0, 0]
-            p = pads[0] if pads else 0 
+            s_h = int(strides[0]) if len(strides) >= 1 else 1
+            s_w = int(strides[1]) if len(strides) >= 2 else s_h
+
+            dilations = attr.get('dilations').ints if 'dilations' in attr else [1, 1]
+            d_h = int(dilations[0]) if len(dilations) >= 1 else 1
+            d_w = int(dilations[1]) if len(dilations) >= 2 else d_h
+
+            auto_pad = OnnxModelParser._decode_auto_pad(attr)
+
+            pads = [0, 0, 0, 0]
+            if 'pads' in attr and len(attr['pads'].ints) >= 4:
+                pads = [int(x) for x in attr['pads'].ints[:4]]
             
             # 解析输入特征图 (IC, H, W)
             input_name = node.input[0]
@@ -165,7 +214,37 @@ class OnnxModelParser:
             if k_h is None or k_w is None or h <= 0 or w <= 0:
                 continue
 
-            layers.append(LayerParams(name=node.name, H=h, W=w, IC=ic, OC=oc, K_h=k_h, K_w=k_w, S=s, P=p))
+            if auto_pad in ('SAME_UPPER', 'SAME_LOWER'):
+                p_top, p_bottom = OnnxModelParser._compute_same_padding(
+                    h, s_h, k_h, d_h, auto_pad
+                )
+                p_left, p_right = OnnxModelParser._compute_same_padding(
+                    w, s_w, k_w, d_w, auto_pad
+                )
+            elif auto_pad == 'VALID':
+                p_top = p_bottom = p_left = p_right = 0
+            else:
+                p_top, p_left, p_bottom, p_right = pads
+
+            layers.append(
+                LayerParams(
+                    name=node.name,
+                    H=h,
+                    W=w,
+                    IC=ic,
+                    OC=oc,
+                    K_h=k_h,
+                    K_w=k_w,
+                    S_h=s_h,
+                    S_w=s_w,
+                    D_h=d_h,
+                    D_w=d_w,
+                    P_top=p_top,
+                    P_bottom=p_bottom,
+                    P_left=p_left,
+                    P_right=p_right,
+                )
+            )
 
         return layers
 
@@ -180,8 +259,8 @@ class CostModel:
 
     def _get_raw_input_tile_dim(self, t_oh: int, t_ow: int, layer: LayerParams) -> tuple:
         """计算生成 t_oh * t_ow 输出所需的输入尺寸"""
-        t_ih = (t_oh - 1) * layer.S + layer.K_h
-        t_iw = (t_ow - 1) * layer.S + layer.K_w
+        t_ih = (t_oh - 1) * layer.S_h + layer.K_eff_h
+        t_iw = (t_ow - 1) * layer.S_w + layer.K_eff_w
         return t_ih, t_iw
 
     def evaluate(self, layer: LayerParams, t_oh: int, t_ow: int, t_oc: int, t_ic: int) -> Optional[TileResult]:
@@ -250,9 +329,17 @@ class TileOptimizer:
     def _get_safe_range(self, limit: int, step: int, max_val: int = 64) -> List[int]:
         """生成安全的搜索空间范围"""
         end = min(limit, max_val)
-        if end < step: 
+        if end <= 0:
+            return []
+        if end < step:
             return [end]
-        return list(range(step, end + 1, step))
+
+        # Keep regular step-based candidates, and always include the exact
+        # dimension boundary (e.g., 14) so full-tile options are evaluated.
+        candidates = list(range(step, end + 1, step))
+        if end not in candidates:
+            candidates.append(end)
+        return sorted(set(candidates))
 
     def search_best_tile(self, layer: LayerParams) -> Optional[TileResult]:
         """为单层搜索最佳分块"""

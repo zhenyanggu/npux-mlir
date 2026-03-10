@@ -1,18 +1,14 @@
+import argparse
 import gzip
 import os
 import struct
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 import numpy as np
 import onnxruntime
-from onnxruntime.quantization import (
-	CalibrationDataReader,
-	QuantFormat,
-	QuantType,
-	quantize_static,
-)
+from onnxruntime.quantization import CalibrationDataReader, QuantFormat, QuantType, quantize_static
 from onnxruntime.quantization.shape_inference import quant_pre_process
 
 
@@ -24,6 +20,8 @@ MNIST_FILES = {
 	"images": "train-images-idx3-ubyte.gz",
 	"labels": "train-labels-idx1-ubyte.gz",
 }
+ASCII_RAMP = " .:-=+*#%@"
+MODEL_NAME = "mnist"
 
 
 def _download_file(url: str, dst: Path) -> None:
@@ -54,7 +52,7 @@ def _download_with_fallback(filename: str, dst: Path) -> None:
 	)
 
 
-def _load_mnist_images(images_gz: Path) -> np.ndarray:
+def _load_mnist_images_u8(images_gz: Path) -> np.ndarray:
 	with gzip.open(images_gz, "rb") as f:
 		header = f.read(16)
 		magic, num_images, rows, cols = struct.unpack(">IIII", header)
@@ -62,18 +60,31 @@ def _load_mnist_images(images_gz: Path) -> np.ndarray:
 			raise ValueError(f"Invalid MNIST image file magic: {magic}")
 		raw = f.read()
 	images = np.frombuffer(raw, dtype=np.uint8)
-	images = images.reshape(num_images, rows, cols).astype(np.float32) / 255.0
+	images = images.reshape(num_images, rows, cols)
 	return images
 
 
-def _ensure_mnist_dataset(data_dir: Path) -> np.ndarray:
+def _load_mnist_labels(labels_gz: Path) -> np.ndarray:
+	with gzip.open(labels_gz, "rb") as f:
+		header = f.read(8)
+		magic, num_labels = struct.unpack(">II", header)
+		if magic != 2049:
+			raise ValueError(f"Invalid MNIST label file magic: {magic}")
+		raw = f.read()
+	labels = np.frombuffer(raw, dtype=np.uint8)
+	if labels.shape[0] != num_labels:
+		raise ValueError(f"MNIST labels size mismatch: header={num_labels}, data={labels.shape[0]}")
+	return labels.astype(np.int64)
+
+
+def _ensure_mnist_dataset(data_dir: Path) -> tuple[np.ndarray, np.ndarray]:
 	images_file = data_dir / MNIST_FILES["images"]
+	labels_file = data_dir / MNIST_FILES["labels"]
 
 	_download_with_fallback(MNIST_FILES["images"], images_file)
-	# Labels are not required for calibration, but downloading keeps dataset complete.
-	_download_with_fallback(MNIST_FILES["labels"], data_dir / MNIST_FILES["labels"])
+	_download_with_fallback(MNIST_FILES["labels"], labels_file)
 
-	return _load_mnist_images(images_file)
+	return _load_mnist_images_u8(images_file), _load_mnist_labels(labels_file)
 
 
 def _resolve_dim(dim) -> int:
@@ -82,7 +93,7 @@ def _resolve_dim(dim) -> int:
 	return 1
 
 
-def _build_input_tensor(images: np.ndarray, input_shape, elem_type: str) -> np.ndarray:
+def _build_input_tensor(images_f32: np.ndarray, input_shape, elem_type: str) -> np.ndarray:
 	concrete_shape = [_resolve_dim(d) for d in input_shape]
 	rank = len(concrete_shape)
 	if rank < 3:
@@ -93,11 +104,9 @@ def _build_input_tensor(images: np.ndarray, input_shape, elem_type: str) -> np.n
 	width = concrete_shape[-1]
 
 	if height != 28 or width != 28:
-		raise ValueError(
-			f"MNIST calibration expects spatial size 28x28, but got {height}x{width}"
-		)
+		raise ValueError(f"MNIST expects 28x28, but got {height}x{width}")
 
-	selected = images[:batch]
+	selected = images_f32[:batch]
 
 	if rank == 3:
 		tensor = selected.reshape(batch, 28, 28)
@@ -121,16 +130,25 @@ def _build_input_tensor(images: np.ndarray, input_shape, elem_type: str) -> np.n
 		return (tensor * 255.0).astype(np.int64)
 	if "int32" in elem_type:
 		return (tensor * 255.0).astype(np.int32)
-
 	return tensor.astype(np.float32)
 
 
+def _image_to_ascii(image_u8: np.ndarray) -> str:
+	# Map grayscale [0,255] to a short ASCII ramp for terminal preview.
+	levels = len(ASCII_RAMP) - 1
+	idx = (image_u8.astype(np.float32) / 255.0 * levels).round().astype(np.int32)
+	rows = []
+	for r in idx:
+		rows.append("".join(ASCII_RAMP[v] for v in r))
+	return "\n".join(rows)
+
+
 class MnistCalibrationDataReader(CalibrationDataReader):
-	def __init__(self, model_path: str, images: np.ndarray, calibration_count: int = 100):
+	def __init__(self, model_path: str, images_f32: np.ndarray, calibration_count: int = 100):
 		self.session = onnxruntime.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 		self.input_meta = self.session.get_inputs()
-		self.images = images
-		self.calibration_count = min(calibration_count, len(images))
+		self.images_f32 = images_f32
+		self.calibration_count = min(calibration_count, len(images_f32))
 		self.cursor = 0
 
 	def get_next(self):
@@ -140,7 +158,7 @@ class MnistCalibrationDataReader(CalibrationDataReader):
 		input_feed = {}
 		for node in self.input_meta:
 			input_feed[node.name] = _build_input_tensor(
-				self.images[self.cursor : self.cursor + 1],
+				self.images_f32[self.cursor : self.cursor + 1],
 				node.shape,
 				node.type,
 			)
@@ -149,27 +167,15 @@ class MnistCalibrationDataReader(CalibrationDataReader):
 		return input_feed
 
 
-def run_qdq_quantization(
-	input_model: str,
-	output_model: str,
-	calibration_count: int,
-	data_dir: str,
-) -> None:
+def run_qdq_quantization(input_model: str, output_model: str, calibration_images_f32: np.ndarray, calibration_count: int) -> None:
 	print(f"Quantizing model: {input_model}")
 
-	data_path = Path(data_dir)
-	images = _ensure_mnist_dataset(data_path)
-
 	processed_model_path = Path("temp_preprocessed.onnx")
-	quant_pre_process(
-		input_model,
-		str(processed_model_path),
-		skip_symbolic_shape=True,
-	)
+	quant_pre_process(input_model, str(processed_model_path), skip_symbolic_shape=True)
 
 	dr = MnistCalibrationDataReader(
 		model_path=str(processed_model_path),
-		images=images,
+		images_f32=calibration_images_f32,
 		calibration_count=calibration_count,
 	)
 
@@ -180,11 +186,8 @@ def run_qdq_quantization(
 		quant_format=QuantFormat.QDQ,
 		activation_type=QuantType.QInt8,
 		weight_type=QuantType.QInt8,
-		op_types_to_quantize=["Conv", "MaxPool", "Resize", "AveragePool", "Transpose", "Relu", "Gelu","Gemm"],
-		extra_options={
-			"ActivationSymmetric": True,
-			"WeightSymmetric": True,
-		},
+		op_types_to_quantize=["Conv", "MatMul", "LayerNorm", "Softmax", "Gelu", "Gemm", "Transpose", "MaxPool","Relu"],
+		extra_options={"ActivationSymmetric": True, "WeightSymmetric": True},
 		per_channel=False,
 		reduce_range=True,
 	)
@@ -193,23 +196,109 @@ def run_qdq_quantization(
 		processed_model_path.unlink()
 
 	print(f"Done. Quantized QDQ model written to: {output_model}")
-	print("Calibration used MNIST training images (real data).")
+
+
+def _prepare_ort_input(image_u8: np.ndarray) -> np.ndarray:
+	return (image_u8.astype(np.float32) / 255.0).reshape(1, 1, 28, 28)
+
+
+def export_samples_and_golden(
+	output_model: str,
+	images_u8: np.ndarray,
+	labels_i64: np.ndarray,
+	sample_count: int,
+	sample_offset: int,
+	print_samples: bool,
+) -> None:
+	total = images_u8.shape[0]
+	if sample_offset < 0 or sample_offset >= total:
+		raise ValueError(f"sample_offset out of range: {sample_offset}, total images={total}")
+	if sample_count <= 0:
+		raise ValueError(f"sample_count must be > 0, got {sample_count}")
+
+	end = min(sample_offset + sample_count, total)
+	sel_images = images_u8[sample_offset:end]
+	sel_labels = labels_i64[sample_offset:end]
+	actual_count = sel_images.shape[0]
+
+	if actual_count == 0:
+		raise RuntimeError("No samples selected")
+
+	sess = onnxruntime.InferenceSession(output_model, providers=["CPUExecutionProvider"])
+	input_name = sess.get_inputs()[0].name
+
+	golden_rows = []
+	for image in sel_images:
+		out = sess.run(None, {input_name: _prepare_ort_input(image)})[0]
+		golden_rows.append(out.reshape(-1).astype(np.float32))
+	golden = np.stack(golden_rows, axis=0)
+
+	prefixed_images = f"{MODEL_NAME}_images_u8.bin"
+	prefixed_labels = f"{MODEL_NAME}_labels.bin"
+	prefixed_golden = f"{MODEL_NAME}_output_golden.bin"
+	prefixed_legacy_input = f"{MODEL_NAME}_input.bin"
+	preview_text = f"{MODEL_NAME}_samples.txt"
+
+	sel_images.reshape(actual_count, -1).astype(np.uint8).tofile(prefixed_images)
+	sel_labels.astype(np.int64).tofile(prefixed_labels)
+	golden.reshape(actual_count, -1).astype(np.float32).tofile(prefixed_golden)
+
+	# Keep a single-image float input for legacy tools.
+	_prepare_ort_input(sel_images[0]).astype(np.float32).tofile(prefixed_legacy_input)
+
+	lines = []
+	for i in range(actual_count):
+		lines.append(f"sample_index={sample_offset + i}, label={int(sel_labels[i])}")
+		lines.append(_image_to_ascii(sel_images[i]))
+		lines.append("")
+	preview_content = "\n".join(lines)
+	Path(preview_text).write_text(preview_content, encoding="utf-8")
+
+	print("Generated MNIST sample artifacts:")
+	print(f"  {prefixed_images}  ({actual_count} images, uint8, each 28x28)")
+	print(f"  {prefixed_labels}  ({actual_count} labels, int64)")
+	print(f"  {prefixed_golden}  ({actual_count}x10 logits, float32)")
+	print(f"  {prefixed_legacy_input}  (legacy single-image float input)")
+	print(f"  {preview_text}  (ASCII preview)")
+
+	if print_samples:
+		print("\n=== MNIST ASCII Preview ===")
+		print(preview_content)
+
+
+def parse_args() -> argparse.Namespace:
+	parser = argparse.ArgumentParser(description="Quantize MNIST model and export sample inputs")
+	parser.add_argument("--input-model", default="mnist-12.onnx")
+	parser.add_argument("--output-model", default="model.onnx")
+	parser.add_argument("--calibration-count", type=int, default=100)
+	parser.add_argument("--sample-count", type=int, default=10)
+	parser.add_argument("--sample-offset", type=int, default=0)
+	parser.add_argument("--print-samples", action="store_true")
+	return parser.parse_args()
 
 
 if __name__ == "__main__":
-	# Keep defaults aligned with model_test/makefile prepare stage.
-	input_model = "mnist-12.onnx"
-	output_model = "model.onnx"
-	calibration_count = 100
+	args = parse_args()
 	cache_root = os.environ.get("MODEL_TEST_CACHE_DIR", "./mnist_data")
 	data_dir = os.path.join(cache_root, "mnist")
 
-	if not os.path.exists(input_model):
-		raise FileNotFoundError(f"Input model not found: {input_model}")
+	if not os.path.exists(args.input_model):
+		raise FileNotFoundError(f"Input model not found: {args.input_model}")
+
+	images_u8, labels_i64 = _ensure_mnist_dataset(Path(data_dir))
+	images_f32 = images_u8.astype(np.float32) / 255.0
 
 	run_qdq_quantization(
-		input_model=input_model,
-		output_model=output_model,
-		calibration_count=calibration_count,
-		data_dir=data_dir,
+		input_model=args.input_model,
+		output_model=args.output_model,
+		calibration_images_f32=images_f32,
+		calibration_count=args.calibration_count,
+	)
+	export_samples_and_golden(
+		output_model=args.output_model,
+		images_u8=images_u8,
+		labels_i64=labels_i64,
+		sample_count=args.sample_count,
+		sample_offset=args.sample_offset,
+		print_samples=args.print_samples,
 	)
