@@ -366,6 +366,43 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
     int64_t OH = outputType.getShape()[2];
     int64_t OW = outputType.getShape()[3];
 
+
+    auto kernelShape = getIntArrayAttr(op, "kernel_shape", 1, 2);
+    int64_t kH = kernelShape[0];
+    int64_t kW = kernelShape[1];
+
+    std::string autoPad = "NOTSET";
+    if (auto autoPadAttr = op->getAttrOfType<StringAttr>("auto_pad")) {
+      autoPad = autoPadAttr.getValue().str();
+    }
+
+    if (autoPad == "SAME_UPPER" || autoPad == "SAME_LOWER") {
+      // P_total = (O - 1) * S + (K - 1) * D + 1 - I
+      int64_t pTotalH = (OH - 1) * strideH + (kH - 1) * dilationH + 1 - H;
+      int64_t pTotalW = (OW - 1) * strideW + (kW - 1) * dilationW + 1 - W;
+
+      // 避免负数 padding
+      pTotalH = std::max<int64_t>(0, pTotalH);
+      pTotalW = std::max<int64_t>(0, pTotalW);
+
+      int64_t pTop, pBottom, pLeft, pRight;
+      if (autoPad == "SAME_UPPER") {
+        pTop = pTotalH / 2;
+        pBottom = pTotalH - pTop;
+        pLeft = pTotalW / 2;
+        pRight = pTotalW - pLeft;
+      } else { // SAME_LOWER
+        pBottom = pTotalH / 2;
+        pTop = pTotalH - pBottom;
+        pRight = pTotalW / 2;
+        pLeft = pTotalW - pRight;
+      }
+      // 覆盖原有的 pads 数组 [padTop, padLeft, padBottom, padRight]
+      pads = {pTop, pLeft, pBottom, pRight};
+    } else if (autoPad == "VALID") {
+      pads = {0, 0, 0, 0};
+    }
+
     int64_t inTileFactor = (IC != ShapedType::kDynamic && IC < 32) ? IC : 32;
     int64_t outTileFactor = (OC != ShapedType::kDynamic && OC < 32) ? OC : 32;
 
@@ -548,7 +585,7 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
         if (auto attr = op->getAttr(name))
           convOp->setAttr(name, attr);
       };
-      copyAttr("pads");
+      convOp->setAttr("pads", rewriter.getI64ArrayAttr(pads));
       copyAttr("dilations");
       copyAttr("strides");
       
