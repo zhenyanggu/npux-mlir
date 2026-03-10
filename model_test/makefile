@@ -14,6 +14,7 @@ ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 MODELS_DIR := $(ROOT_DIR)/models
 SCRIPTS_DIR := $(ROOT_DIR)/scripts
 BUILD_DIR := $(ROOT_DIR)/build
+CACHE_DIR := $(ROOT_DIR)/cache
 
 # 硬件参数（单位: KB），可通过命令行覆盖
 SPM_KB ?= 512
@@ -31,7 +32,7 @@ DISABLED_MODEL_NAMES := $(sort $(filter $(ALL_MODEL_NAMES),$(DISABLED_MODEL_NAME
 MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(ALL_MODEL_NAMES))
 SELECTIVE_CLEAN_MODELS := $(filter $(ALL_MODEL_NAMES),$(filter-out clean,$(MAKECMDGOALS)))
 
-.PHONY: all init run_one clean list check_model \
+.PHONY: all init run_one clean clean_cache list check_model \
 	prepare tile mlir llvm zcu102 rebuild \
 	$(ALL_MODEL_NAMES)
 
@@ -97,10 +98,16 @@ $(BUILD_DIR)/%/.prepare.stamp: | init
 	fi; \
 	mkdir -p "$$work_dir"; \
 	echo "[mkdir] $$work_dir"; \
+	shopt -s nullglob; \
+	onnx_files=("$$src_dir"/*.onnx); \
+	if (( $${#onnx_files[@]} > 0 )); then \
+		cp -f "$$src_dir"/*.onnx "$$work_dir"/; \
+		echo "[copy] $$src_dir/*.onnx -> $$work_dir/"; \
+	fi; \
 	if [[ -f "$$src_dir/model.py" ]]; then \
 		cp -f "$$src_dir/model.py" "$$work_dir/model.py"; \
 		echo "[gen] python $$work_dir/model.py $(MODEL_PY_ARGS)"; \
-		(cd "$$work_dir" && $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
+		(cd "$$work_dir" && MODEL_TEST_CACHE_DIR="$(CACHE_DIR)" $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
 	elif [[ -f "$$src_dir/model.onnx" ]]; then \
 		cp -f "$$src_dir/model.onnx" "$$work_dir/model.onnx"; \
 		echo "[copy] $$src_dir/model.onnx -> $$work_dir/model.onnx"; \
@@ -108,6 +115,16 @@ $(BUILD_DIR)/%/.prepare.stamp: | init
 		echo "[error] $$model 缺少 model.py 或 model.onnx"; \
 		exit 2; \
 	fi; \
+	if [[ ! -f "$$work_dir/model.onnx" ]]; then \
+		work_onnx=("$$work_dir"/*.onnx); \
+		if (( $${#work_onnx[@]} == 0 )); then \
+			echo "[error] $$model 未找到任何 onnx 文件"; \
+			exit 2; \
+		fi; \
+		cp -f "$${work_onnx[0]}" "$$work_dir/model.onnx"; \
+		echo "[copy] $${work_onnx[0]} -> $$work_dir/model.onnx"; \
+	fi; \
+	shopt -u nullglob; \
 	if [[ -f "$$src_dir/main.cpp" ]]; then \
 		cp -f "$$src_dir/main.cpp" "$$work_dir/main.cpp"; \
 	fi; \
@@ -125,6 +142,9 @@ $(BUILD_DIR)/%/.tile.stamp: $(BUILD_DIR)/%/.prepare.stamp
 	shape_args=""; \
 	if [[ -n "$(SHAPE)" ]]; then \
 		shape_args="--shape $(SHAPE)"; \
+	elif [[ "$$model" == "mnist" ]]; then \
+		shape_args="--shape 1,1,28,28"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,28,28"; \
 	fi; \
 	echo "[tile] $$onnx_file -> $$tile_json"; \
 	$(PYTHON) "$(SCRIPTS_DIR)/conv_tile.py" \
@@ -198,6 +218,21 @@ $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 	elif [[ -f "$$work_dir/output_golden.bin" ]]; then \
 		mv -f "$$work_dir/output_golden.bin" "$$output_dir/$${model}_output_golden.bin"; \
 	fi; \
+	if [[ -f "$$work_dir/$${model}_labels.bin" ]]; then \
+		mv -f "$$work_dir/$${model}_labels.bin" "$$output_dir/$${model}_labels.bin"; \
+	elif [[ -f "$$work_dir/labels.bin" ]]; then \
+		mv -f "$$work_dir/labels.bin" "$$output_dir/$${model}_labels.bin"; \
+	fi; \
+	if [[ -f "$$work_dir/$${model}_images_u8.bin" ]]; then \
+		mv -f "$$work_dir/$${model}_images_u8.bin" "$$output_dir/$${model}_images_u8.bin"; \
+	elif [[ -f "$$work_dir/images_u8.bin" ]]; then \
+		mv -f "$$work_dir/images_u8.bin" "$$output_dir/$${model}_images_u8.bin"; \
+	fi; \
+	if [[ -f "$$work_dir/$${model}_image.pgm" ]]; then \
+		mv -f "$$work_dir/$${model}_image.pgm" "$$output_dir/$${model}_image.pgm"; \
+	elif [[ -f "$$work_dir/image.pgm" ]]; then \
+		mv -f "$$work_dir/image.pgm" "$$output_dir/$${model}_image.pgm"; \
+	fi; \
 	touch "$@"
 
 list:
@@ -219,3 +254,8 @@ clean:
 		rm -rf $(BUILD_DIR); \
 		echo "[clean] removed $(BUILD_DIR)"; \
 	fi
+	@echo "[clean] kept cache $(CACHE_DIR) (use 'make clean_cache' to remove)"
+
+clean_cache:
+	@rm -rf "$(CACHE_DIR)"
+	@echo "[clean_cache] removed $(CACHE_DIR)"

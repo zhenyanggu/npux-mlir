@@ -102,6 +102,10 @@ class OnnxModelParser:
     @staticmethod
     def _extract_conv_layers(graph) -> List[LayerParams]:
         """从计算图中提取 Conv 节点信息"""
+        def _safe_dim_value(dim) -> int:
+            # Prefer concrete dim_value; unresolved dims are treated as 0 (unknown).
+            return int(dim.dim_value) if getattr(dim, 'dim_value', 0) > 0 else 0
+
         value_info = {vi.name: vi for vi in graph.value_info}
         value_info.update({vi.name: vi for vi in graph.input})
         value_info.update({vi.name: vi for vi in graph.output})
@@ -110,6 +114,9 @@ class OnnxModelParser:
         layers = []
         for node in graph.node:
             if node.op_type != 'Conv':
+                continue
+            if len(node.input) < 2:
+                # Malformed or transformed Conv node; skip safely.
                 continue
 
             attr = {a.name: a for a in node.attribute}
@@ -128,9 +135,9 @@ class OnnxModelParser:
             if input_name in value_info:
                 input_shape = value_info[input_name].type.tensor_type.shape.dim
                 if len(input_shape) >= 4:
-                    ic = input_shape[1].dim_value
-                    h = input_shape[2].dim_value
-                    w = input_shape[3].dim_value
+                    ic = _safe_dim_value(input_shape[1])
+                    h = _safe_dim_value(input_shape[2])
+                    w = _safe_dim_value(input_shape[3])
                 else:
                     continue
             else:
@@ -140,14 +147,18 @@ class OnnxModelParser:
             weight_name = node.input[1]
             if weight_name in initializers:
                 weight_tensor = initializers[weight_name]
-                oc = weight_tensor.dims[0]
-                if k_h is None or k_w is None and len(weight_tensor.dims) >= 4:
-                    k_h, k_w = weight_tensor.dims[2], weight_tensor.dims[3]
+                if len(weight_tensor.dims) < 1:
+                    continue
+                oc = int(weight_tensor.dims[0])
+                if (k_h is None or k_w is None) and len(weight_tensor.dims) >= 4:
+                    k_h, k_w = int(weight_tensor.dims[2]), int(weight_tensor.dims[3])
             elif weight_name in value_info:
                  weight_shape = value_info[weight_name].type.tensor_type.shape.dim
-                 oc = weight_shape[0].dim_value
-                 if k_h is None or k_w is None and len(weight_shape) >= 4:
-                     k_h, k_w = weight_shape[2].dim_value, weight_shape[3].dim_value
+                 if len(weight_shape) < 1:
+                     continue
+                 oc = _safe_dim_value(weight_shape[0])
+                 if (k_h is None or k_w is None) and len(weight_shape) >= 4:
+                     k_h, k_w = _safe_dim_value(weight_shape[2]), _safe_dim_value(weight_shape[3])
             else:
                 continue
 

@@ -10,6 +10,7 @@ python/*bin
 python/*onnx
 python/*pt
 python/*json
+cache/
 # Prerequisites
 *.d
 
