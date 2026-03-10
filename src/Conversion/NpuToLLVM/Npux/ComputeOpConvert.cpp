@@ -122,6 +122,11 @@ public:
     bool isLoopFirst = (loopStage == "head" || loopStage == "single");
     bool isSplitFirst = (splitStage == "head" || splitStage == "single");
     bool isFirstCalculation = (isLoopFirst && isSplitFirst);
+    bool isLoopLast = (loopStage == "tail" || loopStage == "single");
+    bool isSplitLast = (splitStage == "tail" || splitStage == "single");
+    bool isLastCalculation = (isLoopLast && isSplitLast);
+    bool originalDoRelu = (getIntAttr(op, "do_relu", 0) != 0);
+    bool doRelu = originalDoRelu && isLastCalculation;
 
     if (op.getInputs().size() >= 3) {
       // ==========================================
@@ -137,7 +142,8 @@ public:
         if (opType == ComputeOpType::gemm) {
           auto parentFor = op->getParentOfType<scf::ForOp>();
           while (parentFor) {
-            if (auto splitDim = parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
+            if (auto splitDim =
+                    parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
               if (splitDim.getValue() == "M") {
                 hoistAnchor = parentFor;
                 break;
@@ -151,8 +157,9 @@ public:
           auto parentFor = op->getParentOfType<scf::ForOp>();
 
           while (parentFor) {
-            outermostFor = parentFor; 
-            if (auto splitDim = parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
+            outermostFor = parentFor;
+            if (auto splitDim =
+                    parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
               StringRef dimVal = splitDim.getValue();
               if (dimVal == "cout" || dimVal == "Cout_c" || dimVal == "Cout") {
                 coutLoop = parentFor;
@@ -173,16 +180,17 @@ public:
         }
 
         if (hoistAnchor) {
-          std::function<void(Operation *)> hoistOps = [&](Operation *opToHoist) {
-            for (Value operand : opToHoist->getOperands()) {
-              if (Operation *defOp = operand.getDefiningOp()) {
-                if (hoistAnchor->isAncestor(defOp)) {
-                  hoistOps(defOp);
+          std::function<void(Operation *)> hoistOps =
+              [&](Operation *opToHoist) {
+                for (Value operand : opToHoist->getOperands()) {
+                  if (Operation *defOp = operand.getDefiningOp()) {
+                    if (hoistAnchor->isAncestor(defOp)) {
+                      hoistOps(defOp);
+                    }
+                  }
                 }
-              }
-            }
-            opToHoist->moveBefore(hoistAnchor);
-          };
+                opToHoist->moveBefore(hoistAnchor);
+              };
 
           if (Operation *thirdDef = thirdInput.getDefiningOp()) {
             if (hoistAnchor->isAncestor(thirdDef)) {
@@ -196,13 +204,14 @@ public:
         rewriter.create<MvinBiasOp>(loc, thirdInput);
 
         // 2. Configure ComputeOp Flags
-        psumMemRefForOp = nullptr; // Bias 已经在寄存器里了，不需要传入 psum buffer
-        flagAccBias = true;        // 启用加偏置
-        
-        // 【核心修改点】：因为需要加偏置，有加法操作，DoAccum 必须为 true
-        flagDoAccum = true;        
+        psumMemRefForOp =
+            nullptr;        // Bias 已经在寄存器里了，不需要传入 psum buffer
+        flagAccBias = true; // 启用加偏置
 
-      } else if (loopStage == "body" || loopStage == "tail" || 
+        // 【核心修改点】：因为需要加偏置，有加法操作，DoAccum 必须为 true
+        flagDoAccum = true;
+
+      } else if (loopStage == "body" || loopStage == "tail" ||
                  splitStage == "body" || splitStage == "tail") {
         // === Case A2: Body / Tail (Accumulation Logic) ===
         psumMemRefForOp = outputMemRef;
@@ -218,18 +227,19 @@ public:
       // ==========================================
       if (isFirstCalculation) {
         // === Case B1: 无 Bias 且是第一次计算 ===
-        psumMemRefForOp = nullptr; 
-        flagAccBias = false;       
-        
-        // 【核心修改点】：既没有 Bias，也不需要累加 Psum，此时才是真正的 0
-        flagDoAccum = false;       
+        psumMemRefForOp = nullptr;
+        flagAccBias = false;
 
-      } else if (loopStage == "body" || loopStage == "tail" || 
+        // 【核心修改点】：既没有 Bias，也不需要累加 Psum，此时才是真正的 0
+        flagDoAccum = false;
+
+      } else if (loopStage == "body" || loopStage == "tail" ||
                  splitStage == "body" || splitStage == "tail") {
         // === Case B2: 无 Bias 但处于 Body/Tail 累加阶段 ===
         psumMemRefForOp = outputMemRef;
-        flagAccBias = false; 
-        flagDoAccum = true; // 虽然没 Bias，但需要把之前的 Psum 加进来，所以是 true
+        flagAccBias = false;
+        flagDoAccum =
+            true; // 虽然没 Bias，但需要把之前的 Psum 加进来，所以是 true
       } else {
         return failure();
       }
@@ -339,9 +349,9 @@ public:
     // --- Operation Control ---
     auto opTypeAttr = ComputeOpTypeAttr::get(rewriter.getContext(), opType);
     auto dataflowMode =
-      (opType == ComputeOpType::conv) ? DataflowMode::ws : DataflowMode::os;
+        (opType == ComputeOpType::conv) ? DataflowMode::ws : DataflowMode::os;
     auto dataflowModeAttr =
-      DataflowModeAttr::get(rewriter.getContext(), dataflowMode);
+        DataflowModeAttr::get(rewriter.getContext(), dataflowMode);
     auto accoutDestAttr = AccoutDestAttr::get(rewriter.getContext(), accDest);
     Value vIntType = c8(0);
 
@@ -402,7 +412,6 @@ public:
     Value vDoAccum = c1(flagDoAccum);
     Value vAccBias = c1(flagAccBias);
 
-    bool doRelu = (getIntAttr(op, "do_relu", 0) != 0);
     int64_t reluTypeVal = getIntAttr(op, "relu_type", 0);
     ActivationType actType = static_cast<ActivationType>(reluTypeVal);
     if (reluTypeVal > 4)
