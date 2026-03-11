@@ -516,10 +516,20 @@ KrnlTypeConverter::KrnlTypeConverter() {
 
   addConversion([](TensorType tensorType) {
     assert(tensorType.hasRank() && "expected only ranked shapes");
+    
+    // 1. Cast to RankedTensorType to access the encoding
+    auto rankedTensorType = mlir::cast<RankedTensorType>(tensorType);
+    mlir::Attribute memorySpace = rankedTensorType.getEncoding();
+
     if (mlir::isa<ONNXStringType>(tensorType.getElementType())) {
       Type elementType = krnl::StringType::get(tensorType.getContext());
+      if (memorySpace) {
+        return MemRefType::get(tensorType.getShape(), elementType, 
+                               MemRefLayoutAttrInterface(), memorySpace);
+      }
       return MemRefType::get(tensorType.getShape(), elementType);
     }
+    
     // Accelerators may have special versions of TensorType. Call the
     // conversions of accelerators.
     for (auto *accel : onnx_mlir::accel::Accelerator::getAccelerators()) {
@@ -527,8 +537,16 @@ KrnlTypeConverter::KrnlTypeConverter() {
       if (memRefType)
         return memRefType;
     }
+    
     if (hasCustomONNXTensorDataLayout(tensorType))
       return convertTypeWithCustomONNXDataLayoutToMemRef(tensorType);
+      
+    // 3. Fallback conversion with memory space
+    if (memorySpace) {
+      return MemRefType::get(tensorType.getShape(), tensorType.getElementType(), 
+                             MemRefLayoutAttrInterface(), memorySpace);
+    }
+    
     return MemRefType::get(tensorType.getShape(), tensorType.getElementType());
   });
 

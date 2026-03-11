@@ -395,7 +395,7 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
         gemmOutType.getShape(), gemmOutType.getElementType(), memSpaceAttr);
 
     auto accAlloc = rewriter.create<bufferization::AllocTensorOp>(
-        loc, accTensorType, dynamicSizes, Value{}, memSpaceAttr);
+        loc, accTensorType, dynamicSizes);
 
     auto newGemmOp = rewriter.create<linalg::GenericOp>(loc,
         TypeRange{accTensorType}, fusedGemmOp.getInputs(), ValueRange{accAlloc},

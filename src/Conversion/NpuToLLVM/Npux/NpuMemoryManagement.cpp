@@ -43,7 +43,8 @@ std::pair<int64_t, int64_t> getFlattened2DShape(
 
   int64_t row = 1;
   int64_t col = 1;
-  const int64_t COL_LIMIT = 262144; // 现在已经更改为 32bit寄存器限制，但是spm只有512k，所以限制
+  const int64_t COL_LIMIT =
+      262144; // 现在已经更改为 32bit寄存器限制，但是spm只有512k，所以限制
 
   // 定义分割点索引：从该索引开始（含）往后的所有维度都乘入 col
   int64_t splitIdx = rank - 1;
@@ -167,8 +168,8 @@ public:
 
     int srcSpace = srcType.getMemorySpaceAsInt();
     int dstSpace = dstType.getMemorySpaceAsInt();
-    bool isMvin = (srcSpace == 0 && (dstSpace == 2 || dstSpace == 3));
-    bool isMvout = (srcSpace == 2 && dstSpace == 0);
+    bool isMvin = (srcSpace == 1 && (dstSpace == 2 || dstSpace == 3));
+    bool isMvout = (srcSpace == 2 && dstSpace == 1);
 
     if (!isMvin && !isMvout)
       return failure();
@@ -180,7 +181,7 @@ public:
 
     // 1. 获取物理形状 (通常从逻辑形状一致的 dramType 获取)
     auto shape = dramType.getShape();
-    auto [rows, cols] = getFlattened2DShape(shape,op);
+    auto [rows, cols] = getFlattened2DShape(shape, op);
 
     Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
     Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
@@ -225,8 +226,7 @@ public:
     Type elemType = dramType.getElementType();
     int64_t precisionVal = elemType.isInteger(32) ? 1 : 0;
     // 更正，硬件这里全部配1就行了
-    Value vPrecision =
-        rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
+    Value vPrecision = rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
     Value vInputType =
         rewriter.create<arith::ConstantIntOp>(loc, 0, 8); // Default
 
@@ -276,11 +276,9 @@ public:
   LogicalResult matchAndRewrite(
       memref::AllocOp op, PatternRewriter &rewriter) const override {
 
-    if (!isInNpuKernel(op))
-      return failure();
     int space = op.getType().getMemorySpaceAsInt();
 
-    if (space == 0) {
+    if (space == 1) {
       rewriter.replaceOpWithNewOp<npux::AllocOp>(
           op, op.getType(), op.getDynamicSizes());
       return success();
@@ -306,19 +304,16 @@ public:
   LogicalResult matchAndRewrite(
       memref::DeallocOp op, PatternRewriter &rewriter) const override {
 
-    if (!isInNpuKernel(op))
-      return failure();
     Value memref = op.getMemref();
     auto type = cast<MemRefType>(memref.getType());
     int space = type.getMemorySpaceAsInt();
-
-    if (space == 2) {
-      rewriter.create<npux::SramFreeOp>(op.getLoc(), memref);
+    if (space == 1) {
+      rewriter.create<npux::FreeOp>(op.getLoc(), memref);
       rewriter.eraseOp(op);
       return success();
     }
-    if (space == 0) {
-      rewriter.create<npux::FreeOp>(op.getLoc(), memref);
+    if (space == 2) {
+      rewriter.create<npux::SramFreeOp>(op.getLoc(), memref);
       rewriter.eraseOp(op);
       return success();
     }

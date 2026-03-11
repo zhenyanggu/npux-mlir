@@ -241,7 +241,7 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
         convOutType.getShape(), convOutType.getElementType(), memSpaceAttr);
 
     auto accAlloc = rewriter.create<bufferization::AllocTensorOp>(
-        loc, accTensorType, dynamicSizes, Value{}, memSpaceAttr);
+        loc, accTensorType, dynamicSizes);
 
     auto newConvOp = rewriter.create<linalg::GenericOp>(loc,
         TypeRange{accTensorType}, fusedConvOp.getInputs(), ValueRange{accAlloc},

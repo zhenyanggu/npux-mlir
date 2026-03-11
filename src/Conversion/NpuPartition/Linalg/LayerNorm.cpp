@@ -7,7 +7,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/SCF/IR/SCF.h" // 虽然移除了 scf.region，但保留以防其他地方使用
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/IR/AffineMap.h"
@@ -19,6 +19,19 @@ using namespace mlir;
 using namespace npux;
 
 namespace {
+
+// ==========================================================
+// 辅助函数：为 RankedTensorType 添加 encoding=1
+// ==========================================================
+static RankedTensorType addEncoding1(RankedTensorType type, OpBuilder &b) {
+  if (type.getEncoding()) {
+    if (auto intAttr = mlir::dyn_cast<IntegerAttr>(type.getEncoding())) {
+      if (intAttr.getInt() == 1) return type;
+    }
+  }
+  return RankedTensorType::get(type.getShape(), type.getElementType(),
+                               b.getI64IntegerAttr(1));
+}
 
 // 通用 Body 构建器 (占位逻辑，实际由 library_call 实现)
 static void createLayerNormBody(OpBuilder &b, Location loc, ValueRange args) {
@@ -42,151 +55,58 @@ static Value createPackedLayerNormOp(
     int64_t axis, float epsilon) {
 
   int64_t rank = inputType.getRank();
-  //bool isSpatial = (rank == 4);
 
-  bool isSpatial = false;
-  
-  // ==========================================================
-  // 路径 A: 非 4D 数据 (Flat/Seq) -> 仅 Region 包裹，不 Pack
-  // ==========================================================
-  if (!isSpatial) {
-    // 1. 创建 Region
-    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outputType);
-    
-    {
-      OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.createBlock(&executeRegion.getRegion());
+  // 1. 创建带有 encoding=1 的新类型
+  RankedTensorType inputType1 = addEncoding1(inputType, rewriter);
+  RankedTensorType outputType1 = addEncoding1(outputType, rewriter);
 
-      // 2. Region 内部 Alloc
-      SmallVector<Value> dynamicSizes =
-          getDynamicSizes(rewriter, loc, quantizedInput, inputType.getShape());
-      Value regionAlloc = rewriter.create<bufferization::AllocTensorOp>(
-          loc, outputType, dynamicSizes);
-
-      // 3. GenericOp (Identity Map)
-      SmallVector<AffineMap, 2> indexingMaps = {
-          rewriter.getMultiDimIdentityMap(rank),
-          rewriter.getMultiDimIdentityMap(rank)
-      };
-      SmallVector<utils::IteratorType> iteratorTypes(rank, utils::IteratorType::parallel);
-
-      auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
-          /*resultTypes=*/outputType,
-          /*inputs=*/quantizedInput, // 直接使用外部输入
-          /*outputs=*/regionAlloc, 
-          indexingMaps, iteratorTypes,
-          /*bodyBuilder=*/createLayerNormBody);
-
-      // 4. 设置属性
-      linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_layernorm"));
-      linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-      linalgOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
-      linalgOp->setAttr("in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
-      linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
-      linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), outZp));
-      linalgOp->setAttr("axis", rewriter.getI64IntegerAttr(axis));
-      linalgOp->setAttr("epsilon", rewriter.getF32FloatAttr(epsilon));
-
-      // 5. Yield
-      rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
-    }
-
-    return executeRegion.getResults()[0];
-  }
-
-  // ==========================================================
-  // 路径 B: 4D 数据 (Spatial) -> Pack + Region + Unpack
-  // ==========================================================
-
-  int64_t channelDimPos = 1; // 统一按照 Channel 维度 Pack
-  ArrayRef<int64_t> inShape = inputType.getShape();
-  int64_t inputChannel = inShape[channelDimPos];
-
-  // Tile Factor Calculation
-  int64_t tileFactor = 32;
-  bool isSmallChannel = (inputChannel != ShapedType::kDynamic) && (inputChannel < 32);
-  if (isSmallChannel) {
-    tileFactor = inputChannel;
-  }
-
-  SmallVector<OpFoldResult> innerTilesOFR = {rewriter.getIndexAttr(tileFactor)};
-  SmallVector<int64_t> innerDimsPos = {channelDimPos};
-
-  // 1. 计算 Packed Shape
-  SmallVector<int64_t> packedShape;
-  if (inputType.hasStaticShape()) {
-    for (int i = 0; i < 4; ++i) {
-      if (i == channelDimPos)
-        packedShape.push_back((inShape[i] + tileFactor - 1) / tileFactor);
-      else
-        packedShape.push_back(inShape[i]);
-    }
-    packedShape.push_back(tileFactor);
+  // 2. 检查输入是否来自 onnx.constant，若是则插入 linalg.copy
+  if (quantizedInput.getDefiningOp<ONNXConstantOp>()) {
+    SmallVector<Value> copyDynamicSizes =
+        getDynamicSizes(rewriter, loc, quantizedInput, inputType1.getShape());
+    // 为 copy 的输出申请 encoding=1 的 Tensor
+    Value copyAlloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, inputType1, copyDynamicSizes);
+    auto copyOp = rewriter.create<linalg::CopyOp>(loc, quantizedInput, copyAlloc);
+    // 更新 quantizedInput 为 copy 之后带有 encoding=1 的输出
+    quantizedInput = copyOp.getResult(0);
   } else {
-    packedShape = SmallVector<int64_t>(5, ShapedType::kDynamic);
-    packedShape[4] = tileFactor;
-  }
-  auto packedType = RankedTensorType::get(packedShape, inputType.getElementType());
-
-  // --- Pack (Outside Region) ---
-  SmallVector<Value> packedDynamicSizes =
-      getDynamicSizes(rewriter, loc, quantizedInput, inputType.getShape());
-      
-  Value packedInit =
-      rewriter.create<tensor::EmptyOp>(loc, packedType, packedDynamicSizes);
-  
-  Value paddingVal = rewriter.create<arith::ConstantOp>(
-      loc, rewriter.getIntegerAttr(inputType.getElementType(), inZp));
-
-  auto packOp = rewriter.create<linalg::PackOp>(loc, quantizedInput,
-      packedInit, innerDimsPos, innerTilesOFR, paddingVal);
-
-  // --- Execute Region ---
-  auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, packedType);
-
-  {
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.createBlock(&executeRegion.getRegion());
-
-    // --- Compute (Generic) Inside Region ---
-    Value regionAlloc = rewriter.create<bufferization::AllocTensorOp>(
-        loc, packedType, packedDynamicSizes);
-
-    SmallVector<AffineMap, 2> indexingMaps = {
-        rewriter.getMultiDimIdentityMap(5), rewriter.getMultiDimIdentityMap(5)};
-    SmallVector<utils::IteratorType> iteratorTypes(
-        5, utils::IteratorType::parallel);
-
-    auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
-        /*resultTypes=*/packedType,
-        /*inputs=*/packOp.getResult(),
-        /*outputs=*/regionAlloc, indexingMaps, iteratorTypes,
-        /*bodyBuilder=*/createLayerNormBody);
-
-    // 设置属性
-    linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_layernorm"));
-    linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-    linalgOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
-    linalgOp->setAttr("in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
-    linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
-    linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), outZp));
-    linalgOp->setAttr("axis", rewriter.getI64IntegerAttr(axis));
-    linalgOp->setAttr("epsilon", rewriter.getF32FloatAttr(epsilon));
-
-    // Yield GenericOp 的结果
-    rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
+    // 强制原地修改外部输入的类型
+    quantizedInput.setType(inputType1);
   }
 
-  // --- Unpack (Outside Region) ---
-  SmallVector<Value> unpackDynamicSizes =
-      getDynamicSizes(rewriter, loc, quantizedInput, outputType.getShape());
-  Value unpackDestInit =
-      rewriter.create<tensor::EmptyOp>(loc, outputType, unpackDynamicSizes);
+  // 3. 为 LayerNorm 的输出申请 encoding=1 的 Buffer
+  SmallVector<Value> dynamicSizes =
+      getDynamicSizes(rewriter, loc, quantizedInput, inputType1.getShape());
+  Value regionAlloc = rewriter.create<bufferization::AllocTensorOp>(
+      loc, outputType1, dynamicSizes);
 
-  auto unpackOp = rewriter.create<linalg::UnPackOp>(loc,
-      executeRegion.getResults()[0], unpackDestInit, innerDimsPos, innerTilesOFR);
+  // 4. 构建 GenericOp (Identity Map)
+  SmallVector<AffineMap, 2> indexingMaps = {
+      rewriter.getMultiDimIdentityMap(rank),
+      rewriter.getMultiDimIdentityMap(rank)
+  };
+  SmallVector<utils::IteratorType> iteratorTypes(rank, utils::IteratorType::parallel);
 
-  return unpackOp.getResult();
+  auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
+      /*resultTypes=*/outputType1,
+      /*inputs=*/quantizedInput, 
+      /*outputs=*/regionAlloc, 
+      indexingMaps, iteratorTypes,
+      /*bodyBuilder=*/createLayerNormBody);
+
+  // 5. 设置属性
+  linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_layernorm"));
+  linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  linalgOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
+  linalgOp->setAttr("in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
+  linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
+  linalgOp->setAttr("out_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), outZp));
+  linalgOp->setAttr("axis", rewriter.getI64IntegerAttr(axis));
+  linalgOp->setAttr("epsilon", rewriter.getF32FloatAttr(epsilon));
+
+  // 6. 直接返回 LinalgOp 的结果 (移除了 scf.region 的逻辑)
+  return linalgOp.getResult(0);
 }
 
 struct LayerNormToLinalg : public OpConversionPattern<ONNXLayerNormalizationOp> {
@@ -208,7 +128,6 @@ struct LayerNormToLinalg : public OpConversionPattern<ONNXLayerNormalizationOp> 
     Value quantizedInput = dequantOp.getX();
     auto inputType = mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
     
-    // 修改点: 移除了 Rank!=4 的拦截，允许任意 Rank
     if (!inputType) return failure();
 
     // 3. 获取输出 Y
@@ -232,7 +151,9 @@ struct LayerNormToLinalg : public OpConversionPattern<ONNXLayerNormalizationOp> 
         outParams.scale, outParams.zeroPoint, 
         axis, epsilon);
 
-    // 6. 替换
+    // 6. 替换 (新增：确保下游 consumer 也继承 encoding=1 的 Type)
+    quantOp.getResult().setType(result.getType());
+    
     rewriter.replaceOp(quantOp, result);
     rewriter.eraseOp(op);
     if (dequantOp->hasOneUse())

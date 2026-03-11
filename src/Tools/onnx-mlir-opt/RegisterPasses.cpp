@@ -263,6 +263,14 @@ void registerNpuPasses() {
     return npux::createRemoveDuplicateMvinBiasPass();
   });
 
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createModifyScfRegionEncodingPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createEraseNpuMemorySpacePass();
+  });
+
   npux::registerBufferDeallocTest();
 }
 

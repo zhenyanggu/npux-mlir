@@ -25,37 +25,46 @@ static SmallVector<AffineMap> getIdentityMaps(MLIRContext *context, int rank) {
 }
 
 //=============================================================================
+// Helper: Change Tensor Encoding
+//=============================================================================
+static RankedTensorType changeEncoding(RankedTensorType type, int64_t encoding, OpBuilder &b) {
+  // 如果 encoding 为 0，通常代表外部主存，我们将其重置为 null Attribute (默认状态)
+  Attribute encodingAttr = (encoding == 0) ? Attribute() : b.getI64IntegerAttr(encoding);
+  return RankedTensorType::get(type.getShape(), type.getElementType(), encodingAttr);
+}
+
+//=============================================================================
 // Helper: Create Medium Tensor for NPU Compute Op
-// 专门用来为 NPU 算子提前准备 NPU 内部的 medium tensor (默认 memory_space = 2)
+// 专门用来为 NPU 算子提前准备 NPU 内部的 medium tensor (默认 encoding = 2)
 //=============================================================================
 static Value createNpuMediumTensor(PatternRewriter &rewriter, Location loc,
-    Value oldOutput, int64_t memorySpace = 2) {
+    Value oldOutput, int64_t encoding = 2) {
   auto tensorType = cast<RankedTensorType>(oldOutput.getType());
-  auto memSpaceAttr = rewriter.getI64IntegerAttr(memorySpace);
+  auto newType = changeEncoding(tensorType, encoding, rewriter);
 
   // 分配一个新的 NPU Tensor，作为 linalg(op) 的直接输出目标
   return rewriter.create<bufferization::AllocTensorOp>(
-      loc, tensorType, ValueRange{}, Value{}, memSpaceAttr);
+      loc, newType, ValueRange{});
 }
 
 //=============================================================================
 // Helper: Create DMA Generic Op (mvin or mvout)
 //=============================================================================
 static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
-    StringRef dmaName, int64_t memorySpace, StringRef dmaType = "",
+    StringRef dmaName, int64_t encoding, StringRef dmaType = "",
     Value dest = nullptr) {
   auto inputType = cast<RankedTensorType>(input.getType());
 
   // 1. 确定目标 Tensor (Destination)
   Value finalDest = dest;
   if (!finalDest) {
-    // 如果没有传入 dest，则按原逻辑分配新内存 (常用于 MVIN)
-    auto memSpaceAttr = rewriter.getI64IntegerAttr(memorySpace);
+    // 如果没有传入 dest，则按原逻辑分配新内存 (通过修改 encoding)
+    auto newType = changeEncoding(inputType, encoding, rewriter);
     finalDest = rewriter.create<bufferization::AllocTensorOp>(
-        loc, inputType, ValueRange{}, Value{}, memSpaceAttr);
+        loc, newType, ValueRange{});
   }
 
-  // 获取输出 Tensor 的类型（可能与输入类型略有不同，如 MemorySpace 不同）
+  // 获取输出 Tensor 的类型（包含了新的 encoding 信息）
   auto outType = cast<RankedTensorType>(finalDest.getType());
 
   // 2. 准备并行迭代类型和恒等映射
@@ -169,7 +178,7 @@ struct NpuConvInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
           // 这个 oldOutput 就是你 IR 中的 %extracted_slice_8
           Value oldOutput = genericUser.getOutputs()[0];
 
-          // 步骤 4.1: 创建 Medium Tensor (分配 memory_space=2)
+          // 步骤 4.1: 创建 Medium Tensor (分配 encoding=2)
           Value mediumTensor =
               createNpuMediumTensor(rewriter, uLoc, oldOutput, 2);
 
@@ -179,15 +188,14 @@ struct NpuConvInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
           newMvAcc.getInputsMutable().assign(newConvResult);
           newMvAcc.getOutputsMutable().assign(mediumTensor);
 
+          newMvAcc.getResult(0).setType(mediumTensor.getType());
+
           // 步骤 4.3: 为输出插入 MVOUT (Medium Tensor -> MVOUT ->
           // %extracted_slice_8)
           Value mvoutResult = createDmaOp(rewriter, uLoc, newMvAcc.getResult(0),
               "npu_dma_mvout", 0, "", oldOutput);
 
           // 步骤 4.4: 替换旧的 mv_acc_to_spm
-          // 因为 mvoutResult 的类型和原 mv_acc_to_spm 完全一致，
-          // 下游的 tensor.insert_slice 会自动无缝接收
-          // mvoutResult，不需要我们手动改它！
           rewriter.replaceOp(genericUser, mvoutResult);
           break;
         }
@@ -236,7 +244,7 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
       Value operand = it.value();
 
       if (index < 2) {
-        // 仅对前两个输入 (通常是 LHS, RHS) 执行 MVIN，放入 Memory Space 2
+        // 仅对前两个输入 (通常是 LHS, RHS) 执行 MVIN，赋予 encoding 2
         Value processedInput =
             createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "");
         newInputs.push_back(processedInput);
@@ -283,7 +291,7 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
           // 这个 oldOutput 就是原始 IR 中的 Destination Tensor
           Value oldOutput = genericUser.getOutputs()[0];
 
-          // 步骤 4.1: 创建 Medium Tensor (分配 memory_space=2)
+          // 步骤 4.1: 创建 Medium Tensor (分配 encoding=2)
           Value mediumTensor =
               createNpuMediumTensor(rewriter, uLoc, oldOutput, 2);
 
@@ -292,6 +300,8 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
               rewriter.clone(*genericUser.getOperation()));
           newMvAcc.getInputsMutable().assign(newGemmResult);
           newMvAcc.getOutputsMutable().assign(mediumTensor);
+
+          newMvAcc.getResult(0).setType(mediumTensor.getType());
 
           // 步骤 4.3: 为输出插入 MVOUT (Medium Tensor -> MVOUT -> oldOutput)
           Value mvoutResult = createDmaOp(rewriter, uLoc, newMvAcc.getResult(0),
@@ -342,12 +352,12 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     // --- 步骤 1: 为输入遍历插入 MVIN ---
     SmallVector<Value> newInputs;
     for (auto [idx, input] : llvm::enumerate(op.getInputs())) {
-      // 拦截 Dummy Window：免除搬运，直接在 SRAM (memory_space=2) 分配空壳
+      // 拦截 Dummy Window：免除搬运，直接分配 encoding=2 的空壳
       if (opName == "npu_maxpool" && idx == 1) {
         auto tensorType = cast<RankedTensorType>(input.getType());
-        auto memSpaceAttr = rewriter.getI64IntegerAttr(2);
+        auto newType = changeEncoding(tensorType, 2, rewriter);
         Value dummySram = rewriter.create<bufferization::AllocTensorOp>(
-            loc, tensorType, ValueRange{}, Value{}, memSpaceAttr);
+            loc, newType, ValueRange{});
         newInputs.push_back(dummySram);
         continue;
       }
@@ -358,7 +368,7 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
       newInputs.push_back(mvinResult);
     }
 
-    // --- 步骤 2: 准备 Medium Tensor (分配 memory_space=2 的新内存) ---
+    // --- 步骤 2: 准备 Medium Tensor (分配 encoding=2 的新内存) ---
     SmallVector<Value> mediumTensors;
     for (Value originalOutput : op.getOutputs()) {
       Value mediumTensor =
@@ -370,6 +380,10 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     auto newOp = cast<linalg::GenericOp>(rewriter.clone(*op.getOperation()));
     newOp.getInputsMutable().assign(newInputs);
     newOp.getOutputsMutable().assign(mediumTensors); // 算子输出到 Medium Tensor
+
+    for (auto [idx, medium] : llvm::enumerate(mediumTensors)) {
+      newOp.getResult(idx).setType(medium.getType());
+    }
     newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
 
     // --- 步骤 4: 为输出插入 MVOUT ---

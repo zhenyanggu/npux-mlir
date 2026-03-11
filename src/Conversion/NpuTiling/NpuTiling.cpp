@@ -25,12 +25,6 @@ struct NpuTilingPass
   }
 
   void runOnOperation() override {
-    func::FuncOp func = getOperation();
-
-    auto targetAttr = func->getAttrOfType<StringAttr>("npu.target");
-    if (!targetAttr || targetAttr.getValue() != "npu") {
-      return;
-    }
 
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
@@ -45,7 +39,7 @@ struct NpuTilingPass
         .enableFolding(true);
 
     // 修改：使用 applyPatternsGreedily 替代 applyPartialConversion
-    if (failed(applyPatternsGreedily(func.getBody(), std::move(patterns), config))) {
+    if (failed(applyPatternsGreedily(getOperation().getBody(), std::move(patterns), config))) {
       signalPassFailure();
     }
   };

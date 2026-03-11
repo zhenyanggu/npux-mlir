@@ -22,11 +22,24 @@ using namespace npux;
 
 namespace {
 
+// ==========================================================
+// 辅助函数：为 RankedTensorType 添加 encoding=1
+// ==========================================================
+static RankedTensorType addEncoding1(RankedTensorType type, OpBuilder &b) {
+  if (type.getEncoding()) {
+    if (auto intAttr = mlir::dyn_cast<IntegerAttr>(type.getEncoding())) {
+      if (intAttr.getInt() == 1) return type;
+    }
+  }
+  return RankedTensorType::get(type.getShape(), type.getElementType(),
+                               b.getI64IntegerAttr(1));
+}
+
 // ============================================================
 // Helper: 创建用于 Layout 转换的 Generic Op (Call CAPI)
 // ============================================================
 Operation *createLayoutGeneric(OpBuilder &rewriter, Location loc, Value input,
-    Value outputInit, StringRef libraryCallName, int64_t n, int64_t c,
+    Value outputInit, StringRef libraryCallName,StringRef node_name, int64_t n, int64_t c,
     int64_t h, int64_t w, int64_t tileSize) {
 
   auto inputType = mlir::cast<RankedTensorType>(input.getType());
@@ -76,6 +89,7 @@ Operation *createLayoutGeneric(OpBuilder &rewriter, Location loc, Value input,
       });
 
   op->setAttr("library_call", rewriter.getStringAttr(libraryCallName));
+  op->setAttr("npu.layer_name", rewriter.getStringAttr(node_name));
   op->setAttr("npu.target", rewriter.getStringAttr("npu"));
   op->setAttr("params_n", rewriter.getI32IntegerAttr(n));
   op->setAttr("params_c", rewriter.getI32IntegerAttr(c));
@@ -320,7 +334,7 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
                 if (auto alphaAttr = leakyOp.getAlphaAttr()) {
                   alpha = alphaAttr.getValueAsDouble();
                 }
-                // 使用浮点偏差检查，以防进度问题
+                // 使用浮点偏差检查，以防精度问题
                 if (std::abs(alpha - 0.1) < 1e-5) relu_type = 2;
                 else if (std::abs(alpha - 0.2) < 1e-5) relu_type = 3;
                 else if (std::abs(alpha - 0.01) < 1e-5) relu_type = 4;
@@ -354,6 +368,11 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
     int64_t outZp = qParams.zeroPoint;
 
     auto inputType = mlir::cast<RankedTensorType>(originInput.getType());
+    
+    // 强制原地修改原始输入的类型，赋予 encoding=1
+    auto inputType1 = addEncoding1(inputType, rewriter);
+    originInput.setType(inputType1);
+
     auto outputType =
         mlir::cast<RankedTensorType>(finalQuantOp.getResult().getType());
 
@@ -365,7 +384,6 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
     int64_t OC = outputType.getShape()[1];
     int64_t OH = outputType.getShape()[2];
     int64_t OW = outputType.getShape()[3];
-
 
     auto kernelShape = getIntArrayAttr(op, "kernel_shape", 1, 2);
     int64_t kH = kernelShape[0];
@@ -403,22 +421,36 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
       pads = {0, 0, 0, 0};
     }
 
+    // 判断是否需要 Padding 并计算 Pad 后的尺寸
+    bool hasPadding = false;
+    for (int64_t p : pads)
+      if (p > 0)
+        hasPadding = true;
+
+    int64_t paddedH = H;
+    int64_t paddedW = W;
+    if (hasPadding) {
+      paddedH += pads[0] + pads[2];
+      paddedW += pads[1] + pads[3];
+    }
+
     int64_t inTileFactor = (IC != ShapedType::kDynamic && IC < 32) ? IC : 32;
     int64_t outTileFactor = (OC != ShapedType::kDynamic && OC < 32) ? OC : 32;
 
+    // 根据 PaddedH/W 构建打包后的 Shape 并加上 encoding=1
     SmallVector<int64_t> packedInputShape = {
-        N, (IC + inTileFactor - 1) / inTileFactor, H, W, inTileFactor};
+        N, (IC + inTileFactor - 1) / inTileFactor, paddedH, paddedW, inTileFactor};
     if (!inputType.hasStaticShape()) {
       packedInputShape = {ShapedType::kDynamic, ShapedType::kDynamic,
           ShapedType::kDynamic, ShapedType::kDynamic, inTileFactor};
     }
-    auto packedInputType =
-        RankedTensorType::get(packedInputShape, inputType.getElementType());
+    auto packedInputType = RankedTensorType::get(packedInputShape, inputType.getElementType());
+    auto packedInputType1 = addEncoding1(packedInputType, rewriter);
 
     SmallVector<int64_t> packedOutputShape = {
         N, (OC + outTileFactor - 1) / outTileFactor, OH, OW, outTileFactor};
-    auto packedOutputType =
-        RankedTensorType::get(packedOutputShape, outputType.getElementType());
+    auto packedOutputType = RankedTensorType::get(packedOutputShape, outputType.getElementType());
+    auto packedOutputType1 = addEncoding1(packedOutputType, rewriter);
 
     // ==============================================================================
     // 阶段 2: Weight & Bias Packing (Compile-time)
@@ -438,216 +470,237 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
     }
 
     // ==============================================================================
-    // 阶段 3: 创建统一的 Execute Region (Input Packing -> Padding -> 5D Convolution)
+    // 阶段 3: 执行流 (Padding -> Pack -> Conv -> Quant -> Unpack) 
+    // 取消了 SCF.Region, 直接在当前 Block 创建 Op 并且确保带有 encoding=1
     // ==============================================================================
 
-    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outputType);
-    {
-      OpBuilder::InsertionGuard guard(rewriter);
-      Block *body = rewriter.createBlock(&executeRegion.getRegion());
+    // --- 1. Padding (4D Input) ---
+    Value paddedInput = originInput;
+    if (hasPadding) {
+      int64_t padTop = pads[0];
+      int64_t padLeft = pads[1];
+      int64_t padBottom = pads[2];
+      int64_t padRight = pads[3];
 
-      // --- 1. Input Layout Transform (NCHW -> NCHWc32) ---
-      Value packedInputAlloc = rewriter.create<bufferization::AllocTensorOp>(
-          loc, packedInputType, ValueRange{});
+      int rank = 4; // 针对 NCHW 4D 处理
+      SmallVector<OpFoldResult> low(rank, rewriter.getIndexAttr(0));
+      SmallVector<OpFoldResult> high(rank, rewriter.getIndexAttr(0));
 
-      Operation *packInputOp =
-          createLayoutGeneric(rewriter, loc, originInput, packedInputAlloc,
-              "npu_layout_nchw_to_nchwc32", N, IC, H, W, inTileFactor);
+      low[2] = rewriter.getIndexAttr(padTop);
+      low[3] = rewriter.getIndexAttr(padLeft);
+      high[2] = rewriter.getIndexAttr(padBottom);
+      high[3] = rewriter.getIndexAttr(padRight);
 
-      Value packedInput = packInputOp->getResult(0);
-      Value convInput = packedInput;
-
-      // --- 2. Padding (Inside Region) ---
-      bool hasPadding = false;
-      for (int64_t p : pads)
-        if (p > 0)
-          hasPadding = true;
-
-      if (hasPadding) {
-        int64_t padTop = pads[0];
-        int64_t padLeft = pads[1];
-        int64_t padBottom = pads[2];
-        int64_t padRight = pads[3];
-
-        int rank = 5;
-        SmallVector<OpFoldResult> low(rank, rewriter.getIndexAttr(0));
-        SmallVector<OpFoldResult> high(rank, rewriter.getIndexAttr(0));
-
-        low[2] = rewriter.getIndexAttr(padTop);
-        low[3] = rewriter.getIndexAttr(padLeft);
-        high[2] = rewriter.getIndexAttr(padBottom);
-        high[3] = rewriter.getIndexAttr(padRight);
-
-        Value padValue;
-        Type elemType = inputType.getElementType();
-        if (isa<FloatType>(elemType)) {
-          padValue = rewriter.create<arith::ConstantOp>(
-              loc, rewriter.getFloatAttr(elemType, 0.0));
-        } else {
-          padValue = rewriter.create<arith::ConstantOp>(
-              loc, rewriter.getZeroAttr(elemType));
-        }
-
-        auto padOp = rewriter.create<tensor::PadOp>(loc,
-            /*resultType=*/nullptr, packedInput, low, high, padValue,
-            /*nofold=*/false);
-        convInput = padOp.getResult();
+      Value padValue;
+      Type elemType = inputType.getElementType();
+      if (isa<FloatType>(elemType)) {
+        padValue = rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getFloatAttr(elemType, 0.0));
+      } else {
+        padValue = rewriter.create<arith::ConstantOp>(
+            loc, rewriter.getZeroAttr(elemType));
       }
 
-      // --- 3. Compute (Packed Conv 全维度处理) ---
-      
-      // 最终 i8 结果缓冲区 [N, OC_chunk, OH, OW, 32]
-      Value outputAlloc = rewriter.create<bufferization::AllocTensorOp>(
-          loc, packedOutputType, ValueRange{});
-
-      // 中间 i32 计算缓冲区
-      auto outputTypeI32 =
-          RankedTensorType::get(packedOutputShape, rewriter.getI32Type());
-      Value i32Alloc = rewriter.create<bufferization::AllocTensorOp>(
-          loc, outputTypeI32, ValueRange{});
-
-      // 定义 9 维迭代空间 (加入 N 作为 parallel iterator)
-      SmallVector<utils::IteratorType> iteratorTypes = {
-          utils::IteratorType::parallel,  // N (d0)
-          utils::IteratorType::parallel,  // oc_c (d1)
-          utils::IteratorType::parallel,  // oh (d2)
-          utils::IteratorType::parallel,  // ow (d3)
-          utils::IteratorType::reduction, // ic_c (d4)
-          utils::IteratorType::reduction, // kh (d5)
-          utils::IteratorType::reduction, // kw (d6)
-          utils::IteratorType::reduction, // ic_b (d7)
-          utils::IteratorType::parallel   // oc_b (d8)
-      };
-
-      SmallVector<AffineMap> indexingMaps;
-      // Input Map: (N, ic_c, h_in, w_in, ic_b)
-      indexingMaps.push_back(AffineMap::get(9, 0,
-          {rewriter.getAffineDimExpr(0),
-           rewriter.getAffineDimExpr(4),
-           rewriter.getAffineDimExpr(2) * strideH +
-               rewriter.getAffineDimExpr(5) * dilationH,
-           rewriter.getAffineDimExpr(3) * strideW +
-               rewriter.getAffineDimExpr(6) * dilationW,
-           rewriter.getAffineDimExpr(7)},
-          rewriter.getContext()));
-      
-      // Weight Map: (oc_c, ic_c, kh, kw, ic_b, oc_b)
-      indexingMaps.push_back(AffineMap::get(9, 0,
-          {rewriter.getAffineDimExpr(1), rewriter.getAffineDimExpr(4),
-           rewriter.getAffineDimExpr(5), rewriter.getAffineDimExpr(6),
-           rewriter.getAffineDimExpr(7), rewriter.getAffineDimExpr(8)},
-          rewriter.getContext()));
-      
-      // Bias Map: (oc_c, oc_b) - 如果存在
-      if (packedBias)
-        indexingMaps.push_back(AffineMap::get(9, 0,
-            {rewriter.getAffineDimExpr(1), rewriter.getAffineDimExpr(8)},
-            rewriter.getContext()));
-      
-      // Output Map: (N, oc_c, oh, ow, oc_b)
-      indexingMaps.push_back(AffineMap::get(9, 0,
-          {rewriter.getAffineDimExpr(0), rewriter.getAffineDimExpr(1),
-           rewriter.getAffineDimExpr(2), rewriter.getAffineDimExpr(3),
-           rewriter.getAffineDimExpr(8)},
-          rewriter.getContext()));
-
-      SmallVector<Value> genericInputs = {convInput, packedWeight};
-      if (packedBias)
-        genericInputs.push_back(packedBias);
-
-      // 创建核心的 5D 卷积 (N 一并在内处理)
-      auto convOp = rewriter.create<linalg::GenericOp>(loc, outputTypeI32,
-          genericInputs, i32Alloc, indexingMaps, iteratorTypes,
-          [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
-            Value in = args[0];
-            Value weight = args[1];
-            Value acc = args.back(); // i32
-
-            Value inI32 = nestedB.create<arith::ExtSIOp>(
-                nestedLoc, nestedB.getI32Type(), in);
-            Value weightI32 = nestedB.create<arith::ExtSIOp>(
-                nestedLoc, nestedB.getI32Type(), weight);
-            Value prod = nestedB.create<arith::MulIOp>(
-                nestedLoc, inI32, weightI32);
-            Value sum =
-                nestedB.create<arith::AddIOp>(nestedLoc, acc, prod);
-
-            if (packedBias && args.size() > 3) {
-              sum =
-                  nestedB.create<arith::AddIOp>(nestedLoc, sum, args[2]);
-            }
-            nestedB.create<linalg::YieldOp>(nestedLoc, sum);
-          });
-
-      convOp->setAttr("library_call", rewriter.getStringAttr("npu_conv"));
-      convOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-      auto copyAttr = [&](StringRef name) {
-        if (auto attr = op->getAttr(name))
-          convOp->setAttr(name, attr);
-      };
-      convOp->setAttr("pads", rewriter.getI64ArrayAttr(pads));
-      copyAttr("dilations");
-      copyAttr("strides");
-      
-      convOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
-      convOp->setAttr(
-          "in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
-        convOp->setAttr("w_scale", rewriter.getF32FloatAttr(wScale));
-        convOp->setAttr(
-          "w_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), wZp));
-      convOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
-      convOp->setAttr("out_zp",
-          rewriter.getIntegerAttr(rewriter.getI16Type(), outZp));
-
-      // 写入 Relu 融合属性
-      convOp->setAttr("do_relu", rewriter.getI32IntegerAttr(do_relu));
-      if (do_relu == 1) {
-        convOp->setAttr("relu_type", rewriter.getI32IntegerAttr(relu_type));
+      SmallVector<int64_t> paddedShape = {N, IC, paddedH, paddedW};
+      if (!inputType.hasStaticShape()) {
+        paddedShape = {ShapedType::kDynamic, ShapedType::kDynamic,
+                       ShapedType::kDynamic, ShapedType::kDynamic};
       }
+      auto paddedType = RankedTensorType::get(paddedShape, elemType);
+      auto paddedType1 = addEncoding1(paddedType, rewriter);
 
-      if (isCustomized) {
-        SmallVector<int64_t, 4> bestTile = {t_oh, t_ow, t_ic, t_oc};
-        convOp->setAttr(
-            "npu.dse_tiling", rewriter.getI64ArrayAttr(bestTile));
-      }
-      if (!nodeName.empty()) {
-        convOp->setAttr(
-            "npu.layer_name", rewriter.getStringAttr(nodeName));
-      }
-
-      // --- 4. 5D 量化 ---
-      auto identityMap5D = rewriter.getMultiDimIdentityMap(5);
-      auto quantOp = rewriter.create<linalg::GenericOp>(loc, packedOutputType,
-          ValueRange{convOp.getResult(0)}, ValueRange{outputAlloc},
-          SmallVector<AffineMap>{identityMap5D, identityMap5D},
-          SmallVector<utils::IteratorType>(
-              5, utils::IteratorType::parallel),
-          [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
-            Value res = nestedB.create<arith::TruncIOp>(
-                nestedLoc, nestedB.getI8Type(), args[0]);
-            nestedB.create<linalg::YieldOp>(nestedLoc, res);
-          });
-
-      quantOp->setAttr("library_call", rewriter.getStringAttr("mv_acc_to_spm"));
-      quantOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-
-      Value packedConvResult = quantOp.getResult(0);
-
-      // ==============================================================================
-      // 阶段 4: Output Layout Transform (NCHWc32 -> NCHW)
-      // ==============================================================================
-      Value outputInit = rewriter.create<bufferization::AllocTensorOp>(
-          loc, outputType, ValueRange{});
-
-      Operation *unpackOp =
-          createLayoutGeneric(rewriter, loc, packedConvResult, outputInit,
-              "npu_layout_nchwc32_to_nchw", N, OC, OH, OW, outTileFactor);
-
-      rewriter.create<scf::YieldOp>(loc, unpackOp->getResult(0));
+      auto padOp = rewriter.create<tensor::PadOp>(loc,
+          paddedType1, originInput, low, high, padValue, /*nofold=*/false);
+      paddedInput = padOp.getResult();
     }
 
-    Value finalResult = executeRegion.getResult(0);
-    // 替换对象改为 finalQuantOp 
+    // --- 2. Input Layout Transform (NCHW -> NCHWc32) ---
+    Value packedInputAlloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, packedInputType1, ValueRange{});
+
+    // 注意传入 paddedH 和 paddedW，保证转换是按照 Padded 后的尺寸
+    Operation *packInputOp =
+        createLayoutGeneric(rewriter, loc, paddedInput, packedInputAlloc,
+            "npu_layout_nchw_to_nchwc32", rewriter.getStringAttr(nodeName), N, IC, paddedH, paddedW, inTileFactor);
+
+    Value convInput = packInputOp->getResult(0); // 带有 encoding=1
+
+    // --- 3. Linalg.Copy 处理常量 Weight 和 Bias (引入 runtime buffer 并加上 encoding=1) ---
+    auto weightType = mlir::cast<RankedTensorType>(packedWeight.getType());
+    auto weightType1 = addEncoding1(weightType, rewriter);
+
+    Value weightAlloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, weightType1, ValueRange{});
+    
+    auto copyOp = rewriter.create<linalg::CopyOp>(loc, packedWeight, weightAlloc);
+    Value copiedWeight = copyOp.getResult(0); // 带有 encoding=1
+
+    // [修改点：为 Bias 添加 linalg.copy 处理]
+    Value copiedBias = nullptr;
+    if (packedBias) {
+      auto biasType = mlir::cast<RankedTensorType>(packedBias.getType());
+      auto biasType1 = addEncoding1(biasType, rewriter);
+
+      Value biasAlloc = rewriter.create<bufferization::AllocTensorOp>(
+          loc, biasType1, ValueRange{});
+      
+      auto biasCopyOp = rewriter.create<linalg::CopyOp>(loc, packedBias, biasAlloc);
+      copiedBias = biasCopyOp.getResult(0); // 带有 encoding=1
+    }
+
+    // --- 4. Compute (Packed Conv 全维度处理) ---
+    // 定义中间 i32 计算缓冲区，以及最后的 i8 Quant 缓冲区，全加 encoding=1
+    auto outputTypeI32 = RankedTensorType::get(packedOutputShape, rewriter.getI32Type());
+    auto outputTypeI32_1 = addEncoding1(outputTypeI32, rewriter);
+    Value i32Alloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, outputTypeI32_1, ValueRange{});
+
+    Value outputAlloc = rewriter.create<bufferization::AllocTensorOp>(
+        loc, packedOutputType1, ValueRange{});
+
+    // 定义 9 维迭代空间 (加入 N 作为 parallel iterator)
+    SmallVector<utils::IteratorType> iteratorTypes = {
+        utils::IteratorType::parallel,  // N (d0)
+        utils::IteratorType::parallel,  // oc_c (d1)
+        utils::IteratorType::parallel,  // oh (d2)
+        utils::IteratorType::parallel,  // ow (d3)
+        utils::IteratorType::reduction, // ic_c (d4)
+        utils::IteratorType::reduction, // kh (d5)
+        utils::IteratorType::reduction, // kw (d6)
+        utils::IteratorType::reduction, // ic_b (d7)
+        utils::IteratorType::parallel   // oc_b (d8)
+    };
+
+    SmallVector<AffineMap> indexingMaps;
+    // Input Map: (N, ic_c, h_in, w_in, ic_b)
+    indexingMaps.push_back(AffineMap::get(9, 0,
+        {rewriter.getAffineDimExpr(0),
+         rewriter.getAffineDimExpr(4),
+         rewriter.getAffineDimExpr(2) * strideH +
+             rewriter.getAffineDimExpr(5) * dilationH,
+         rewriter.getAffineDimExpr(3) * strideW +
+             rewriter.getAffineDimExpr(6) * dilationW,
+         rewriter.getAffineDimExpr(7)},
+        rewriter.getContext()));
+    
+    // Weight Map: (oc_c, ic_c, kh, kw, ic_b, oc_b)
+    indexingMaps.push_back(AffineMap::get(9, 0,
+        {rewriter.getAffineDimExpr(1), rewriter.getAffineDimExpr(4),
+         rewriter.getAffineDimExpr(5), rewriter.getAffineDimExpr(6),
+         rewriter.getAffineDimExpr(7), rewriter.getAffineDimExpr(8)},
+        rewriter.getContext()));
+    
+    // Bias Map: (oc_c, oc_b) - 如果存在 (此处依然使用判断条件，Map保持不变)
+    if (copiedBias)
+      indexingMaps.push_back(AffineMap::get(9, 0,
+          {rewriter.getAffineDimExpr(1), rewriter.getAffineDimExpr(8)},
+          rewriter.getContext()));
+    
+    // Output Map: (N, oc_c, oh, ow, oc_b)
+    indexingMaps.push_back(AffineMap::get(9, 0,
+        {rewriter.getAffineDimExpr(0), rewriter.getAffineDimExpr(1),
+         rewriter.getAffineDimExpr(2), rewriter.getAffineDimExpr(3),
+         rewriter.getAffineDimExpr(8)},
+        rewriter.getContext()));
+
+    // 此时 genericInputs 为已经带有 encoding=1 的 convInput 和 copiedWeight
+    // [修改点：此处将 copiedBias 作为第三个 input 加入 genericInputs]
+    SmallVector<Value> genericInputs = {convInput, copiedWeight};
+    if (copiedBias)
+      genericInputs.push_back(copiedBias);
+
+    // 创建核心的 5D 卷积 (N 一并在内处理)
+    auto convOp = rewriter.create<linalg::GenericOp>(loc, outputTypeI32_1,
+        genericInputs, i32Alloc, indexingMaps, iteratorTypes,
+        [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
+          Value in = args[0];
+          Value weight = args[1];
+          Value acc = args.back(); // i32
+
+          Value inI32 = nestedB.create<arith::ExtSIOp>(
+              nestedLoc, nestedB.getI32Type(), in);
+          Value weightI32 = nestedB.create<arith::ExtSIOp>(
+              nestedLoc, nestedB.getI32Type(), weight);
+          Value prod = nestedB.create<arith::MulIOp>(
+              nestedLoc, inI32, weightI32);
+          Value sum =
+              nestedB.create<arith::AddIOp>(nestedLoc, acc, prod);
+
+          // args.size() > 3 代表有三个 input (in, weight, bias) 以及一个 output (acc)
+          if (copiedBias && args.size() > 3) {
+            sum =
+                nestedB.create<arith::AddIOp>(nestedLoc, sum, args[2]);
+          }
+          nestedB.create<linalg::YieldOp>(nestedLoc, sum);
+        });
+
+    convOp->setAttr("library_call", rewriter.getStringAttr("npu_conv"));
+    convOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    auto copyAttr = [&](StringRef name) {
+      if (auto attr = op->getAttr(name))
+        convOp->setAttr(name, attr);
+    };
+    convOp->setAttr("pads", rewriter.getI64ArrayAttr(pads));
+    copyAttr("dilations");
+    copyAttr("strides");
+    
+    convOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
+    convOp->setAttr(
+        "in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
+      convOp->setAttr("w_scale", rewriter.getF32FloatAttr(wScale));
+      convOp->setAttr(
+        "w_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), wZp));
+    convOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
+    convOp->setAttr("out_zp",
+        rewriter.getIntegerAttr(rewriter.getI16Type(), outZp));
+
+    // 写入 Relu 融合属性
+    convOp->setAttr("do_relu", rewriter.getI32IntegerAttr(do_relu));
+    if (do_relu == 1) {
+      convOp->setAttr("relu_type", rewriter.getI32IntegerAttr(relu_type));
+    }
+
+    if (isCustomized) {
+      SmallVector<int64_t, 4> bestTile = {t_oh, t_ow, t_ic, t_oc};
+      convOp->setAttr(
+          "npu.dse_tiling", rewriter.getI64ArrayAttr(bestTile));
+    }
+    if (!nodeName.empty()) {
+      convOp->setAttr(
+          "npu.layer_name", rewriter.getStringAttr(nodeName));
+    }
+
+    // --- 5. 5D 量化 ---
+    auto identityMap5D = rewriter.getMultiDimIdentityMap(5);
+    auto quantOp = rewriter.create<linalg::GenericOp>(loc, packedOutputType1,
+        ValueRange{convOp.getResult(0)}, ValueRange{outputAlloc},
+        SmallVector<AffineMap>{identityMap5D, identityMap5D},
+        SmallVector<utils::IteratorType>(
+            5, utils::IteratorType::parallel),
+        [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
+          Value res = nestedB.create<arith::TruncIOp>(
+              nestedLoc, nestedB.getI8Type(), args[0]);
+          nestedB.create<linalg::YieldOp>(nestedLoc, res);
+        });
+
+    quantOp->setAttr("library_call", rewriter.getStringAttr("mv_acc_to_spm"));
+    quantOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+
+    Value packedConvResult = quantOp.getResult(0); // 带有 encoding=1
+
+    // --- 6. Output Layout Transform (NCHWc32 -> NCHW) ---
+    auto outputType1 = addEncoding1(outputType, rewriter);
+    Value outputInit = rewriter.create<bufferization::AllocTensorOp>(
+        loc, outputType1, ValueRange{});
+
+    Operation *unpackOp =
+        createLayoutGeneric(rewriter, loc, packedConvResult, outputInit,
+            "npu_layout_nchwc32_to_nchw", rewriter.getStringAttr(nodeName), N, OC, OH, OW, outTileFactor);
+
+    Value finalResult = unpackOp->getResult(0); // 带有 encoding=1
+
+    // 最终结果替换：设置 finalQuantOp 的结果为 encoding=1 供下游 Consumer 使用
+    finalQuantOp.getResult().setType(finalResult.getType());
     rewriter.replaceOp(finalQuantOp, finalResult);
 
     // 反向安全擦除被替换后悬空无用的所有节点

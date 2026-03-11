@@ -61,8 +61,45 @@ static int64_t getScalarInt(Value v, int64_t defaultVal = 0) {
   return defaultVal;
 }
 
+// 辅助函数：为 RankedTensorType 添加 encoding=1
+static RankedTensorType addEncoding1(RankedTensorType type, OpBuilder &b) {
+  if (type.getEncoding()) {
+    if (auto intAttr = mlir::dyn_cast<IntegerAttr>(type.getEncoding())) {
+      if (intAttr.getInt() == 1) return type;
+    }
+  }
+  return RankedTensorType::get(type.getShape(), type.getElementType(),
+                               b.getI64IntegerAttr(1));
+}
+
+// 辅助函数：处理 linalg 输入的 encoding 和 constant 的拷贝
+static Value processNpuLinalgInput(OpBuilder &b, Location loc, Value v) {
+  if (!v) return v;
+  auto type = mlir::dyn_cast<RankedTensorType>(v.getType());
+  if (!type) return v;
+  
+  auto encType = addEncoding1(type, b);
+  
+  // 如果是常数，插入 linalg.copy
+  if (v.getDefiningOp<ONNXConstantOp>()) {
+    SmallVector<Value> dynSizes;
+    for (int i = 0; i < type.getRank(); ++i) {
+      if (type.isDynamicDim(i)) {
+        dynSizes.push_back(b.create<tensor::DimOp>(loc, v, i).getResult());
+      }
+    }
+    Value alloc = b.create<bufferization::AllocTensorOp>(loc, encType, dynSizes);
+    auto copyOp = b.create<linalg::CopyOp>(loc, v, alloc);
+    return copyOp.getResult(0);
+  } else {
+    // 否则直接强制类型转换 encoding=1
+    v.setType(encType);
+    return v;
+  }
+}
+
 // ==========================================================
-// 生成 Linalg 转置 (在 Region 内部)
+// 生成 Linalg 转置 
 // ==========================================================
 static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input) {
   auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
@@ -72,7 +109,10 @@ static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input) {
   int64_t rank = inputType.getRank();
   SmallVector<int64_t> outShape(inputType.getShape());
   std::swap(outShape[rank - 1], outShape[rank - 2]);
+  
+  // 输出带有 encoding=1
   auto outType = RankedTensorType::get(outShape, inputType.getElementType());
+  auto encOutType = addEncoding1(outType, b);
 
   SmallVector<Value> dynSizes;
   for (int i = 0; i < rank; ++i) {
@@ -82,7 +122,7 @@ static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input) {
     }
   }
 
-  Value alloc = b.create<bufferization::AllocTensorOp>(loc, outType, dynSizes);
+  Value alloc = b.create<bufferization::AllocTensorOp>(loc, encOutType, dynSizes);
 
   SmallVector<AffineExpr> inExprs, outExprs;
   for (int i = 0; i < rank; ++i) {
@@ -97,7 +137,7 @@ static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input) {
 
   SmallVector<utils::IteratorType> iters(rank, utils::IteratorType::parallel);
 
-  auto genericOp = b.create<linalg::GenericOp>(loc, outType,
+  auto genericOp = b.create<linalg::GenericOp>(loc, encOutType,
       /*inputs=*/input,
       /*outputs=*/alloc, maps, iters,
       [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
@@ -120,23 +160,18 @@ static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input) {
 }
 
 // MatMul i32 Body 构建器
-// 确保使用 Integer 运算并且仅输出 i32 的累加结果，精度转换留给 SPM 阶段
 static void createI32MatMulBody(OpBuilder &b, Location loc, ValueRange args) {
-  // args: [A, B, (Optional C), OutAcc]
   Value lhs = args[0];
   Value rhs = args[1];
   Value outAcc = args.back();
   bool hasBias = (args.size() == 4);
 
-  // Helper: 统一提升到 i32 进行计算
   auto castToI32 = [&](Value v) -> Value {
     Type t = v.getType();
-    if (t.isInteger(32))
-      return v;
+    if (t.isInteger(32)) return v;
     if (t.isInteger(8) || t.isInteger(1) || t.isInteger(16)) {
       return b.create<arith::ExtSIOp>(loc, b.getI32Type(), v);
     }
-    // Fallback for float
     if (mlir::isa<FloatType>(t)) {
       return b.create<arith::FPToSIOp>(loc, b.getI32Type(), v);
     }
@@ -145,21 +180,16 @@ static void createI32MatMulBody(OpBuilder &b, Location loc, ValueRange args) {
 
   Value lhsI32 = castToI32(lhs);
   Value rhsI32 = castToI32(rhs);
-  Value outI32 = castToI32(outAcc); // i32 accum
+  Value outI32 = castToI32(outAcc); 
 
-  // 1. Mul: i32 = i32 * i32
   Value mul = b.create<arith::MulIOp>(loc, lhsI32, rhsI32);
 
-  // 2. Add Bias: i32 = i32 + i32
   if (hasBias) {
     Value biasI32 = castToI32(args[2]);
     mul = b.create<arith::AddIOp>(loc, biasI32, mul);
   }
 
-  // 3. Accumulate: i32 = i32 + i32
   Value resI32 = b.create<arith::AddIOp>(loc, outI32, mul);
-
-  // 4. Yield pure i32 (no truncation here!)
   b.create<linalg::YieldOp>(loc, resI32);
 }
 
@@ -168,7 +198,6 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
     Location loc,
     SmallVector<Value> inputs, // [A, B] 或 [A, B, C]
     RankedTensorType outType,  // Final Output Type (e.g., i8)
-    // Quant Params
     float lhsScale, int64_t lhsZp, float rhsScale, int64_t rhsZp,
     float outScale, int64_t outZp, StringRef libCallName,
     int64_t do_relu = 0, int64_t relu_type = 0,
@@ -178,32 +207,30 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
   bool hasBias = (inputs.size() == 3);
   int32_t withBiasAttr = hasBias ? 1 : 0;
 
-  // ==============================================================================
-  // Helper Lambda
-  // ==============================================================================
   auto buildGemm = [&](OpBuilder &b, Location loc, Value lhs, Value rhs,
                        Value bias, SmallVector<Value> dynSizes) -> Value {
     int64_t outRank = outType.getRank();
     assert((outRank == 2 || outRank == 3) && "Only 2D and 3D MatMul are supported here");
 
-    // 1. 分配中间 i32 累加器 Buffer (NPU Accumulator)
+    // 1. 分配中间带有 encoding=1 的 i32 累加器 Buffer 
     auto i32Type = RankedTensorType::get(outType.getShape(), b.getI32Type());
-    Value i32Alloc = b.create<bufferization::AllocTensorOp>(loc, i32Type, dynSizes);
+    auto encI32Type = addEncoding1(i32Type, b);
+    Value i32Alloc = b.create<bufferization::AllocTensorOp>(loc, encI32Type, dynSizes);
 
-    // 2. 构建 Iterators (保证 N, M, K 顺序，3D 时最外层为 B)
+    // 2. 构建 Iterators 
     SmallVector<utils::IteratorType> iteratorTypes;
     if (outRank == 2) {
       iteratorTypes = {
-          utils::IteratorType::parallel, // N (对应 d0)
-          utils::IteratorType::parallel, // M (对应 d1)
-          utils::IteratorType::reduction // K (对应 d2)
+          utils::IteratorType::parallel, 
+          utils::IteratorType::parallel, 
+          utils::IteratorType::reduction 
       };
     } else {
       iteratorTypes = {
-          utils::IteratorType::parallel, // B (对应 d0)
-          utils::IteratorType::parallel, // N (对应 d1)
-          utils::IteratorType::parallel, // M (对应 d2)
-          utils::IteratorType::reduction // K (对应 d3)
+          utils::IteratorType::parallel, 
+          utils::IteratorType::parallel, 
+          utils::IteratorType::parallel, 
+          utils::IteratorType::reduction 
       };
     }
 
@@ -219,27 +246,25 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
         if (isA) exprs = {m, k};
         else if (isB) exprs = {k, n};
         else if (isOut) exprs = {m, n};
-        else { // Bias (C)
+        else {
           if (rank == 1) exprs = {n};
           else exprs = {m, n};
         }
-      } else { // outRank == 3
+      } else { 
         auto b_dim = b.getAffineDimExpr(0);
         auto n = b.getAffineDimExpr(1);
         auto m = b.getAffineDimExpr(2);
         auto k = b.getAffineDimExpr(3);
         
         if (isA) {
-          // 兼容 A 可能是 2D Broadcast 的情况
           if (rank == 3) exprs = {b_dim, m, k};
           else exprs = {m, k};
         } else if (isB) {
-          // 兼容 B 可能是 2D Broadcast 的情况
           if (rank == 3) exprs = {b_dim, k, n};
           else exprs = {k, n};
         } else if (isOut) {
           exprs = {b_dim, m, n};
-        } else { // Bias (C)
+        } else {
           if (rank == 1) exprs = {n};
           else if (rank == 2) exprs = {m, n};
           else exprs = {b_dim, m, n};
@@ -249,17 +274,17 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
     };
 
     SmallVector<AffineMap> gemmMaps;
-    gemmMaps.push_back(getMap(lhs, true, false, false)); // A
-    gemmMaps.push_back(getMap(rhs, false, true, false)); // B
-    if (bias) gemmMaps.push_back(getMap(bias, false, false, false)); // C
-    gemmMaps.push_back(getMap(nullptr, false, false, true)); // Out (i32)
+    gemmMaps.push_back(getMap(lhs, true, false, false));
+    gemmMaps.push_back(getMap(rhs, false, true, false));
+    if (bias) gemmMaps.push_back(getMap(bias, false, false, false));
+    gemmMaps.push_back(getMap(nullptr, false, false, true));
 
     SmallVector<Value> gemmInputs = {lhs, rhs};
     if (bias) gemmInputs.push_back(bias);
 
-    // 4. 创建 GenericOp (GEMM -> i32)
+    // 4. 创建 GenericOp (GEMM -> i32 encoding=1)
     auto gemmOp = b.create<linalg::GenericOp>(loc,
-        /*resultTypes=*/i32Type,
+        /*resultTypes=*/encI32Type,
         /*inputs=*/gemmInputs,
         /*outputs=*/i32Alloc, gemmMaps, iteratorTypes,
         /*bodyBuilder=*/createI32MatMulBody);
@@ -279,23 +304,18 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
       gemmOp->setAttr("relu_type", b.getI32IntegerAttr(relu_type));
     }
 
-    // 5. SPM 阶段：i32 -> 最终类型 (通常为 i8)
+    // 5. SPM 阶段：i32 -> 最终带有 encoding=1 的输出类型
     Type finalElemType = outType.getElementType();
-    Value outAlloc = b.create<bufferization::AllocTensorOp>(loc, outType, dynSizes);
+    auto encOutType = addEncoding1(outType, b);
+    Value outAlloc = b.create<bufferization::AllocTensorOp>(loc, encOutType, dynSizes);
 
     SmallVector<AffineMap> quantMaps;
     if (outRank == 2) {
-      // 迭代空间: [N, M] (即 d0=N, d1=M)
-      // Tensor 物理形状: [M, N]
-      // 映射关系: (d0, d1) -> (d1, d0)
       auto d0 = b.getAffineDimExpr(0);
       auto d1 = b.getAffineDimExpr(1);
       auto map = AffineMap::get(2, 0, {d1, d0}, b.getContext());
-      quantMaps = {map, map}; // input (i32) 和 output (i8) 的形状相同，Map 也相同
+      quantMaps = {map, map};
     } else {
-      // 迭代空间: [B, N, M] (即 d0=B, d1=N, d2=M)
-      // Tensor 物理形状: [B, M, N]
-      // 映射关系: (d0, d1, d2) -> (d0, d2, d1)
       auto d0 = b.getAffineDimExpr(0);
       auto d1 = b.getAffineDimExpr(1);
       auto d2 = b.getAffineDimExpr(2);
@@ -305,7 +325,7 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
     SmallVector<utils::IteratorType> parallelIters(outRank, utils::IteratorType::parallel);
 
     auto quantOp = b.create<linalg::GenericOp>(loc,
-        /*resultTypes=*/outType,
+        /*resultTypes=*/encOutType,
         /*inputs=*/ValueRange{gemmOp.getResult(0)},
         /*outputs=*/ValueRange{outAlloc}, quantMaps, parallelIters,
         [&](OpBuilder &nestedB, Location nestedLoc, ValueRange args) {
@@ -330,39 +350,34 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
   };
 
   // ==============================================================================
-  // 主干逻辑
+  // 主干逻辑: 剥离 SCF.Region，加入 Encode 和 Constant 检查
   // ==============================================================================
-  auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outType);
-  {
-    OpBuilder::InsertionGuard guard(rewriter);
-    Block *body = rewriter.createBlock(&executeRegion.getRegion());
 
-    // --- 0. 在 Region 内部执行输入端 Transpose (Linalg Generic) ---
-    Value actualA = inputs[0];
-    if (transA) {
-      actualA = buildLinalgTranspose(rewriter, loc, actualA);
-    }
-    Value actualB = inputs[1];
-    if (transB) {
-      actualB = buildLinalgTranspose(rewriter, loc, actualB);
-    }
-
-    SmallVector<Value> processedInputs = {actualA, actualB};
-    if (inputs.size() > 2) {
-      processedInputs.push_back(inputs[2]);
-    }
-
-    // 获取输出的动态尺寸
-    SmallVector<Value> dynamicSizes =
-        getDynamicSizes(rewriter, loc, processedInputs[0], outType.getShape());
-
-    // --- 1. 直接调用通用构建器生成 Linalg 算子 ---
-    Value biasVal = hasBias ? processedInputs[2] : nullptr;
-    Value result = buildGemm(rewriter, loc, processedInputs[0], processedInputs[1], biasVal, dynamicSizes);
-    
-    rewriter.create<scf::YieldOp>(loc, result);
+  // --- 0. 预处理 inputs (设置 Encode=1, 插入 linalg.copy 处理 Constant) ---
+  SmallVector<Value> processedInputs;
+  for (Value in : inputs) {
+    processedInputs.push_back(processNpuLinalgInput(rewriter, loc, in));
   }
-  return executeRegion.getResults()[0];
+
+  // --- 1. 执行输入端 Transpose ---
+  Value actualA = processedInputs[0];
+  if (transA) {
+    actualA = buildLinalgTranspose(rewriter, loc, actualA);
+  }
+  Value actualB = processedInputs[1];
+  if (transB) {
+    actualB = buildLinalgTranspose(rewriter, loc, actualB);
+  }
+
+  // --- 2. 准备动态尺寸 ---
+  SmallVector<Value> dynamicSizes =
+      getDynamicSizes(rewriter, loc, processedInputs[0], outType.getShape());
+
+  // --- 3. 调用核心构建器生成 Gemm ---
+  Value biasVal = hasBias ? processedInputs[2] : nullptr;
+  Value result = buildGemm(rewriter, loc, actualA, actualB, biasVal, dynamicSizes);
+
+  return result;
 }
 
 // ============================================================================
@@ -394,9 +409,6 @@ struct GemmToLinalg : public OpConversionPattern<ONNXGemmOp> {
     if (!quantOp)
       return failure();
 
-    // =========================================================================
-    // 前向搜索 Relu 融合 (Gemm -> Q -> DQ -> Act -> Q)
-    // =========================================================================
     int64_t do_relu = 0;
     int64_t relu_type = 0;
     ONNXQuantizeLinearOp finalQuantOp = quantOp;
@@ -456,11 +468,10 @@ struct GemmToLinalg : public OpConversionPattern<ONNXGemmOp> {
     inputs.push_back(quantInputA);
     inputs.push_back(quantInputB);
 
-    // Handle Bias Type Backtracking
     bool hasBias = !mlir::isa<NoneType>(inputC.getType());
     if (hasBias) {
       if (auto dequantC = inputC.getDefiningOp<ONNXDequantizeLinearOp>()) {
-        inputs.push_back(dequantC.getX()); // Use the i32 input
+        inputs.push_back(dequantC.getX()); 
       } else {
         inputs.push_back(inputC);
       }
@@ -481,10 +492,13 @@ struct GemmToLinalg : public OpConversionPattern<ONNXGemmOp> {
       }
     };
 
+    // 顺延类型 encoding=1 向下传递
+    finalQuantOp.getResult().setType(result.getType());
+
     rewriter.replaceOp(finalQuantOp, result);
     opsErased.insert(finalQuantOp);
 
-    safeErase(op); // GemmOp
+    safeErase(op); 
 
     for (auto *fuseOp : fusionOpsToErase) {
       safeErase(fuseOp);
@@ -523,9 +537,6 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
     float scaleY = getScalarFloat(op.getYScale());
     int64_t zpY = getScalarInt(op.getYZeroPoint());
 
-    // =========================================================================
-    // 前向搜索 Relu 融合 (QLinearMatMul -> DQ -> Act -> Q)
-    // =========================================================================
     int64_t do_relu = 0;
     int64_t relu_type = 0;
     Operation* replaceTarget = op;
@@ -565,7 +576,6 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
                 do_relu = 1;
                 replaceTarget = finalQOp;
 
-                // 使用最后 Quantize 的 Params 和 Type 作为整个 fused block 的输出
                 auto qParams = getScalarQuantParams(finalQOp);
                 scaleY = qParams.scale;
                 zpY = qParams.zeroPoint;
@@ -584,7 +594,7 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
 
     Value result = createGenericMatMulOp(rewriter, op.getLoc(), inputs,
         outputType, scaleA, zpA, scaleB, zpB, scaleY, zpY, "npu_matmul",
-        do_relu, relu_type, false, false); // QLinearMatMul 无 transA/transB
+        do_relu, relu_type, false, false);
 
     // =========================================================================
     // 安全擦除
@@ -596,10 +606,13 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
       }
     };
 
+    // 顺延类型 encoding=1 向下传递
+    replaceTarget->getResult(0).setType(result.getType());
+
     rewriter.replaceOp(replaceTarget, result);
     opsErased.insert(replaceTarget);
 
-    safeErase(op); // erase original QLinearMatMul
+    safeErase(op);
 
     for (auto *fuseOp : fusionOpsToErase) {
       safeErase(fuseOp);

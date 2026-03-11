@@ -12,6 +12,7 @@ add_onnx_mlir_library(NpuToLLVM
     NpuxComputeFusion.cpp
     CustomBufferLoopHoist.cpp
     RemoveDuplicateMvinBias.cpp
+    EraseNpuMemorySpace.cpp
 
     LINK_LIBS PUBLIC
     # --- 基础库 ---

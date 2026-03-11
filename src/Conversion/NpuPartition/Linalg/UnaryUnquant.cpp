@@ -20,18 +20,31 @@ using namespace npux;
 namespace {
 
 // ============================================================================
-// 1. 辅助逻辑：量化上下文处理 (已极简优化)
+// 0. 辅助函数：为 RankedTensorType 添加 encoding=1
+// ============================================================================
+static RankedTensorType addEncoding1(RankedTensorType type, OpBuilder &b) {
+  if (type.getEncoding()) {
+    if (auto intAttr = mlir::dyn_cast<IntegerAttr>(type.getEncoding())) {
+      if (intAttr.getInt() == 1) return type;
+    }
+  }
+  return RankedTensorType::get(type.getShape(), type.getElementType(),
+                               b.getI64IntegerAttr(1));
+}
+
+// ============================================================================
+// 1. 辅助逻辑：量化上下文处理
 // ============================================================================
 
 struct QuantizedContext {
-  Value finalInput;             // 最终传给 NPU Op 的输入 (Int8)
-  RankedTensorType finalOutputType; // NPU Op 的输出类型 (Int8)
+  Value finalInput;             // 最终传给 NPU Op 的输入 (Int8, 带有 encoding=1)
+  RankedTensorType finalOutputType; // NPU Op 的输出类型 (Int8, 带有 encoding=1)
   
   // 回调函数：处理输出替换
   std::function<void(Value npuResult, PatternRewriter &rewriter)> handleOutputReplacement;
 };
 
-// 核心逻辑：严格匹配上下游 qdq，没有就不处理，有就直接吸收转 Int8
+// 核心逻辑：严格匹配上下游 qdq，没有就不处理，有就直接吸收转 Int8，并加上 encoding=1
 static LogicalResult handleQuantizationContext(
     Operation *op, 
     Value originalInput, 
@@ -55,13 +68,20 @@ static LogicalResult handleQuantizationContext(
   }
 
   // 3. 匹配成功 (int8 -> dq -> op -> q -> int8)
-  // 吸收上游 dq：直接拿 dequant 之前的 Int8 作为输入
+  
+  // 吸收上游 dq：直接拿 dequant 之前的 Int8 作为输入，并强制覆盖 Type (加上 encoding=1)
   ctx.finalInput = dequantOp.getX(); 
+  auto inputType = mlir::cast<RankedTensorType>(ctx.finalInput.getType());
+  ctx.finalInput.setType(addEncoding1(inputType, rewriter));
+
+  // 吸收下游 q：直接拿 quant 之后的类型作为 NPU Op 的输出类型，并加上 encoding=1
+  auto outputType = mlir::cast<RankedTensorType>(quantOp.getResult().getType());
+  ctx.finalOutputType = addEncoding1(outputType, rewriter);
   
-  // 吸收下游 q：直接拿 quant 之后的类型作为 NPU Op 的输出类型
-  ctx.finalOutputType = cast<RankedTensorType>(quantOp.getResult().getType());
-  
-  ctx.handleOutputReplacement = [=](Value npuResult, PatternRewriter &b) {
+  ctx.handleOutputReplacement = [=](Value npuResult, PatternRewriter &b) mutable {
+    // 顺延 encoding=1 到外部消费节点的类型上
+    quantOp.getResult().setType(npuResult.getType());
+    
     // 替换下游的 QuantOp 为 NPU 生成的直通 Int8 结果
     b.replaceOp(quantOp, npuResult);
     // 删除当前的 Resample/Transpose Op
@@ -76,7 +96,7 @@ static LogicalResult handleQuantizationContext(
 }
 
 // ============================================================================
-// 2. Linalg 构建逻辑 (保持不变)
+// 2. Linalg 构建逻辑
 // ============================================================================
 
 static void createLinalgBody(OpBuilder &b, Location loc, ValueRange args) {
@@ -103,35 +123,30 @@ static Value createResampleOp(
     AffineMap outputMap,         
     std::function<void(Operation *)> attrHook = nullptr 
 ) {
-  auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(loc, outputType);
-  {
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.createBlock(&executeRegion.getRegion());
+  // 移除 scf::ExecuteRegionOp，直接在当前块分配 Buffer 并执行 linalg
+  SmallVector<Value> dynamicSizes =
+      getDynamicSizes(rewriter, loc, input, outputType.getShape());
+  Value regionAlloc = rewriter.create<bufferization::AllocTensorOp>(
+      loc, outputType, dynamicSizes);
 
-    SmallVector<Value> dynamicSizes =
-        getDynamicSizes(rewriter, loc, input, outputType.getShape());
-    Value regionAlloc = rewriter.create<bufferization::AllocTensorOp>(
-        loc, outputType, dynamicSizes);
+  SmallVector<AffineMap, 2> indexingMaps = {inputMap, outputMap};
+  SmallVector<utils::IteratorType> iteratorTypes(
+      outputType.getRank(), utils::IteratorType::parallel);
 
-    SmallVector<AffineMap, 2> indexingMaps = {inputMap, outputMap};
-    SmallVector<utils::IteratorType> iteratorTypes(
-        outputType.getRank(), utils::IteratorType::parallel);
+  auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
+      outputType, input, regionAlloc, indexingMaps, iteratorTypes,
+      createLinalgBody);
 
-    auto linalgOp = rewriter.create<linalg::GenericOp>(loc,
-        outputType, input, regionAlloc, indexingMaps, iteratorTypes,
-        createLinalgBody);
+  linalgOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
+  linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  if (attrHook) attrHook(linalgOp);
 
-    linalgOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
-    linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-    if (attrHook) attrHook(linalgOp);
-
-    rewriter.create<scf::YieldOp>(loc, linalgOp.getResults());
-  }
-  return executeRegion.getResults()[0];
+  // 直接返回 genericOp 的结果
+  return linalgOp.getResult(0);
 }
 
 // ============================================================================
-// 3. MaxPool Pattern (保持不变，依赖新的 context 逻辑)
+// 3. MaxPool Pattern
 // ============================================================================
 struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
   using OpConversionPattern<ONNXMaxPoolSingleOutOp>::OpConversionPattern;
@@ -159,7 +174,6 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
 
     int64_t strideH = mlir::cast<IntegerAttr>((*strides)[0]).getInt();
     int64_t strideW = mlir::cast<IntegerAttr>((*strides)[1]).getInt();
-    // 提取 Kernel 尺寸
     int64_t kH = mlir::cast<IntegerAttr>((kernelShape)[0]).getInt();
     int64_t kW = mlir::cast<IntegerAttr>((kernelShape)[1]).getInt();
 
@@ -180,66 +194,54 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
     auto kh = rewriter.getAffineDimExpr(4);
     auto kw = rewriter.getAffineDimExpr(5);
 
-    // Input Map: (n, c, oh, ow, kh, kw) -> (n, c, oh * strideH + kh, ow * strideW + kw)
     SmallVector<AffineExpr> inputExprs = {n, c, oh * strideH + kh, ow * strideW + kw};
     auto inputMap = AffineMap::get(loopRank, 0, inputExprs, rewriter.getContext());
 
-    // Window Map: (n, c, oh, ow, kh, kw) -> (kh, kw)
     SmallVector<AffineExpr> windowExprs = {kh, kw};
     auto windowMap = AffineMap::get(loopRank, 0, windowExprs, rewriter.getContext());
 
-    // Output Map: (n, c, oh, ow, kh, kw) -> (n, c, oh, ow)
     SmallVector<AffineExpr> outputExprs = {n, c, oh, ow};
     auto outputMap = AffineMap::get(loopRank, 0, outputExprs, rewriter.getContext());
 
-    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(op.getLoc(), ctx.finalOutputType);
-    {
-      OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.createBlock(&executeRegion.getRegion());
+    // 1. 创建带有 encoding=1 的 Dummy Window Tensor
+    auto dummyWindowType = RankedTensorType::get({kH, kW}, ctx.finalOutputType.getElementType(), rewriter.getI64IntegerAttr(1));
+    Value dummyWindow = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), dummyWindowType, ValueRange{});
 
-      // 1. 创建 Dummy Window Tensor，用于给 Linalg 提供 KH 和 KW 的边界大小
-      auto dummyWindowType = RankedTensorType::get({kH, kW}, ctx.finalOutputType.getElementType());
-      Value dummyWindow = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), dummyWindowType, ValueRange{});
+    // 2. 创建 Result Tensor
+    SmallVector<Value> dynSizes = getDynamicSizes(rewriter, op.getLoc(), ctx.finalInput, ctx.finalOutputType.getShape());
+    Value resultInit = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), ctx.finalOutputType, dynSizes);
 
-      // 2. 创建 Result Tensor
-      SmallVector<Value> dynSizes = getDynamicSizes(rewriter, op.getLoc(), ctx.finalInput, ctx.finalOutputType.getShape());
-      Value resultInit = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), ctx.finalOutputType, dynSizes);
+    SmallVector<AffineMap, 3> indexingMaps = {inputMap, windowMap, outputMap};
+    
+    auto linalgOp = rewriter.create<linalg::GenericOp>(op.getLoc(),
+        ctx.finalOutputType, 
+        ValueRange{ctx.finalInput, dummyWindow}, 
+        resultInit, 
+        indexingMaps, 
+        iteratorTypes,
+        [&](OpBuilder &b, Location loc, ValueRange args) {
+            Value in = args[0];
+            Value acc = args[2];
+            
+            Value res;
+            if (mlir::isa<FloatType>(in.getType())) {
+                res = b.create<arith::MaximumFOp>(loc, in, acc);
+            } else {
+                res = b.create<arith::MaxSIOp>(loc, in, acc);
+            }
+            b.create<linalg::YieldOp>(loc, res);
+        }); 
 
-      // 现在有 3 个 Map：输入、Dummy 窗口、输出
-      SmallVector<AffineMap, 3> indexingMaps = {inputMap, windowMap, outputMap};
-      
-      auto linalgOp = rewriter.create<linalg::GenericOp>(op.getLoc(),
-          ctx.finalOutputType, 
-          ValueRange{ctx.finalInput, dummyWindow}, // <-- 传入真实输入和 Dummy 窗口
-          resultInit, 
-          indexingMaps, 
-          iteratorTypes,
-          [&](OpBuilder &b, Location loc, ValueRange args) {
-              Value in = args[0];
-              // Value dummy_win = args[1]; // 纯属占位，直接忽略
-              Value acc = args[2];
-              
-              Value res;
-              if (mlir::isa<FloatType>(in.getType())) {
-                  res = b.create<arith::MaximumFOp>(loc, in, acc);
-              } else {
-                  res = b.create<arith::MaxSIOp>(loc, in, acc);
-              }
-              b.create<linalg::YieldOp>(loc, res);
-          }); 
+    linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_maxpool"));
+    linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
 
-      linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_maxpool"));
-      linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-
-      rewriter.create<scf::YieldOp>(op.getLoc(), linalgOp.getResults());
-    }
-
-    ctx.handleOutputReplacement(executeRegion.getResults()[0], rewriter);
+    ctx.handleOutputReplacement(linalgOp.getResult(0), rewriter);
     return success();
   }
 };
+
 // ============================================================================
-// 4. AveragePool Pattern (保持不变，依赖新的 context 逻辑)
+// 4. AveragePool Pattern
 // ============================================================================
 struct AveragePoolToLinalg : public OpConversionPattern<ONNXAveragePoolOp> {
   using OpConversionPattern<ONNXAveragePoolOp>::OpConversionPattern;
@@ -288,7 +290,7 @@ struct AveragePoolToLinalg : public OpConversionPattern<ONNXAveragePoolOp> {
 };
 
 // ============================================================================
-// 5. Resize Pattern (保持不变，依赖新的 context 逻辑)
+// 5. Resize Pattern
 // ============================================================================
 struct ResizeToLinalg : public OpConversionPattern<ONNXResizeOp> {
   using OpConversionPattern<ONNXResizeOp>::OpConversionPattern;
@@ -338,7 +340,7 @@ struct ResizeToLinalg : public OpConversionPattern<ONNXResizeOp> {
 };
 
 // ============================================================================
-// 6. Transpose Pattern (保持不变，依赖新的 context 逻辑)
+// 6. Transpose Pattern
 // ============================================================================
 struct TransposeToLinalg : public OpConversionPattern<ONNXTransposeOp> {
   using OpConversionPattern<ONNXTransposeOp>::OpConversionPattern;
@@ -369,25 +371,18 @@ struct TransposeToLinalg : public OpConversionPattern<ONNXTransposeOp> {
     SmallVector<AffineMap, 2> indexingMaps = {inputMap, outputMap};
     SmallVector<utils::IteratorType> iteratorTypes(rank, utils::IteratorType::parallel);
 
-    auto executeRegion = rewriter.create<scf::ExecuteRegionOp>(op.getLoc(), ctx.finalOutputType);
-    {
-      OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.createBlock(&executeRegion.getRegion());
+    // 移除了 scf 域相关的构造逻辑
+    SmallVector<Value> dynSizes = getDynamicSizes(rewriter, op.getLoc(), ctx.finalInput, ctx.finalOutputType.getShape());
+    Value resultInit = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), ctx.finalOutputType, dynSizes);
 
-      SmallVector<Value> dynSizes = getDynamicSizes(rewriter, op.getLoc(), ctx.finalInput, ctx.finalOutputType.getShape());
-      Value resultInit = rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), ctx.finalOutputType, dynSizes);
+    auto linalgOp = rewriter.create<linalg::GenericOp>(op.getLoc(),
+        ctx.finalOutputType, ctx.finalInput, resultInit, indexingMaps, iteratorTypes,
+        createLinalgBody); 
 
-      auto linalgOp = rewriter.create<linalg::GenericOp>(op.getLoc(),
-          ctx.finalOutputType, ctx.finalInput, resultInit, indexingMaps, iteratorTypes,
-          createLinalgBody); 
+    linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_transpose"));
+    linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
 
-      linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_transpose"));
-      linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-
-      rewriter.create<scf::YieldOp>(op.getLoc(), linalgOp.getResults());
-    }
-
-    ctx.handleOutputReplacement(executeRegion.getResults()[0], rewriter);
+    ctx.handleOutputReplacement(linalgOp.getResult(0), rewriter);
     return success();
   }
 };

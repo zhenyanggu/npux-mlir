@@ -105,17 +105,21 @@ run_pass "Convert to Linalg" \
          "--convert-npu-onnx-to-linalg --npu-ops=Conv,MatMul,LayerNorm,Softmax,Gelu,Gemm,Transpose,MaxPool --npu-tiling-config=$TILING_CONFIG" \
          "ConvertONNXToLinalgNpu.mlir"
 
-run_pass "Op Merge" \
-         "--npu-clean-pack --npu-merge" \
-         "NpuMerge.mlir"
+# run_pass "Modify Scf Region Encoding" \
+#         "--npu-modify-scf-encoding"\
+#         "ModifyScfRegionEncoding.mlir"
 
-run_pass "Region Extent" \
-         "--npu-region-extension" \
-         "NpuRegionExtension.mlir"
+# run_pass "Op Merge" \
+#          "--npu-clean-pack --npu-merge" \
+#          "NpuMerge.mlir"
 
-run_pass "Outline" \
-         "--npu-outline" \
-         "NpuOutline.mlir"
+# run_pass "Region Extent" \
+#          "--npu-region-extension" \
+#          "NpuRegionExtension.mlir"
+
+# run_pass "Outline" \
+#          "--npu-outline" \
+#          "NpuOutline.mlir"
 
 # ------------------------------------------------
 # NpuFuse
@@ -127,14 +131,14 @@ run_pass "Outline" \
 #          "--npu-fuse" \
 #          "NpuFuse.mlir"
 
-# ------------------------------------------------
-#  NpuTiling
-# ------------------------------------------------
+# # ------------------------------------------------
+# #  NpuTiling
+# # ------------------------------------------------
 enter_stage "NpuTiling"
 
 
 run_pass "Tiling " \
-         "--npu-tiling --canonicalize --restore-alloc-space --npu-tiling-config=$TILING_CONFIG" \
+         "--npu-tiling --canonicalize --npu-tiling-config=model.json" \
          "NpuTiling.mlir"
 
 run_pass "Insert Dma " \
@@ -145,31 +149,20 @@ run_pass "Op Splitting " \
          "--npu-op-splitting --npu-remove-redundant-dma" \
          "NpuOpSplitting.mlir"
 
-# ------------------------------------------------
-#  NpuBufferization
-# ------------------------------------------------
+# # # ------------------------------------------------
+# # #  NpuBufferization
+# # # ------------------------------------------------
 enter_stage "NpuBufferization"
 
-# run_pass "Pack&UnPack Lower" \
-#          "--npu-lower-pack" \
-#          "NpuLowerPack.mlir"
-
-# 这是一个很长的命令，现在写起来很清爽
 run_pass "Bufferize" \
          "--convert-onnx-to-krnl --target=npu --canonicalize --convert-krnl-to-affine --npu-dps-convert --cse --canonicalize" \
          "NpuBufferization.mlir"
 
 
-# ------------------------------------------------
-#  NpuToLLVM
-# ------------------------------------------------
+# # # ------------------------------------------------
+# # #  NpuToLLVM
+# # # ------------------------------------------------
 enter_stage "NpuToLLVM"
-
-# run_pass "Npu Sram Promotion" \
-#         "--npu-sram-promotion" \
-#         "NpuSramPromotion.mlir"
-
-
 
 run_pass "convert-vector-to-scf" \
         "--convert-vector-to-scf" \
@@ -186,7 +179,6 @@ run_pass "lower-krnl-region" \
 run_pass "buffer-loop-hoisting" \
         "--custom-buffer-loop-hoisting" \
         "buffer-loop-hoisting.mlir"
-
 
 run_pass "buffer-dealloc-test" \
         "--buffer-dealloc-test " \
@@ -205,24 +197,8 @@ run_pass "fold-memref-alias-ops" \
         "fold-memref-alias-ops.mlir"      
 
 run_pass "Npux Conversion" \
-         "--convert-linalg-to-npux --cse --canonicalize --npu-remove-duplicate-mvin-bias" \
+         "--convert-linalg-to-npux --canonicalize" \
          "ConvertLinalgToNpux.mlir"
-
-# run_pass "Npux SFU 5D Shape Patch" \
-#          "--npux-sfu-reshape" \
-#          "NpuxSfu5DShapePatch.mlir"
-
-# run_pass "Split Loop" \
-#          "--npu-split-loop" \
-#          "LoopSplit.mlir"
-
-# run_pass "Split Conv" \
-#          "--split-conv-ic" \
-#          "ConvSplit.mlir"
-
-# run_pass "Gemm Pipeline" \
-#          "--npu-gemm-pipeline" \
-#          "GemmPipeline.mlir"
 
 run_pass "Lower Subview" \
          "--npu-lower-subview" \
@@ -237,12 +213,16 @@ run_pass "convert-linalg-to-loops" \
         "convert-linalg-to-loops.mlir"
         
 run_pass "Npu Memory Plan" \
-        "--npu-memory-plan --npu-tiling-config=$TILING_CONFIG" \
+        "--npu-memory-plan --npu-tiling-config=model.json" \
         "NpuMemoryPlan.mlir"
 
-run_pass "Npu Inline" \
-        "--npu-inline --expand-strided-metadata" \
-        "NpuInline.mlir"
+# run_pass "Npu Inline" \
+#         "--npu-inline  " \
+#         "NpuInline.mlir"
+
+run_pass "Erase Memoryspace"\
+         "--npu-erase-memory-space --expand-strided-metadata "\
+         "EraseNpuMemorySpace.mlir"
 
 run_pass "LLVM Lowering" \
         "--convert-krnl-to-llvm --target=npu --reconcile-unrealized-casts --canonicalize" \

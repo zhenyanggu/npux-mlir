@@ -21,28 +21,36 @@ using namespace mlir::bufferization;
 // 修复 1: 添加返回值 LogicalResult
 LogicalResult RunNpuBufferization(ModuleOp module) {
   bufferization::OneShotBufferizationOptions options;
+  
+  options.allowUnknownOps = true;
   options.bufferizeFunctionBoundaries = false;
 
-  options.allowUnknownOps = true;
+  // --- 模拟官方 use-encoding-for-memory-space=true 的逻辑 ---
+  options.defaultMemorySpaceFn = [](TensorType t) -> std::optional<Attribute> {
+    // 官方源码逻辑：如果是 RankedTensorType，返回其 Encoding
+    if (auto rtt = llvm::dyn_cast<RankedTensorType>(t))
+      return rtt.getEncoding();
+    return std::nullopt;
+  };
+  // -------------------------------------------------------
+
   options.setFunctionBoundaryTypeConversion(
       bufferization::LayoutMapOption::IdentityLayoutMap);
+
   options.unknownTypeConverterFn =
       [](TensorType tensorType, Attribute memorySpace,
-          const bufferization::BufferizationOptions &options) {
+         const bufferization::BufferizationOptions &options) {
+        // 这里的 memorySpace 会接收来自上面 Lambda 返回的 encoding
         return bufferization::getMemRefTypeWithStaticIdentityLayout(
             tensorType, memorySpace);
       };
 
-  // State 对象
   bufferization::BufferizationState state;
-
   if (failed(bufferization::runOneShotBufferize(module, options, state))) {
     module.emitError("NPU Kernel One-Shot Bufferization failed");
-    // 修复 2: 普通函数不能调用 signalPassFailure，只能返回 failure()
     return failure();
   }
 
-  // 修复 3: 如果成功跑完，返回 success
   return success();
 }
 
