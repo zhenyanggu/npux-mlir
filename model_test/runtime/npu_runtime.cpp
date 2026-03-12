@@ -72,7 +72,7 @@
 #define NPU_ERR(fmt, ...) fprintf(stderr, "[NPU_ERROR] " fmt "\n", ##__VA_ARGS__)
 
 #ifndef NPU_CAPI_TRACE
-#define NPU_CAPI_TRACE 1
+#define NPU_CAPI_TRACE 0
 #endif
 
 #if NPU_CAPI_TRACE
@@ -93,7 +93,7 @@
 
 
 #define REG_MAP_OFFSET      0x10000000
-#define DDR_MAP_SIZE        0x20000000 // 512MB
+#define DDR_MAP_SIZE        0x40000000 // 1GB
 #define REG_MAP_SIZE        0x1000     // 4KB
 
 // IOCTL Commands (Must match driver)
@@ -151,8 +151,8 @@ bool NpuRuntime::init() {
 
     // 1. 获取物理地址
     if (ioctl(fd, IOCTL_GET_DDR_PADDR, &data_phy_base) < 0) {
-        data_phy_base = 0x60000000; 
-        NPU_ERR("Warning: IOCTL_GET_DDR_PADDR failed, using hardcoded 0x60000000");
+        data_phy_base = 0x40000000; 
+        NPU_ERR("Warning: IOCTL_GET_DDR_PADDR failed, using hardcoded 0x40000000");
     }
 
     // 2. 映射寄存器
@@ -363,7 +363,7 @@ uint32_t NpuRuntime::virt_to_phys(void* ptr) {
     uintptr_t virt_addr = (uintptr_t)ptr;
     uintptr_t base_virt = (uintptr_t)data_virt_base;
     if (virt_addr < base_virt || virt_addr >= base_virt + DDR_MAP_SIZE) {
-        throw std::runtime_error("Pointer out of NPU memory range");
+        throw std::runtime_error("Pointer out of NPU memory range, virt_addr=0x" + std::to_string(virt_addr) + " base_virt=0x" + std::to_string(base_virt) + " DDR_MAP_SIZE=0x" + std::to_string(DDR_MAP_SIZE));
     }
     return data_phy_base + (uint32_t)(virt_addr - base_virt);
 }
@@ -1017,8 +1017,8 @@ void NpuRuntime::run_nchw_to_nchwc32(const LayoutConvertConfig& cfg) {
     }
 
     uint32_t hw = static_cast<uint32_t>(cfg.h) * static_cast<uint32_t>(cfg.w);
-    if (hw == 0 || hw > 4096) {
-        NPU_ERR("Layout convert: H*W=%u exceeds max 4096.", hw);
+    if (hw == 0 || hw > 65536) {
+        NPU_ERR("Layout convert: H*W=%u exceeds max 65536.", hw);
         return;
     }
 
@@ -1077,8 +1077,8 @@ void NpuRuntime::run_nchwc32_to_nchw(const LayoutConvertConfig& cfg) {
     }
 
     uint32_t hw = static_cast<uint32_t>(cfg.h) * static_cast<uint32_t>(cfg.w);
-    if (hw == 0 || hw > 4096) {
-        NPU_ERR("Layout convert: H*W=%u exceeds max 4096.", hw);
+    if (hw == 0 || hw > 65536) {
+        NPU_ERR("Layout convert: H*W=%u exceeds max 65536.", hw);
         return;
     }
 

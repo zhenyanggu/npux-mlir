@@ -85,7 +85,7 @@ fi
 if [ -n "$2" ]; then
         TILING_CONFIG=$(realpath "$2")
 else
-        TILING_CONFIG="model.json"
+        TILING_CONFIG="tile_config.json"
 fi
 
 if [ ! -f "$TILING_CONFIG" ]; then
@@ -138,7 +138,7 @@ enter_stage "NpuTiling"
 
 
 run_pass "Tiling " \
-         "--npu-tiling --canonicalize --npu-tiling-config=model.json" \
+         "--npu-tiling --canonicalize --npu-tiling-config=$TILING_CONFIG" \
          "NpuTiling.mlir"
 
 run_pass "Insert Dma " \
@@ -213,7 +213,7 @@ run_pass "convert-linalg-to-loops" \
         "convert-linalg-to-loops.mlir"
         
 run_pass "Npu Memory Plan" \
-        "--npu-memory-plan --npu-tiling-config=model.json" \
+        "--npu-memory-plan --npu-tiling-config=$TILING_CONFIG" \
         "NpuMemoryPlan.mlir"
 
 # run_pass "Npu Inline" \

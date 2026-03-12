@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -338,6 +339,7 @@ int main(int argc, char **argv) {
   int64_t classifyTotal = 0;
   int64_t goldenPassCount = 0;
   int64_t goldenCheckedCount = 0;
+  int64_t inferenceTotalUs = 0;
 
   for (int64_t sample = 0; sample < runCount; ++sample) {
     const int64_t imageIndex = opts.startIndex + sample;
@@ -369,7 +371,13 @@ int main(int argc, char **argv) {
       return 1;
     }
 
+    const auto inferStart = std::chrono::steady_clock::now();
     OMTensorList *outputList = run_main_graph(inputList);
+    const auto inferEnd = std::chrono::steady_clock::now();
+    const int64_t inferUs =
+        std::chrono::duration_cast<std::chrono::microseconds>(inferEnd - inferStart)
+            .count();
+    inferenceTotalUs += inferUs;
     if (!outputList) {
       std::cerr << "Error: inference returned null output" << std::endl;
       omTensorListDestroy(inputList);
@@ -406,6 +414,7 @@ int main(int argc, char **argv) {
     }
 
     std::cout << "\n=== Sample " << imageIndex << " Result ===" << std::endl;
+    std::cout << "Inference time: " << inferUs << " us" << std::endl;
     const int64_t pred = argmax(out, kNumClasses);
     std::cout << "Predicted label: " << pred;
     if (hasLabels) {
@@ -470,6 +479,13 @@ int main(int argc, char **argv) {
               << std::endl;
   } else {
     std::cout << "Golden diff check: skipped (no golden file)" << std::endl;
+  }
+
+  if (runCount > 0) {
+    const double inferenceAvgUs =
+        static_cast<double>(inferenceTotalUs) / static_cast<double>(runCount);
+    std::cout << "Inference time total: " << inferenceTotalUs << " us" << std::endl;
+    std::cout << "Inference time avg: " << inferenceAvgUs << " us/sample" << std::endl;
   }
 
   const bool pass = (classifyTotal == 0) ? true : (classifyCorrect == classifyTotal);
