@@ -10,6 +10,7 @@ add_onnx_mlir_library(NpuPatition
     Linalg/LayerNorm.cpp
     Linalg/Conv.cpp
     Linalg/Unary.cpp
+    Linalg/Matadd.cpp
     Linalg/Gemm.cpp
     Linalg/UnaryUnquant.cpp
 

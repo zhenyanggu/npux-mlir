@@ -547,6 +547,122 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
   }
 
 private:
+  static constexpr int64_t kMaxGemmKTile = 2048;
+
+  bool isGemmLikeOp(linalg::GenericOp op) const {
+    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
+    if (!libCallAttr)
+      return false;
+    StringRef libName = libCallAttr.getValue();
+    return libName == "npu_gemm" || libName == "npu_matmul";
+  }
+
+  void inheritLoopAttrs(scf::ForOp source, scf::ForOp target) const {
+    if (!source || !target)
+      return;
+    if (auto attr = source->getAttr("npu.split_dim"))
+      target->setAttr("npu.split_dim", attr);
+    if (auto attr = source->getAttr("npu.target"))
+      target->setAttr("npu.target", attr);
+  }
+
+  LogicalResult splitGemmOnKIfNeeded(
+      linalg::GenericOp gemmOp, PatternRewriter &rewriter, bool &didSplit) const {
+    didSplit = false;
+    if (!isGemmLikeOp(gemmOp))
+      return success();
+
+    SmallVector<int64_t> loopRanges = gemmOp.getStaticLoopRanges();
+    if (loopRanges.empty())
+      return success();
+
+    int64_t staticK = loopRanges.back();
+    if (staticK == ShapedType::kDynamic || staticK <= kMaxGemmKTile)
+      return success();
+
+    int64_t rank = gemmOp.getNumLoops();
+    SmallVector<int64_t> kTileSizes(rank, 0);
+    kTileSizes.back() = kMaxGemmKTile;
+
+    SmallVector<OpFoldResult> kTileSizesOfr =
+        getAsIndexOpFoldResult(rewriter.getContext(), kTileSizes);
+    auto kTilingOptions = scf::SCFTilingOptions().setTileSizes(kTileSizesOfr);
+
+    rewriter.setInsertionPoint(gemmOp);
+    FailureOr<scf::SCFTilingResult> kTilingResult = scf::tileUsingSCF(
+        rewriter, cast<TilingInterface>(gemmOp.getOperation()), kTilingOptions);
+    if (failed(kTilingResult))
+      return failure();
+
+    for (Operation *tiledOp : kTilingResult->tiledOps) {
+      tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+    }
+
+    auto kLoops = kTilingResult->loops;
+    if (!kLoops.empty()) {
+      auto kLoop = cast<scf::ForOp>(kLoops.back().getOperation());
+      kLoop->setAttr("npu.split_dim", rewriter.getStringAttr("K"));
+      if (auto targetAttr = gemmOp->getAttr("npu.target"))
+        kLoop->setAttr("npu.target", targetAttr);
+    }
+
+    SmallVector<Value> finalKResults = kTilingResult->replacements;
+    if (!kLoops.empty()) {
+      auto loopOp = cast<scf::ForOp>(kLoops.back().getOperation());
+      int64_t tripCount = getStaticTripCount(loopOp);
+
+      if (tripCount == 1) {
+        tagInnerComputeOp(loopOp, "single", rewriter);
+      } else {
+        scf::ForOp restLoop = loopOp;
+
+        scf::ForOp headLoop;
+        if (succeeded(peelForLoopFirstIteration(rewriter, loopOp, headLoop))) {
+          inheritLoopAttrs(restLoop, headLoop);
+          tagInnerComputeOp(headLoop, "head", rewriter);
+          restLoop = loopOp;
+        }
+
+        int64_t restTripCount = getStaticTripCount(restLoop);
+        if (restTripCount == 1) {
+          tagInnerComputeOp(restLoop, "tail", rewriter);
+          finalKResults = restLoop->getResults();
+        } else {
+          scf::ForOp tailLoop;
+          bool hasTail = false;
+
+          scf::ForOp partialLoop;
+          if (succeeded(scf::peelForLoopAndSimplifyBounds(
+                  rewriter, restLoop, partialLoop))) {
+            tailLoop = partialLoop;
+            hasTail = true;
+          } else {
+            scf::ForOp forceTail;
+            if (succeeded(peelForLoopLastIteration(
+                    rewriter, restLoop, forceTail))) {
+              tailLoop = forceTail;
+              hasTail = true;
+            }
+          }
+
+          if (hasTail) {
+            inheritLoopAttrs(restLoop, tailLoop);
+            tagInnerComputeOp(tailLoop, "tail", rewriter);
+            tagInnerComputeOp(restLoop, "body", rewriter);
+            finalKResults = tailLoop->getResults();
+          } else {
+            tagInnerComputeOp(restLoop, "body", rewriter);
+            finalKResults = restLoop->getResults();
+          }
+        }
+      }
+    }
+
+    rewriter.replaceOp(gemmOp, finalKResults);
+    didSplit = true;
+    return success();
+  }
+
   // ----------------------------------------------------------------------------
   // 辅助函数：根据算子的 Rank 动态生成 [N, M] 分块大小
   // ----------------------------------------------------------------------------
@@ -598,6 +714,11 @@ private:
     SmallVector<int64_t> staticTileSizes = getGemmSplitSizes(op);
 
     if (!needsSplit(op, staticTileSizes)) {
+      bool didKSplit = false;
+      if (failed(splitGemmOnKIfNeeded(op, rewriter, didKSplit)))
+        return failure();
+      if (didKSplit)
+        return success();
       op->setAttr("npu.split_done", rewriter.getUnitAttr());
       return failure();
     }
@@ -620,10 +741,26 @@ private:
       loops[1]->setAttr("npu.split_dim", rewriter.getStringAttr("M"));
     }
 
-    rewriter.replaceOp(op, tilingResult->loops.front()->getResults());
     for (auto *tiledOp : tilingResult->tiledOps) {
       tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
     }
+
+    linalg::GenericOp tiledGemmOp = nullptr;
+    for (Operation *tiledOp : tilingResult->tiledOps) {
+      auto genericOp = dyn_cast<linalg::GenericOp>(tiledOp);
+      if (genericOp && isGemmLikeOp(genericOp)) {
+        tiledGemmOp = genericOp;
+        break;
+      }
+    }
+
+    if (tiledGemmOp) {
+      bool didKSplit = false;
+      if (failed(splitGemmOnKIfNeeded(tiledGemmOp, rewriter, didKSplit)))
+        return failure();
+    }
+
+    rewriter.replaceOp(op, tilingResult->loops.front()->getResults());
     return success();
   }
 
@@ -636,8 +773,13 @@ private:
 
     // 如果维度已经满足 <= 32，打上标签并跳过
     if (!needsSplit(consumerOp, staticTileSizes)) {
+      bool didKSplit = false;
+      if (failed(splitGemmOnKIfNeeded(producerOp, rewriter, didKSplit)))
+        return failure();
       consumerOp->setAttr("npu.split_done", rewriter.getUnitAttr());
-      return failure();
+      if (!didKSplit)
+        producerOp->setAttr("npu.split_done", rewriter.getUnitAttr());
+      return didKSplit ? success() : failure();
     }
 
     SmallVector<OpFoldResult> tileSizes =
@@ -683,10 +825,19 @@ private:
     }
 
     // 4. 给新生成的算子打上完成标签
+    linalg::GenericOp fusedGemmOp = nullptr;
     for (auto op : fuseResult->tiledAndFusedOps) {
       if (auto genericOp = dyn_cast<linalg::GenericOp>(op)) {
+        if (isGemmLikeOp(genericOp))
+          fusedGemmOp = genericOp;
         genericOp->setAttr("npu.split_done", rewriter.getUnitAttr());
       }
+    }
+
+    if (fusedGemmOp) {
+      bool didKSplit = false;
+      if (failed(splitGemmOnKIfNeeded(fusedGemmOp, rewriter, didKSplit)))
+        return failure();
     }
 
     // 5. 替换外层的 Consumer 输出

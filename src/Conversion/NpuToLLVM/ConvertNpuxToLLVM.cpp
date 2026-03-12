@@ -929,6 +929,43 @@ public:
   }
 };
 
+class NpuxMataddRunLowering : public ConvertOpToLLVMPattern<MataddRunOp> {
+public:
+  using ConvertOpToLLVMPattern<MataddRunOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(MataddRunOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+
+    Value addrA = getNpuOffsetAddress(loc, op.getInputA(), rewriter);
+    Value addrB = getNpuOffsetAddress(loc, op.getInputB(), rewriter);
+    Value addrOut = getNpuOffsetAddress(loc, op.getOutput(), rewriter);
+    if (!addrA || !addrB || !addrOut)
+      return failure();
+
+    SmallVector<Value> args;
+    args.push_back(addrA);
+    args.push_back(addrB);
+    args.push_back(addrOut);
+    args.push_back(castToI8(loc, adaptor.getColNum(), rewriter));
+    args.push_back(castToI8(loc, adaptor.getRowNum(), rewriter));
+    args.push_back(adaptor.getOutputZeropoint());
+    args.push_back(castToI16(loc, adaptor.getOutputScale(), rewriter));
+    args.push_back(castToI16(loc, adaptor.getOutputScaleshift(), rewriter));
+
+    auto module = op->getParentOfType<ModuleOp>();
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    SmallVector<Type> argTypes;
+    for (auto v : args)
+      argTypes.push_back(v.getType());
+
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(
+        rewriter, module, "npu_matadd_run", voidType, argTypes);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+    return success();
+  }
+};
+
 class NpuxTransposeRunLowering
     : public ConvertOpToLLVMPattern<npux::TransposeOp> {
 public:
@@ -1145,7 +1182,8 @@ void npux::populateNpuxToLLVMConversionPatterns(
       NpuxFreeLowering, NpuxMvinBiasLowering, NpuxDmaMvinLowering,
       NpuxSramAllocLowering, NpuxSramFreeLowering, NpuxAccAllocLowering,
       NpuxAccFreeLowering, NpuxSubviewLowering, NpuxSfuRunLowering,
-      NpuxComputeRunLowering, NpuxDmaMvoutLowering, NpuxTransposeRunLowering,
-      NpuxResampleRunLowering, NpuxLayoutNchwToNchwc32Lowering,
+      NpuxComputeRunLowering, NpuxMataddRunLowering, NpuxDmaMvoutLowering,
+      NpuxTransposeRunLowering, NpuxResampleRunLowering,
+      NpuxLayoutNchwToNchwc32Lowering,
       NpuxLayoutNchwc32ToNchwLowering>(typeConverter);
 }

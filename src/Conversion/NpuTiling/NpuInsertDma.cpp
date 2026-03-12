@@ -4,6 +4,7 @@
 // around NPU-executable linalg.generic operations.
 //=============================================================================
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -93,6 +94,49 @@ static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
   if (!dmaType.empty()) {
     dmaOp->setAttr("npu.dma_type", rewriter.getStringAttr(dmaType));
   }
+
+  return dmaOp.getResult(0);
+}
+
+//=============================================================================
+// Helper: Create MVIN to ACC(i32) for MATADD
+// - Input: typically int8 in DRAM
+// - Output: int32 in ACC (for accurate ACC capacity planning)
+//=============================================================================
+static Value createMataddAccMvinOp(
+    PatternRewriter &rewriter, Location loc, Value input) {
+  auto inputType = cast<RankedTensorType>(input.getType());
+  auto accType = RankedTensorType::get(
+      inputType.getShape(), rewriter.getI32Type(), rewriter.getI64IntegerAttr(3));
+  Value accAlloc =
+      rewriter.create<bufferization::AllocTensorOp>(loc, accType, ValueRange{});
+
+  int64_t rank = inputType.getRank();
+  SmallVector<utils::IteratorType> iteratorTypes(
+      rank, utils::IteratorType::parallel);
+  SmallVector<AffineMap> maps = {
+      rewriter.getMultiDimIdentityMap(rank),
+      rewriter.getMultiDimIdentityMap(rank)};
+
+  auto dmaOp = rewriter.create<linalg::GenericOp>(loc, accType,
+      /*inputs=*/ValueRange{input},
+      /*outputs=*/ValueRange{accAlloc},
+      maps, iteratorTypes,
+      [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
+        Value in = args[0];
+        Value out = in;
+        if (!in.getType().isInteger(32)) {
+          out = b.create<arith::ExtSIOp>(nestedLoc, b.getI32Type(), in);
+        }
+        b.create<linalg::YieldOp>(nestedLoc, out);
+      });
+
+  dmaOp->setAttr("library_call", rewriter.getStringAttr("npu_dma_mvin"));
+  dmaOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  dmaOp->setAttr("npu.is_quant", rewriter.getBoolAttr(true));
+  dmaOp->setAttr("npu.quant_zero", rewriter.getI32IntegerAttr(0));
+  dmaOp->setAttr("npu.quant_scale", rewriter.getI16IntegerAttr(1));
+  dmaOp->setAttr("npu.quant_shift", rewriter.getI16IntegerAttr(0));
 
   return dmaOp.getResult(0);
 }
@@ -318,6 +362,66 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
   }
 };
 
+struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+
+    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
+    if (!libCallAttr || libCallAttr.getValue() != "npu_matadd")
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    if (op.getInputs().size() != 2 || op.getOutputs().size() != 1)
+      return failure();
+
+    Location loc = op.getLoc();
+
+    // 1) Two inputs: DRAM -> ACC(i32)
+    SmallVector<Value> newInputs;
+    newInputs.push_back(createMataddAccMvinOp(rewriter, loc, op.getInputs()[0]));
+    newInputs.push_back(createMataddAccMvinOp(rewriter, loc, op.getInputs()[1]));
+
+    // 2) Output medium tensor in SPM
+    Value oldOutput = op.getOutputs()[0];
+    Value mediumTensor = createNpuMediumTensor(rewriter, loc, oldOutput, 2);
+    auto mediumType = cast<RankedTensorType>(mediumTensor.getType());
+
+    // 3) New matadd generic that consumes ACC(i32) and writes SPM(i8)
+    auto newOp = rewriter.create<linalg::GenericOp>(loc,
+        TypeRange{mediumType},
+        newInputs,
+        ValueRange{mediumTensor},
+        op.getIndexingMapsArray(),
+        op.getIteratorTypesArray(),
+        [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
+          Value sum = b.create<arith::AddIOp>(nestedLoc, args[0], args[1]);
+          Value out = sum;
+          Type outElemType = args[2].getType();
+          if (!outElemType.isInteger(32)) {
+            out = b.create<arith::TruncIOp>(nestedLoc, outElemType, sum);
+          }
+          b.create<linalg::YieldOp>(nestedLoc, out);
+        });
+
+    newOp->setAttrs(op->getAttrs());
+    newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+
+    // 4) SPM -> DRAM
+    Value mvoutResult = createDmaOp(rewriter, loc, newOp.getResult(0),
+        "npu_dma_mvout", 0, "", oldOutput);
+
+    rewriter.replaceOp(op, mvoutResult);
+    return success();
+  }
+};
+
 //=============================================================================
 // Pattern: NpuUnaryInsertDmaPattern
 // For unary ops (1 input, 1 output), insert mvin before and mvout after.
@@ -344,7 +448,8 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     if (opName == "npu_dma_mvin" || opName == "npu_dma_mvout" || opName == "mv_acc_to_spm")
       return failure();
 
-    if (opName.contains("conv") || opName.contains("gemm") || opName.contains("matmul"))
+    if (opName.contains("conv") || opName.contains("gemm") ||
+        opName.contains("matmul") || opName.contains("matadd"))
       return failure();
 
     Location loc = op.getLoc();
@@ -420,6 +525,7 @@ struct NpuInsertDmaPass
 
     // 添加针对 Conv 和 Unary 的专用 Pattern
     patterns.add<NpuConvInsertDmaPattern>(context);
+    patterns.add<NpuMataddInsertDmaPattern>(context);
     patterns.add<NpuGeneralInsertDmaPattern>(context);
     patterns.add<NpuGemmInsertDmaPattern>(context);
 

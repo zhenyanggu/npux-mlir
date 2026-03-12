@@ -17,6 +17,7 @@
 #include "src/Dialect/ONNX/ONNXDialect.hpp"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "src/Pass/Passes.hpp"
+#include <cmath>
 
 using namespace mlir;
 
@@ -101,6 +102,56 @@ static bool isSupportedResize(ONNXResizeOp op) {
   return hasScale2;
 }
 
+static bool isSupportedNpuMatadd(ONNXAddOp op) {
+  if (!hasStrictQDQContext(op.getOperation()))
+    return false;
+
+  auto lhsDq = op.getA().getDefiningOp<ONNXDequantizeLinearOp>();
+  auto rhsDq = op.getB().getDefiningOp<ONNXDequantizeLinearOp>();
+  if (!lhsDq || !rhsDq)
+    return false;
+
+  if (!op.getResult().hasOneUse())
+    return false;
+  auto outQ = dyn_cast<ONNXQuantizeLinearOp>(*op.getResult().getUsers().begin());
+  if (!outQ)
+    return false;
+
+  auto lhsType = dyn_cast<RankedTensorType>(lhsDq.getX().getType());
+  auto rhsType = dyn_cast<RankedTensorType>(rhsDq.getX().getType());
+  auto outType = dyn_cast<RankedTensorType>(outQ.getResult().getType());
+  if (!lhsType || !rhsType || !outType)
+    return false;
+  if (!lhsType.hasStaticShape() || !rhsType.hasStaticShape() ||
+      !outType.hasStaticShape())
+    return false;
+  if (lhsType.getRank() < 1 || lhsType.getRank() > 2)
+    return false;
+  if (lhsType.getRank() != rhsType.getRank() ||
+      lhsType.getRank() != outType.getRank())
+    return false;
+  if (!lhsType.getElementType().isInteger(8) ||
+      !rhsType.getElementType().isInteger(8) ||
+      !outType.getElementType().isInteger(8))
+    return false;
+  for (int64_t i = 0, e = lhsType.getRank(); i < e; ++i) {
+    if (lhsType.getDimSize(i) != rhsType.getDimSize(i) ||
+        lhsType.getDimSize(i) != outType.getDimSize(i))
+      return false;
+  }
+
+  // Current compiler matadd path expects symmetric int8 (zp=0) and equal
+  // input scales.
+  auto lhsQ = npux::getScalarQuantParams(lhsDq);
+  auto rhsQ = npux::getScalarQuantParams(rhsDq);
+  if (std::abs(lhsQ.scale - rhsQ.scale) > 1e-6)
+    return false;
+  if (lhsQ.zeroPoint != 0 || rhsQ.zeroPoint != 0)
+    return false;
+
+  return true;
+}
+
 struct ONNXToLinalgNpuPass
     : public PassWrapper<ONNXToLinalgNpuPass, OperationPass<ModuleOp>> {
 
@@ -134,6 +185,10 @@ struct ONNXToLinalgNpuPass
 
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv)) {
       target.addDynamicallyLegalOp<ONNXConvOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    }
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Add)) {
+      target.addDynamicallyLegalOp<ONNXAddOp>(
+          [](ONNXAddOp op) { return !isSupportedNpuMatadd(op); });
     }
     if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
       target.addIllegalOp<ONNXQLinearMatMulOp>();

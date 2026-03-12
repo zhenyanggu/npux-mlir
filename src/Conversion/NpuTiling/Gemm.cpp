@@ -205,6 +205,7 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
   bool isManual = false;
 
   if (!manualSizes.empty() && manualSizes.size() >= 3) {
+    // 第一阶段仅按容量分块，硬件 2048 限制在第二阶段 (npu-op-splitting) 处理。
     computedSizes = {manualSizes[0], manualSizes[1], manualSizes[2]};
     isManual = true;
   } else {

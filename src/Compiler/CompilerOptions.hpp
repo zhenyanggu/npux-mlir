@@ -73,6 +73,7 @@ enum class NpuOp {
     None,
     All,
     Conv,
+    Add,
     MatMul,
     LayerNorm,
     Softmax,
@@ -267,4 +268,3 @@ bool hasSignatureInstrumentation(InstrumentStages targetInstrumentationStage);
 
 } // namespace onnx_mlir
 #endif
-

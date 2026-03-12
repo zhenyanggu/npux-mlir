@@ -80,6 +80,80 @@ public:
       return failure();
 
     StringRef libName = libCallAttr.getValue();
+
+    if (libName == "npu_matadd") {
+      if (op.getInputs().size() != 2 || op.getOutputs().size() != 1)
+        return failure();
+
+      Value inputAMemRef = op.getInputs()[0];
+      Value inputBMemRef = op.getInputs()[1];
+      Value outputMemRef = op.getOutputs()[0];
+
+      auto inAType = dyn_cast<MemRefType>(inputAMemRef.getType());
+      auto inBType = dyn_cast<MemRefType>(inputBMemRef.getType());
+      auto outType = dyn_cast<MemRefType>(outputMemRef.getType());
+      if (!inAType || !inBType || !outType)
+        return failure();
+
+      // MATADD contract: A/B in ACC, output in SPM.
+      if (inAType.getMemorySpaceAsInt() != 3 || inBType.getMemorySpaceAsInt() != 3)
+        return failure();
+      if (outType.getMemorySpaceAsInt() != 2)
+        return failure();
+
+      auto outShape = outType.getShape();
+      if (outShape.empty() || outShape.size() > 2)
+        return failure();
+      for (int64_t d : outShape) {
+        if (d == ShapedType::kDynamic) {
+          op.emitError("npu_matadd requires static shape after tiling");
+          return failure();
+        }
+      }
+
+      int64_t row = 1;
+      int64_t col = outShape.back();
+      if (outShape.size() == 2)
+        row = outShape[0];
+
+      if (col <= 0 || row <= 0)
+        return failure();
+      if (col > 255 || row > 255) {
+        op.emitError()
+            << "MATADD row/col exceed hardware 8-bit fields: row=" << row
+            << ", col=" << col
+            << ". Expected npu-tiling to split into row/col <= 255.";
+        return failure();
+      }
+
+      double lhsScale = getFloatAttr(op, "lhs_scale", 1.0);
+      double rhsScale = getFloatAttr(op, "rhs_scale", 1.0);
+      if (std::abs(lhsScale - rhsScale) > 1e-6) {
+        op.emitError()
+            << "npu_matadd currently requires lhs_scale == rhs_scale "
+            << "(got lhs=" << lhsScale << ", rhs=" << rhsScale << ")";
+        return failure();
+      }
+
+      double outScaleTarget = getFloatAttr(op, "out_scale", 1.0);
+      if (outScaleTarget <= 0.0)
+        return failure();
+      int64_t outZp = getIntAttr(op, "out_zp", 0);
+
+      double realMultiplier = lhsScale / outScaleTarget;
+      auto quantParams = getFixedPointParams(realMultiplier);
+
+      Location loc = op.getLoc();
+      auto c32 = [&](int64_t v) {
+        return rewriter.create<arith::ConstantIntOp>(loc, v, 32);
+      };
+
+      rewriter.replaceOpWithNewOp<MataddRunOp>(op,
+          inputAMemRef, inputBMemRef, outputMemRef, c32(col), c32(row),
+          c32(outZp), c32(quantParams.multiplier), c32(quantParams.shift));
+      return success();
+    }
+
     ComputeOpType opType;
 
     if (libName == "npu_conv") {
@@ -362,6 +436,24 @@ public:
     Value vPadMode = c32(pad_mode_val);
 
     auto safe_m1 = [](int64_t v) { return v > 0 ? v - 1 : 0; };
+
+    if (opType == ComputeOpType::gemm) {
+      // Hardware field width limits:
+      //   SA_IN_A.COL_m1 : 11-bit (max 2047)
+      //   SA_IN_B.ROW_m1 : 11-bit (max 2047)
+      constexpr int64_t kMaxGemmKMinus1 = 2047;
+      int64_t aColM1 = safe_m1(a_col);
+      int64_t bRowM1 = safe_m1(b_row);
+      if (aColM1 > kMaxGemmKMinus1 || bRowM1 > kMaxGemmKMinus1) {
+        op.emitError()
+            << "GEMM K dimension exceeds hardware field limit before lowering: "
+            << "a_col_m1=" << aColM1 << ", b_row_m1=" << bRowM1
+            << " (max 2047). "
+            << "Expected K-splitting to keep each tile K<=2048.";
+        return failure();
+      }
+    }
+
     Value vWeightShapeM1 = c32(safe_m1(kernel_sz));
     Value vWeightStrideM1 = c32(safe_m1(stride_val));
     Value vWeightDilationM1 = c32(safe_m1(dilation_val));

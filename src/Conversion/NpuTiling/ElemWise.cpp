@@ -18,7 +18,7 @@ using namespace npux;
 
 namespace {
 SmallVector<int64_t> calculateAutoElemWiseTile(
-    linalg::GenericOp op, int64_t spmSize) {
+    linalg::GenericOp op, int64_t maxElems) {
   
   auto loopRanges = op.getStaticLoopRanges();
   int64_t rank = loopRanges.size();
@@ -27,19 +27,8 @@ SmallVector<int64_t> calculateAutoElemWiseTile(
   SmallVector<int64_t> tileSizes(rank, 1);
   if (rank == 0) return tileSizes; // 处理 Scalar
 
-  // 1. 计算每次迭代需要的内存 (Input + Output)
-  // 获取输入和输出的总数量 (例如 GeLU 是 1进1出 = 2，Add 是 2进1出 = 3)
-  int64_t numOperands = op.getNumDpsInputs() + op.getNumDpsInits(); 
-  
-  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
-  int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
-  int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
-
-  // 一次内层循环处理 1 个元素需要的字节数
-  int64_t bytesPerIteration = numOperands * bytesPerElem;
-  int64_t maxElems = spmSize / bytesPerIteration;
-
-  if (maxElems <= 0) return tileSizes; // SPM 极度受限时的保护
+  if (maxElems <= 0)
+    return tileSizes;
 
   int64_t remainingElems = maxElems;
 
@@ -70,17 +59,43 @@ SmallVector<int64_t> calculateAutoElemWiseTile(
   return tileSizes;
 }
 
-SmallVector<int64_t> getElemWiseTileSizes(linalg::GenericOp op, StringRef opName) {
+SmallVector<int64_t> getElemWiseTileSizes(
+    linalg::GenericOp op, StringRef opName) {
   auto &config = npux::NPUConfig::getInstance();
   int64_t spmSize = config.getSpmSize();
+  int64_t accSize = config.getAccSize();
+
+  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
+  int64_t outputElemBits = outputType.getElementType().getIntOrFloatBitWidth();
+  int64_t outputElemBytes = std::max<int64_t>(1, outputElemBits / 8);
+  int64_t numOperands = op.getNumDpsInputs() + op.getNumDpsInits();
+  int64_t bytesPerIteration = std::max<int64_t>(1, numOperands * outputElemBytes);
+  int64_t maxElems = spmSize / bytesPerIteration;
+
+  if (opName == "npu_matadd") {
+    // MatAdd 输入在 ACC（int32）: A + B 两路，各 4B/elem；输出在 SPM（int8）。
+    int64_t maxByAcc = accSize / (2 * 4);
+    int64_t maxBySpm = spmSize / std::max<int64_t>(1, outputElemBytes);
+    maxElems = std::max<int64_t>(1, std::min(maxByAcc, maxBySpm));
+  }
 
   // 默认获取自动计算的分块大小
-  SmallVector<int64_t> tileSizes = calculateAutoElemWiseTile(op, spmSize);
+  SmallVector<int64_t> tileSizes = calculateAutoElemWiseTile(op, maxElems);
+
+  if (opName == "npu_matadd") {
+    int64_t rank = tileSizes.size();
+    // MATADD 硬件字段限制：row/col 均为 8bit。
+    if (rank >= 1)
+      tileSizes[rank - 1] = std::max<int64_t>(1, std::min<int64_t>(255, tileSizes[rank - 1]));
+    if (rank >= 2)
+      tileSizes[rank - 2] = std::max<int64_t>(1, std::min<int64_t>(255, tileSizes[rank - 2]));
+  }
 
   // 日志打印 (动态拼接维度信息)
   std::string msg;
   llvm::raw_string_ostream os(msg);
-  os << "Tiling [" << opName << "] (Auto, Any-Rank): SPM=" << spmSize << " Problem=[";
+  os << "Tiling [" << opName << "] (Auto, Any-Rank): SPM=" << spmSize
+     << ", ACC=" << accSize << " Problem=[";
   
   auto loopRanges = op.getStaticLoopRanges();
   for (size_t i = 0; i < loopRanges.size(); ++i) {
@@ -106,14 +121,16 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     if (op->hasAttr("npu.tiled")) return failure();
 
     auto libCall = op->getAttrOfType<StringAttr>("library_call");
-    if (libCall && libCall.getValue() != "npu_gelu") {
+    if (!libCall)
+      return failure();
+    if (libCall.getValue() != "npu_gelu" &&
+        libCall.getValue() != "npu_matadd") {
         return failure(); // 把机会留给 NpuConvTilingPattern
     }
 
     StringRef opName = libCall.getValue();
 
     SmallVector<int64_t> rawTileSizes = getElemWiseTileSizes(op, opName);
-    auto loopRanges = op.getStaticLoopRanges();
 
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
     SmallVector<OpFoldResult> tileSizes = getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
@@ -171,4 +188,3 @@ void npux::populateElemWiseTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
   patterns.add<NpuElemWiseTilingPattern>(context);
 }
-

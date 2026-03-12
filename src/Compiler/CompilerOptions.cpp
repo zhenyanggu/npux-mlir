@@ -151,6 +151,7 @@ static llvm::cl::list<NpuOp, std::vector<NpuOp>> npuOpOpt(
     llvm::cl::values(
       clEnumValN(NpuOp::All, "all", "Accelerate all NPU-supported operations"),
         clEnumValN(NpuOp::Conv, "Conv", "Accelerate Conv operation"),
+        clEnumValN(NpuOp::Add, "Add", "Accelerate Add operation (mapped to MatAdd)"),
         clEnumValN(NpuOp::MatMul, "MatMul", "Accelerate MatMul operation"),
         clEnumValN(NpuOp::LayerNorm, "LayerNorm", "Accelerate LayerNormalization operation"),
         clEnumValN(NpuOp::Softmax, "Softmax", "Accelerate Softmax operation"),

@@ -221,20 +221,38 @@ public:
     // sramType 获取 这里暂时保持和 cols 一致，或者通过 sramType 计算
     Value vSramStride = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
 
-    // 4. Precision Logic (从数据源获取类型)
-    // 无论是 mvin 还是 mvout，元素类型通常是一致的
-    Type elemType = dramType.getElementType();
-    int64_t precisionVal = elemType.isInteger(32) ? 1 : 0;
-    // 更正，硬件这里全部配1就行了
+    // 4. Precision Logic: 当前硬件路径统一按 int8 配置。
     Value vPrecision = rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
     Value vInputType =
         rewriter.create<arith::ConstantIntOp>(loc, 0, 8); // Default
 
     // Common Constants
+    auto getIntAttrOr = [&](StringRef name, int64_t defaultVal) -> int64_t {
+      if (auto attr = op->getAttrOfType<IntegerAttr>(name))
+        return attr.getInt();
+      return defaultVal;
+    };
+
+    bool mvinIsQuant = false;
+    if (auto attr = op->getAttrOfType<BoolAttr>("npu.is_quant")) {
+      mvinIsQuant = attr.getValue();
+    }
+    int64_t mvinQuantZero = getIntAttrOr("npu.quant_zero", 0);
+    int64_t mvinQuantScale = getIntAttrOr("npu.quant_scale", 0);
+    int64_t mvinQuantShift = getIntAttrOr("npu.quant_shift", 0);
+
     Value vZero32 = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
     Value vZero16 = rewriter.create<arith::ConstantIntOp>(loc, 0, 16);
     Value vZero8 = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
     Value vFalse = rewriter.create<arith::ConstantIntOp>(loc, 0, 1);
+    Value vMvinIsQuant =
+        rewriter.create<arith::ConstantIntOp>(loc, mvinIsQuant ? 1 : 0, 1);
+    Value vMvinQuantZero =
+        rewriter.create<arith::ConstantIntOp>(loc, mvinQuantZero, 32);
+    Value vMvinQuantScale =
+        rewriter.create<arith::ConstantIntOp>(loc, mvinQuantScale, 16);
+    Value vMvinQuantShift =
+        rewriter.create<arith::ConstantIntOp>(loc, mvinQuantShift, 16);
 
     if (isMvin) {
       // === DMA MVIN ===
@@ -245,12 +263,9 @@ public:
       // Is Bias: Always 0 (Hardcoded as requested)
       Value vIsBias = vFalse;
 
-      // Quant: Disabled
-      Value vIsQuant = vFalse;
-
       rewriter.create<DmaMvinOp>(loc, src, dst, vCol, vRow, vSramStride,
-          vDramStride, vPrecision, vInputType, vDest, vIsBias, vIsQuant,
-          vZero32, vZero16, vZero16);
+          vDramStride, vPrecision, vInputType, vDest, vIsBias, vMvinIsQuant,
+          vMvinQuantZero, vMvinQuantScale, vMvinQuantShift);
     } else {
       // === DMA MVOUT ===
       // Dest: usually 0 for DRAM

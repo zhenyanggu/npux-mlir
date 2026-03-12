@@ -61,7 +61,7 @@ model_test/
 
 **目标**：验证单个或局部算子在 NPU 上的可识别性、替换率及数值准确性（逐元素误差比对）。
 
-* **已支持与验证算子**：Conv, MaxPool, MatMul, Gemm, Transpose, Relu, Gelu, Softmax, LayerNorm。
+* **已支持与验证算子**：Conv, MaxPool, MatMul, Gemm, Add(MatAdd), Transpose, Relu, Gelu, Softmax, LayerNorm。
 * **验证逻辑**：比对张量级差异。小张量全量打印，大张量打印误差最大的 Top-K。
 
 ### 3.2 模型级测试通用规范 (Integration Tests)
