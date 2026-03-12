@@ -11,6 +11,7 @@ python/*onnx
 python/*pt
 python/*json
 cache/
+.vscode/
 # Prerequisites
 *.d
 
