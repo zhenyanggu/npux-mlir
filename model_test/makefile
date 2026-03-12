@@ -111,8 +111,11 @@ $(BUILD_DIR)/%/.prepare.stamp: | init
 	elif [[ -f "$$src_dir/model.onnx" ]]; then \
 		cp -f "$$src_dir/model.onnx" "$$work_dir/model.onnx"; \
 		echo "[copy] $$src_dir/model.onnx -> $$work_dir/model.onnx"; \
+	elif (( $${#onnx_files[@]} > 0 )); then \
+		cp -f "$${onnx_files[0]}" "$$work_dir/model.onnx"; \
+		echo "[copy] 使用预置 ONNX: $${onnx_files[0]} -> $$work_dir/model.onnx"; \
 	else \
-		echo "[error] $$model 缺少 model.py 或 model.onnx"; \
+		echo "[error] $$model 缺少 model.py 或任意 .onnx 文件"; \
 		exit 2; \
 	fi; \
 	if [[ ! -f "$$work_dir/model.onnx" ]]; then \
@@ -145,7 +148,7 @@ $(BUILD_DIR)/%/.tile.stamp: $(BUILD_DIR)/%/.prepare.stamp
 	elif [[ "$$model" == "mnist" ]]; then \
 		shape_args="--shape 1,1,28,28"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,28,28"; \
-	elif [[ "$$model" == "resnet50" ]]; then \
+	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" ]]; then \
 		shape_args="--shape 1,3,224,224"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,224,224"; \
 	fi; \
@@ -240,6 +243,11 @@ $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 		mv -f "$$work_dir/$${model}_image.pgm" "$$output_dir/$${model}_image.pgm"; \
 	elif [[ -f "$$work_dir/image.pgm" ]]; then \
 		mv -f "$$work_dir/image.pgm" "$$output_dir/$${model}_image.pgm"; \
+	fi; \
+	if [[ -f "$$work_dir/$${model}_samples.txt" ]]; then \
+		mv -f "$$work_dir/$${model}_samples.txt" "$$output_dir/$${model}_samples.txt"; \
+	elif [[ -f "$$work_dir/samples.txt" ]]; then \
+		mv -f "$$work_dir/samples.txt" "$$output_dir/$${model}_samples.txt"; \
 	fi; \
 	touch "$@"
 

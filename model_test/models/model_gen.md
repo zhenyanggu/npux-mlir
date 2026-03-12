@@ -273,3 +273,18 @@ shape 必须优先贴近真实模型：
 - 输出 PASS/FAIL 但返回码不一致
 - 自动执行构建或运行命令
 - 用 toy 示例替代真实模型输入约束
+
+---
+
+## 14. VGG16 任务补充约定
+
+当任务是 `vgg16` 整模型测试时，默认采用以下约定：
+
+- 模型目录：`model_test/models/vgg16/`
+- 预置模型文件：`vgg16-12.onnx`（由用户提前下载放入）
+- 生成脚本输出：`model.onnx`（量化后）、`vgg16_images_u8.bin`、`vgg16_labels.bin`、`vgg16_output_golden.bin`、`vgg16_samples.txt`
+- `main.cpp` 输入预处理：`uint8 -> float32`，按 ImageNet mean/std 做 NCHW 归一化
+- 若未传 `SHAPE`，分块默认 shape 使用 `1,3,224,224`
+
+说明：
+- 标签文件应使用 ImageNet-1K 类别 ID（不是目录排序 ID），确保准确率统计有语义。
