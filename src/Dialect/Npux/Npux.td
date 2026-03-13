@@ -385,6 +385,34 @@ def Npux_ComputeRunOp : Npux_Op<"compute_run"> {
   }];
 }
 
+def Npux_MataddRunOp : Npux_Op<"matadd_run"> {
+  let summary = "Run MATADD operation";
+  let description = [{
+    Maps to runtime C-API `npu_matadd_run`.
+    Inputs A/B must reside in ACC (space 3), output resides in SPM (space 2).
+  }];
+
+  let arguments = (ins
+      NpuAccMemRef:$input_a,
+      NpuAccMemRef:$input_b,
+      NpuSramMemRef:$output,
+      I32:$col_num,
+      I32:$row_num,
+      I32:$output_zeropoint,
+      I32:$output_scale,
+      I32:$output_scaleshift
+  );
+
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $input_a `,` $input_b `->` $output
+    `shape` `(` $col_num `x` $row_num `)`
+    `quant` `(` $output_zeropoint `,` $output_scale `,` $output_scaleshift `)`
+    attr-dict `:` type($input_a) `,` type($input_b) `,` type($output)
+  }];
+}
+
 def Npux_SubviewOp : Npux_Op<"subview", [Pure]> {
   let summary = "Simple NPU SRAM/ACC slicing";
   let description = [{
