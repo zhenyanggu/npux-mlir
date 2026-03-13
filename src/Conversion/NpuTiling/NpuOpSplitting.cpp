@@ -760,6 +760,17 @@ private:
         return failure();
     }
 
+    // 对 N/M 空间循环做边界剥离，尽量把尾块静态化（例如 40 -> 32 + 8）。
+    // 这样后续 lowering 不会因为动态 memref 维度退化为 `?`。
+    for (int i = (int)loops.size() - 1; i >= 0; --i) {
+      auto loopOp = cast<scf::ForOp>(loops[i].getOperation());
+      scf::ForOp partialLoop;
+      if (succeeded(
+              scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialLoop))) {
+        inheritLoopAttrs(loopOp, partialLoop);
+      }
+    }
+
     rewriter.replaceOp(op, tilingResult->loops.front()->getResults());
     return success();
   }
@@ -838,6 +849,16 @@ private:
       bool didKSplit = false;
       if (failed(splitGemmOnKIfNeeded(fusedGemmOp, rewriter, didKSplit)))
         return failure();
+    }
+
+    // 对融合后生成的 N/M 循环执行边界剥离，避免尾块以动态维度传播到后续阶段。
+    for (int i = (int)loops.size() - 1; i >= 0; --i) {
+      auto loopOp = cast<scf::ForOp>(loops[i].getOperation());
+      scf::ForOp partialLoop;
+      if (succeeded(
+              scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialLoop))) {
+        inheritLoopAttrs(loopOp, partialLoop);
+      }
     }
 
     // 5. 替换外层的 Consumer 输出

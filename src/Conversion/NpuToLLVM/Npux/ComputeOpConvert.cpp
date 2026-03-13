@@ -11,6 +11,7 @@
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
 #include "src/Dialect/Npux/NpuxOps.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -102,7 +103,7 @@ public:
         return failure();
 
       auto outShape = outType.getShape();
-      if (outShape.empty() || outShape.size() > 2)
+      if (outShape.empty())
         return failure();
       for (int64_t d : outShape) {
         if (d == ShapedType::kDynamic) {
@@ -113,8 +114,9 @@ public:
 
       int64_t row = 1;
       int64_t col = outShape.back();
-      if (outShape.size() == 2)
-        row = outShape[0];
+      for (int64_t i = 0, e = static_cast<int64_t>(outShape.size()) - 1; i < e;
+           ++i)
+        row *= outShape[i];
 
       if (col <= 0 || row <= 0)
         return failure();
@@ -128,20 +130,17 @@ public:
 
       double lhsScale = getFloatAttr(op, "lhs_scale", 1.0);
       double rhsScale = getFloatAttr(op, "rhs_scale", 1.0);
-      if (std::abs(lhsScale - rhsScale) > 1e-6) {
-        op.emitError()
-            << "npu_matadd currently requires lhs_scale == rhs_scale "
-            << "(got lhs=" << lhsScale << ", rhs=" << rhsScale << ")";
-        return failure();
-      }
-
       double outScaleTarget = getFloatAttr(op, "out_scale", 1.0);
       if (outScaleTarget <= 0.0)
         return failure();
       int64_t outZp = getIntAttr(op, "out_zp", 0);
+      if (lhsScale <= 0.0 || rhsScale <= 0.0)
+        return failure();
 
-      double realMultiplier = lhsScale / outScaleTarget;
-      auto quantParams = getFixedPointParams(realMultiplier);
+      int64_t outScaleInt = getIntAttr(op, "npu.matadd_out_scale", 1);
+      int64_t outShiftInt = getIntAttr(op, "npu.matadd_out_shift", 0);
+      outScaleInt = std::clamp<int64_t>(outScaleInt, 1, 32767);
+      outShiftInt = std::clamp<int64_t>(outShiftInt, -32768, 32767);
 
       Location loc = op.getLoc();
       auto c32 = [&](int64_t v) {
@@ -150,7 +149,7 @@ public:
 
       rewriter.replaceOpWithNewOp<MataddRunOp>(op,
           inputAMemRef, inputBMemRef, outputMemRef, c32(col), c32(row),
-          c32(outZp), c32(quantParams.multiplier), c32(quantParams.shift));
+          c32(outZp), c32(outScaleInt), c32(outShiftInt));
       return success();
     }
 

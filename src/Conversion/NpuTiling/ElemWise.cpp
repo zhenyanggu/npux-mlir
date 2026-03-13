@@ -87,8 +87,16 @@ SmallVector<int64_t> getElemWiseTileSizes(
     // MATADD 硬件字段限制：row/col 均为 8bit。
     if (rank >= 1)
       tileSizes[rank - 1] = std::max<int64_t>(1, std::min<int64_t>(255, tileSizes[rank - 1]));
-    if (rank >= 2)
-      tileSizes[rank - 2] = std::max<int64_t>(1, std::min<int64_t>(255, tileSizes[rank - 2]));
+    if (rank >= 2) {
+      // ComputeOpConvert 会把除了最后一维外全部展平为 row，确保乘积 <= 255。
+      int64_t row = 1;
+      for (int64_t i = rank - 2; i >= 0; --i) {
+        int64_t maxForDim = std::max<int64_t>(1, 255 / row);
+        tileSizes[i] = std::max<int64_t>(
+            1, std::min<int64_t>(tileSizes[i], maxForDim));
+        row *= tileSizes[i];
+      }
+    }
   }
 
   // 日志打印 (动态拼接维度信息)

@@ -125,27 +125,48 @@ static bool isSupportedNpuMatadd(ONNXAddOp op) {
   if (!lhsType.hasStaticShape() || !rhsType.hasStaticShape() ||
       !outType.hasStaticShape())
     return false;
-  if (lhsType.getRank() < 1 || lhsType.getRank() > 2)
+  int64_t outRank = outType.getRank();
+  if (outRank < 1 || outRank > 4)
     return false;
-  if (lhsType.getRank() != rhsType.getRank() ||
-      lhsType.getRank() != outType.getRank())
+  if (lhsType.getRank() != outRank && lhsType.getRank() != outRank - 1)
+    return false;
+  if (rhsType.getRank() != outRank && rhsType.getRank() != outRank - 1)
     return false;
   if (!lhsType.getElementType().isInteger(8) ||
       !rhsType.getElementType().isInteger(8) ||
       !outType.getElementType().isInteger(8))
     return false;
-  for (int64_t i = 0, e = lhsType.getRank(); i < e; ++i) {
-    if (lhsType.getDimSize(i) != rhsType.getDimSize(i) ||
-        lhsType.getDimSize(i) != outType.getDimSize(i))
-      return false;
-  }
 
-  // Current compiler matadd path expects symmetric int8 (zp=0) and equal
-  // input scales.
+  auto isExactOutShape = [&](RankedTensorType t) -> bool {
+    if (t.getRank() != outRank)
+      return false;
+    for (int64_t i = 0; i < outRank; ++i) {
+      if (t.getDimSize(i) != outType.getDimSize(i))
+        return false;
+    }
+    return true;
+  };
+
+  auto isTailBroadcastShape = [&](RankedTensorType t) -> bool {
+    if (t.getRank() != outRank - 1)
+      return false;
+    for (int64_t i = 0; i < t.getRank(); ++i) {
+      if (t.getDimSize(i) != outType.getDimSize(i + 1))
+        return false;
+    }
+    return true;
+  };
+
+  bool lhsOk = isExactOutShape(lhsType) || isTailBroadcastShape(lhsType);
+  bool rhsOk = isExactOutShape(rhsType) || isTailBroadcastShape(rhsType);
+  if (!lhsOk || !rhsOk)
+    return false;
+  if (!isExactOutShape(lhsType) && !isExactOutShape(rhsType))
+    return false;
+
+  // Current compiler matadd path expects symmetric int8 (zp=0) inputs.
   auto lhsQ = npux::getScalarQuantParams(lhsDq);
   auto rhsQ = npux::getScalarQuantParams(rhsDq);
-  if (std::abs(lhsQ.scale - rhsQ.scale) > 1e-6)
-    return false;
   if (lhsQ.zeroPoint != 0 || rhsQ.zeroPoint != 0)
     return false;
 

@@ -12,6 +12,8 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "src/Pass/Passes.hpp"
+#include <algorithm>
+#include <cmath>
 
 using namespace mlir;
 
@@ -104,7 +106,8 @@ static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
 // - Output: int32 in ACC (for accurate ACC capacity planning)
 //=============================================================================
 static Value createMataddAccMvinOp(
-    PatternRewriter &rewriter, Location loc, Value input) {
+    PatternRewriter &rewriter, Location loc, Value input,
+    int16_t quantScale, int16_t quantShift) {
   auto inputType = cast<RankedTensorType>(input.getType());
   auto accType = RankedTensorType::get(
       inputType.getShape(), rewriter.getI32Type(), rewriter.getI64IntegerAttr(3));
@@ -135,10 +138,58 @@ static Value createMataddAccMvinOp(
   dmaOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
   dmaOp->setAttr("npu.is_quant", rewriter.getBoolAttr(true));
   dmaOp->setAttr("npu.quant_zero", rewriter.getI32IntegerAttr(0));
-  dmaOp->setAttr("npu.quant_scale", rewriter.getI16IntegerAttr(1));
-  dmaOp->setAttr("npu.quant_shift", rewriter.getI16IntegerAttr(0));
+  dmaOp->setAttr("npu.quant_scale", rewriter.getI16IntegerAttr(quantScale));
+  dmaOp->setAttr("npu.quant_shift",
+      rewriter.getIntegerAttr(rewriter.getI16Type(), quantShift));
 
   return dmaOp.getResult(0);
+}
+
+struct MataddQuantPlan {
+  int16_t mvinScaleA;
+  int16_t mvinScaleB;
+  int16_t mvinShiftA;
+  int16_t mvinShiftB;
+  int16_t outScale;
+  int16_t outShift;
+};
+
+static MataddQuantPlan buildMataddQuantPlan(
+    double lhsScale, double rhsScale, double outScale) {
+  MataddQuantPlan plan{/*mvinScaleA=*/1, /*mvinScaleB=*/1, /*mvinShiftA=*/0,
+      /*mvinShiftB=*/0, /*outScale=*/1, /*outShift=*/0};
+
+  if (lhsScale <= 0.0 || rhsScale <= 0.0 || outScale <= 0.0)
+    return plan;
+
+  const double ratioA = lhsScale / outScale;
+  const double ratioB = rhsScale / outScale;
+  const double maxRatio = std::max(ratioA, ratioB);
+
+  int n = 0;
+  while (n < 30 && maxRatio * static_cast<double>(1u << (n + 1)) <= 32767.0)
+    ++n;
+
+  auto clampI16 = [](int64_t v) -> int16_t {
+    if (v < 1)
+      v = 1;
+    if (v > 32767)
+      v = 32767;
+    return static_cast<int16_t>(v);
+  };
+
+  int64_t scaleA =
+      static_cast<int64_t>(std::llround(ratioA * static_cast<double>(1u << n)));
+  int64_t scaleB =
+      static_cast<int64_t>(std::llround(ratioB * static_cast<double>(1u << n)));
+
+  plan.mvinScaleA = clampI16(scaleA);
+  plan.mvinScaleB = clampI16(scaleB);
+  plan.mvinShiftA = 0;
+  plan.mvinShiftB = 0;
+  plan.outScale = 1;
+  plan.outShift = static_cast<int16_t>(-n);
+  return plan;
 }
 
 //=============================================================================
@@ -383,10 +434,23 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 
     Location loc = op.getLoc();
 
+    auto getFloatAttrOr = [&](StringRef name, double defaultVal) -> double {
+      if (auto attr = op->getAttrOfType<FloatAttr>(name))
+        return attr.getValueAsDouble();
+      return defaultVal;
+    };
+
+    double lhsScale = getFloatAttrOr("lhs_scale", 1.0);
+    double rhsScale = getFloatAttrOr("rhs_scale", 1.0);
+    double outScale = getFloatAttrOr("out_scale", 1.0);
+    MataddQuantPlan quantPlan = buildMataddQuantPlan(lhsScale, rhsScale, outScale);
+
     // 1) Two inputs: DRAM -> ACC(i32)
     SmallVector<Value> newInputs;
-    newInputs.push_back(createMataddAccMvinOp(rewriter, loc, op.getInputs()[0]));
-    newInputs.push_back(createMataddAccMvinOp(rewriter, loc, op.getInputs()[1]));
+    newInputs.push_back(createMataddAccMvinOp(
+        rewriter, loc, op.getInputs()[0], quantPlan.mvinScaleA, quantPlan.mvinShiftA));
+    newInputs.push_back(createMataddAccMvinOp(
+        rewriter, loc, op.getInputs()[1], quantPlan.mvinScaleB, quantPlan.mvinShiftB));
 
     // 2) Output medium tensor in SPM
     Value oldOutput = op.getOutputs()[0];
@@ -411,6 +475,10 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
         });
 
     newOp->setAttrs(op->getAttrs());
+    newOp->setAttr("npu.matadd_out_scale",
+        rewriter.getI16IntegerAttr(quantPlan.outScale));
+    newOp->setAttr("npu.matadd_out_shift",
+        rewriter.getIntegerAttr(rewriter.getI16Type(), quantPlan.outShift));
     newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
 
     // 4) SPM -> DRAM

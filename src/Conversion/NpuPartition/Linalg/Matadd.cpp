@@ -32,22 +32,45 @@ static RankedTensorType addEncoding1(RankedTensorType type, OpBuilder &b) {
       type.getShape(), type.getElementType(), b.getI64IntegerAttr(1));
 }
 
-static bool hasSameStaticShape(
-    RankedTensorType a, RankedTensorType b, RankedTensorType c) {
-  if (!a || !b || !c)
+static bool isExactShapeAs(RankedTensorType t, RankedTensorType outType) {
+  if (!t || !outType)
     return false;
-  if (!a.hasStaticShape() || !b.hasStaticShape() || !c.hasStaticShape())
+  if (!t.hasStaticShape() || !outType.hasStaticShape())
     return false;
-  if (a.getRank() != b.getRank() || a.getRank() != c.getRank())
+  if (t.getRank() != outType.getRank())
     return false;
-  if (a.getRank() < 1 || a.getRank() > 2)
-    return false;
-
-  for (int64_t i = 0; i < a.getRank(); ++i) {
-    if (a.getDimSize(i) != b.getDimSize(i) || a.getDimSize(i) != c.getDimSize(i))
+  for (int64_t i = 0; i < t.getRank(); ++i) {
+    if (t.getDimSize(i) != outType.getDimSize(i))
       return false;
   }
   return true;
+}
+
+static bool isTailBroadcastShape(RankedTensorType t, RankedTensorType outType) {
+  if (!t || !outType)
+    return false;
+  if (!t.hasStaticShape() || !outType.hasStaticShape())
+    return false;
+  if (outType.getRank() < 2)
+    return false;
+  if (t.getRank() != outType.getRank() - 1)
+    return false;
+  for (int64_t i = 0; i < t.getRank(); ++i) {
+    if (t.getDimSize(i) != outType.getDimSize(i + 1))
+      return false;
+  }
+  return true;
+}
+
+static AffineMap getMataddOperandMap(
+    MLIRContext *ctx, int64_t outRank, bool exactOutShape) {
+  if (exactOutShape)
+    return AffineMap::getMultiDimIdentityMap(outRank, ctx);
+  SmallVector<AffineExpr> exprs;
+  exprs.reserve(outRank - 1);
+  for (int64_t i = 1; i < outRank; ++i)
+    exprs.push_back(getAffineDimExpr(i, ctx));
+  return AffineMap::get(outRank, 0, exprs, ctx);
 }
 
 static void createMataddBody(OpBuilder &b, Location loc, ValueRange args) {
@@ -95,9 +118,9 @@ struct AddToLinalgMatadd : public OpConversionPattern<ONNXAddOp> {
     auto lhsParams = getScalarQuantParams(lhsDq);
     auto rhsParams = getScalarQuantParams(rhsDq);
     auto outParams = getScalarQuantParams(outQ);
-    if (std::abs(lhsParams.scale - rhsParams.scale) > 1e-6)
-      return failure();
     if (lhsParams.zeroPoint != 0 || rhsParams.zeroPoint != 0)
+      return failure();
+    if (outParams.scale <= 0.0f)
       return failure();
 
     Value lhsQ = lhsDq.getX();
@@ -106,8 +129,23 @@ struct AddToLinalgMatadd : public OpConversionPattern<ONNXAddOp> {
     auto lhsType = dyn_cast<RankedTensorType>(lhsQ.getType());
     auto rhsType = dyn_cast<RankedTensorType>(rhsQ.getType());
     auto outType = dyn_cast<RankedTensorType>(outQ.getResult().getType());
-    if (!hasSameStaticShape(lhsType, rhsType, outType))
+    if (!lhsType || !rhsType || !outType)
       return failure();
+    if (!lhsType.hasStaticShape() || !rhsType.hasStaticShape() ||
+        !outType.hasStaticShape())
+      return failure();
+    int64_t outRank = outType.getRank();
+    if (outRank < 1 || outRank > 4)
+      return failure();
+    bool lhsExact = isExactShapeAs(lhsType, outType);
+    bool rhsExact = isExactShapeAs(rhsType, outType);
+    bool lhsTail = isTailBroadcastShape(lhsType, outType);
+    bool rhsTail = isTailBroadcastShape(rhsType, outType);
+    if (!(lhsExact || lhsTail) || !(rhsExact || rhsTail))
+      return failure();
+    if (!lhsExact && !rhsExact)
+      return failure();
+
     if (!lhsType.getElementType().isInteger(8) ||
         !rhsType.getElementType().isInteger(8) ||
         !outType.getElementType().isInteger(8))
@@ -125,10 +163,10 @@ struct AddToLinalgMatadd : public OpConversionPattern<ONNXAddOp> {
     Value outAlloc =
         rewriter.create<bufferization::AllocTensorOp>(op.getLoc(), outEncType, dynSizes);
 
-    int64_t rank = outType.getRank();
+    int64_t rank = outRank;
     SmallVector<AffineMap, 3> maps = {
-        rewriter.getMultiDimIdentityMap(rank),
-        rewriter.getMultiDimIdentityMap(rank),
+        getMataddOperandMap(rewriter.getContext(), rank, lhsExact),
+        getMataddOperandMap(rewriter.getContext(), rank, rhsExact),
         rewriter.getMultiDimIdentityMap(rank)};
     SmallVector<utils::IteratorType> iters(rank, utils::IteratorType::parallel);
 

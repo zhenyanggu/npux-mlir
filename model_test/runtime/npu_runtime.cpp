@@ -1,4 +1,5 @@
 #include "npu_runtime.h"
+#include <algorithm>
 #include <cstdio>
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -375,10 +376,43 @@ uint32_t NpuRuntime::virt_to_phys(void* ptr) {
 void NpuRuntime::run_mvin(const MvinConfig& cfg) {
     NPU_TIMER_TOTAL("run_mvin");
     const uint8_t precision = 1; // force precision regardless of API input
-    
-    uint32_t phys_dram = virt_to_phys(cfg.host_ptr);
+
+    // Some compiler paths may pass constant pointers that are not inside NPU
+    // DDR mmap range. In that case, stage data into NPU DDR first.
+    auto calc_transfer_bytes = [&](const MvinConfig &c) -> size_t {
+        const uint64_t cols = static_cast<uint64_t>(c.col_num) + 1ULL;
+        const uint64_t rows = static_cast<uint64_t>(c.row_num) + 1ULL;
+        const uint64_t elem_bytes = 1ULL; // precision is forced to int8 path.
+        const uint64_t stride_bytes =
+            static_cast<uint64_t>(std::max<uint32_t>(c.dram_stride, c.col_num + 1U)) * elem_bytes;
+        if (rows <= 1ULL) return static_cast<size_t>(cols * elem_bytes);
+        const uint64_t total =
+            (rows - 1ULL) * stride_bytes + cols * elem_bytes;
+        return static_cast<size_t>(total);
+    };
+
+    void *dma_src_ptr = cfg.host_ptr;
+    void *staging_ptr = nullptr;
+    uint32_t phys_dram = 0;
+    try {
+        phys_dram = virt_to_phys(dma_src_ptr);
+    } catch (const std::runtime_error &) {
+        size_t transfer_bytes = calc_transfer_bytes(cfg);
+        staging_ptr = alloc(transfer_bytes);
+        if (!staging_ptr) {
+            throw std::runtime_error(
+                "run_mvin staging alloc failed for non-NPU host pointer");
+        }
+        std::memcpy(staging_ptr, cfg.host_ptr, transfer_bytes);
+        dma_src_ptr = staging_ptr;
+        phys_dram = virt_to_phys(dma_src_ptr);
+        NPU_LOG(
+            "MVIN staged host ptr %p -> NPU ptr %p (%zu bytes)",
+            cfg.host_ptr, staging_ptr, transfer_bytes);
+    }
+
     NPU_TIMER_SECTION_BEGIN("run_mvin(pre_reg)")
-    NPU_LOG("Running MVIN (HostPtr=%p, phy_dram=0x%x, SRAM=0x%x)", cfg.host_ptr, phys_dram, cfg.sram_addr);
+    NPU_LOG("Running MVIN (HostPtr=%p, phy_dram=0x%x, SRAM=0x%x)", dma_src_ptr, phys_dram, cfg.sram_addr);
     NPU_TIMER_SECTION_END()
 
     NPU_TIMER_SECTION_BEGIN("run_mvin(reg_write)")
@@ -411,6 +445,10 @@ void NpuRuntime::run_mvin(const MvinConfig& cfg) {
     NPU_TIMER_SECTION_BEGIN("run_mvin(wait_irq)")
     wait_irq();
     NPU_TIMER_SECTION_END()
+
+    if (staging_ptr) {
+        free(staging_ptr);
+    }
 }
 
 void NpuRuntime::run_mvout(const MvoutConfig& cfg) {
