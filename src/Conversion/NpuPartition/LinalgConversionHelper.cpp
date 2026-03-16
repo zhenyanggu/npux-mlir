@@ -49,7 +49,7 @@ void populateLinalgConversionPatterns(RewritePatternSet &patterns)
   populateLinalgLayerNormPattern(patterns);
   populateLinalgConvPattern(patterns);
   populateLinalgUnaryPatterns(patterns);
-  populateLinalgMataddPattern(patterns);
+  populateLinalgBinaryPatterns(patterns);
   populateLinalgGemmPattern(patterns);
   populateLinalgResamplePatterns(patterns);
   populateLinalgTransposePattern(patterns);

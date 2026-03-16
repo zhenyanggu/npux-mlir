@@ -11,7 +11,6 @@
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
 #include "src/Dialect/Npux/NpuxOps.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -81,78 +80,6 @@ public:
       return failure();
 
     StringRef libName = libCallAttr.getValue();
-
-    if (libName == "npu_matadd") {
-      if (op.getInputs().size() != 2 || op.getOutputs().size() != 1)
-        return failure();
-
-      Value inputAMemRef = op.getInputs()[0];
-      Value inputBMemRef = op.getInputs()[1];
-      Value outputMemRef = op.getOutputs()[0];
-
-      auto inAType = dyn_cast<MemRefType>(inputAMemRef.getType());
-      auto inBType = dyn_cast<MemRefType>(inputBMemRef.getType());
-      auto outType = dyn_cast<MemRefType>(outputMemRef.getType());
-      if (!inAType || !inBType || !outType)
-        return failure();
-
-      // MATADD contract: A/B in ACC, output in SPM.
-      if (inAType.getMemorySpaceAsInt() != 3 || inBType.getMemorySpaceAsInt() != 3)
-        return failure();
-      if (outType.getMemorySpaceAsInt() != 2)
-        return failure();
-
-      auto outShape = outType.getShape();
-      if (outShape.empty())
-        return failure();
-      for (int64_t d : outShape) {
-        if (d == ShapedType::kDynamic) {
-          op.emitError("npu_matadd requires static shape after tiling");
-          return failure();
-        }
-      }
-
-      int64_t row = 1;
-      int64_t col = outShape.back();
-      for (int64_t i = 0, e = static_cast<int64_t>(outShape.size()) - 1; i < e;
-           ++i)
-        row *= outShape[i];
-
-      if (col <= 0 || row <= 0)
-        return failure();
-      if (col > 255 || row > 255) {
-        op.emitError()
-            << "MATADD row/col exceed hardware 8-bit fields: row=" << row
-            << ", col=" << col
-            << ". Expected npu-tiling to split into row/col <= 255.";
-        return failure();
-      }
-
-      double lhsScale = getFloatAttr(op, "lhs_scale", 1.0);
-      double rhsScale = getFloatAttr(op, "rhs_scale", 1.0);
-      double outScaleTarget = getFloatAttr(op, "out_scale", 1.0);
-      if (outScaleTarget <= 0.0)
-        return failure();
-      int64_t outZp = getIntAttr(op, "out_zp", 0);
-      if (lhsScale <= 0.0 || rhsScale <= 0.0)
-        return failure();
-
-      int64_t outScaleInt = getIntAttr(op, "npu.matadd_out_scale", 1);
-      int64_t outShiftInt = getIntAttr(op, "npu.matadd_out_shift", 0);
-      outScaleInt = std::clamp<int64_t>(outScaleInt, 1, 32767);
-      outShiftInt = std::clamp<int64_t>(outShiftInt, -32768, 32767);
-
-      Location loc = op.getLoc();
-      auto c32 = [&](int64_t v) {
-        return rewriter.create<arith::ConstantIntOp>(loc, v, 32);
-      };
-
-      rewriter.replaceOpWithNewOp<MataddRunOp>(op,
-          inputAMemRef, inputBMemRef, outputMemRef, c32(col), c32(row),
-          c32(outZp), c32(outScaleInt), c32(outShiftInt));
-      return success();
-    }
-
     ComputeOpType opType;
 
     if (libName == "npu_conv") {
@@ -174,7 +101,6 @@ public:
     Value inputBMemRef = op.getInputs()[1]; // Weight / RHS
     Value outputMemRef = op.getOutputs()[0];
 
-    // Variables to be determined by logic path
     Value psumMemRefForOp = nullptr; // Passed to ComputeRunOp
     bool flagAccBias = false;
     bool flagDoAccum = false;
@@ -210,53 +136,61 @@ public:
       if (isFirstCalculation) {
         // === Case A1: Head / Single (Bias Logic) ===
         OpBuilder::InsertionGuard guard(rewriter);
-        scf::ForOp hoistAnchor = nullptr;
 
-        if (opType == ComputeOpType::gemm) {
-          auto parentFor = op->getParentOfType<scf::ForOp>();
-          while (parentFor) {
-            if (auto splitDim =
-                    parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
-              if (splitDim.getValue() == "M") {
-                hoistAnchor = parentFor;
-                break;
-              }
-            }
-            parentFor = parentFor->getParentOfType<scf::ForOp>();
-          }
-        } else if (opType == ComputeOpType::conv) {
-          scf::ForOp coutLoop = nullptr;
-          scf::ForOp outermostFor = nullptr;
-          auto parentFor = op->getParentOfType<scf::ForOp>();
+        StringRef targetDim = (opType == ComputeOpType::gemm) ? "N" : "cout";
 
-          while (parentFor) {
-            outermostFor = parentFor;
-            if (auto splitDim =
-                    parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
-              StringRef dimVal = splitDim.getValue();
-              if (dimVal == "cout" || dimVal == "Cout_c" || dimVal == "Cout") {
-                coutLoop = parentFor;
-              }
-            }
-            parentFor = parentFor->getParentOfType<scf::ForOp>();
-          }
+        scf::ForOp targetLoop = nullptr;
+        scf::ForOp outermostFor = nullptr;
+        scf::ForOp parentFor = op->getParentOfType<scf::ForOp>();
 
-          if (coutLoop) {
-            scf::ForOp child = op->getParentOfType<scf::ForOp>();
-            while (child && child->getParentOp() != coutLoop) {
-              child = child->getParentOfType<scf::ForOp>();
+        // 2. 从内向外遍历，寻找第一个匹配 targetDim 的循环，同时记录最外层循环
+        while (parentFor) {
+          outermostFor = parentFor; // 一直更新，循环结束时这就是最外层循环
+
+          // 优先看当前层是不是 split_dim 匹配
+          if (auto splitDim =
+                  parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
+            if (splitDim.getValue() == targetDim) {
+              targetLoop = parentFor;
+              break;
             }
-            hoistAnchor = child;
-          } else {
-            hoistAnchor = outermostFor;
           }
+          // 再看当前层是不是 loop_dim 匹配
+          if (auto loopDim =
+                  parentFor->getAttrOfType<StringAttr>("npu.loop_dim")) {
+            if (loopDim.getValue() == targetDim) {
+              targetLoop = parentFor;
+              break;
+            }
+          }
+          parentFor = parentFor->getParentOfType<scf::ForOp>();
         }
 
+        // 3. 确定安全的插入锚点 (hoistAnchor)
+        scf::ForOp hoistAnchor = nullptr;
+
+        if (targetLoop) {
+          // 情况 A：找到了 N/cout 循环。向下找到包含当前 op 的“直接子循环”。
+          // 这样 moveBefore(child) 会把操作提上去，放在 targetLoop 内部、child
+          // 的外部。
+          scf::ForOp child = op->getParentOfType<scf::ForOp>();
+          while (child && child->getParentOp() != targetLoop) {
+            child = child->getParentOfType<scf::ForOp>();
+          }
+          hoistAnchor = child;
+        } else {
+          // 情况 B (你的核心逻辑)：没有找到 N/cout 循环。
+          // 说明 Bias 计算对当前所有循环都是不变量，直接放在最外层循环的外面！
+          hoistAnchor = outermostFor;
+        }
+
+        // 4. 执行 Hoist
         if (hoistAnchor) {
           std::function<void(Operation *)> hoistOps =
               [&](Operation *opToHoist) {
                 for (Value operand : opToHoist->getOperands()) {
                   if (Operation *defOp = operand.getDefiningOp()) {
+                    // 只上提当前 hoistAnchor 内部的操作，避免越界
                     if (hoistAnchor->isAncestor(defOp)) {
                       hoistOps(defOp);
                     }
@@ -265,6 +199,7 @@ public:
                 opToHoist->moveBefore(hoistAnchor);
               };
 
+          // 提取 Bias (第三个输入) 的定义链
           if (Operation *thirdDef = thirdInput.getDefiningOp()) {
             if (hoistAnchor->isAncestor(thirdDef)) {
               hoistOps(thirdDef);
@@ -435,24 +370,6 @@ public:
     Value vPadMode = c32(pad_mode_val);
 
     auto safe_m1 = [](int64_t v) { return v > 0 ? v - 1 : 0; };
-
-    if (opType == ComputeOpType::gemm) {
-      // Hardware field width limits:
-      //   SA_IN_A.COL_m1 : 11-bit (max 2047)
-      //   SA_IN_B.ROW_m1 : 11-bit (max 2047)
-      constexpr int64_t kMaxGemmKMinus1 = 2047;
-      int64_t aColM1 = safe_m1(a_col);
-      int64_t bRowM1 = safe_m1(b_row);
-      if (aColM1 > kMaxGemmKMinus1 || bRowM1 > kMaxGemmKMinus1) {
-        op.emitError()
-            << "GEMM K dimension exceeds hardware field limit before lowering: "
-            << "a_col_m1=" << aColM1 << ", b_row_m1=" << bRowM1
-            << " (max 2047). "
-            << "Expected K-splitting to keep each tile K<=2048.";
-        return failure();
-      }
-    }
-
     Value vWeightShapeM1 = c32(safe_m1(kernel_sz));
     Value vWeightStrideM1 = c32(safe_m1(stride_val));
     Value vWeightDilationM1 = c32(safe_m1(dilation_val));
@@ -535,8 +452,90 @@ public:
   }
 };
 
+// --- Matadd Rewrite Pattern ---
+
+class LinalgMataddToNpuxPattern : public OpRewritePattern<linalg::GenericOp> {
+public:
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+    // 1. Check Library Call Name
+    auto libCallAttr = op.getLibraryCallAttr();
+    if (!libCallAttr || libCallAttr.getValue() != "npu_matadd")
+      return failure();
+
+    Location loc = op.getLoc();
+
+    // 2. Check Operands
+    if (op.getInputs().size() != 2 || op.getOutputs().size() != 1) {
+      return failure();
+    }
+
+    Value inputAMemRef = op.getInputs()[0];
+    Value inputBMemRef = op.getInputs()[1];
+    Value outputMemRef = op.getOutputs()[0];
+
+    // 3. Memory Space Validation
+    // Constraints: Inputs A/B must reside in ACC (space 3), output resides in
+    // SPM (space 2).
+    auto checkSpace = [&](Value v, int expectedSpace) {
+      if (!v)
+        return true;
+      auto type = mlir::dyn_cast<MemRefType>(v.getType());
+      return type && type.getMemorySpaceAsInt() == expectedSpace;
+    };
+
+    if (!checkSpace(inputAMemRef, 3))
+      return failure();
+    if (!checkSpace(inputBMemRef, 3))
+      return failure();
+    if (!checkSpace(outputMemRef, 2))
+      return failure();
+
+    // 4. Parse Geometry (Shapes)
+    // 根据示例，输入 shape 是 1x1x32x1024，提取最后两维作为 row 和 col
+    auto inAType = mlir::cast<MemRefType>(inputAMemRef.getType());
+    ArrayRef<int64_t> inAShape = inAType.getShape();
+    int64_t rankA = inAShape.size();
+    if (rankA < 2)
+      return failure();
+
+    int64_t col_num = inAShape.back();
+    int64_t row_num = 1;
+    for (int i = 0; i < rankA - 1; ++i) {
+      row_num *= inAShape[i];
+    }
+
+    // 5. Create Constants for Geometry
+    auto c32 = [&](int64_t v) {
+      return rewriter.create<arith::ConstantIntOp>(loc, v, 32);
+    };
+
+    Value vColNum = c32(col_num);
+    Value vRowNum = c32(row_num);
+
+    // 6. Quantization Params
+    // Matadd 通常使用 output 的 scale 和 zeropoint
+    double outScale = getFloatAttr(op, "out_scale", 1.0);
+    int64_t outZp = getIntAttr(op, "out_zp", 0);
+
+    auto quantParams = getFixedPointParams(outScale);
+    Value vOutZp = c32(outZp);
+    Value vOutScale = c32(quantParams.multiplier);
+    Value vOutScaleShift = c32(quantParams.shift);
+
+    // 7. Replace Op with MataddRunOp
+    rewriter.replaceOpWithNewOp<MataddRunOp>(op, inputAMemRef, inputBMemRef,
+        outputMemRef, vColNum, vRowNum, vOutZp, vOutScale, vOutScaleShift);
+
+    return success();
+  }
+};
+
 } // namespace
 
 void npux::populateLinalgConvToNpuxPattern(RewritePatternSet &patterns) {
   patterns.add<LinalgComputeToNpuxPattern>(patterns.getContext());
+  patterns.add<LinalgMataddToNpuxPattern>(patterns.getContext());
 }

@@ -64,7 +64,7 @@ void populateLinalgConvPattern(mlir::RewritePatternSet &patterns);
 
 void populateLinalgUnaryPatterns(mlir::RewritePatternSet &patterns);
 
-void populateLinalgMataddPattern(mlir::RewritePatternSet &patterns);
+void populateLinalgBinaryPatterns(mlir::RewritePatternSet &patterns);
 
 void populateLinalgGemmPattern(mlir::RewritePatternSet &patterns);
 

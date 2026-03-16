@@ -12,4 +12,5 @@ target_link_libraries(onnx-lsp-server
 
   OMCompilerDialects
   MLIRLspServerLib
+  NpuxOps
 )

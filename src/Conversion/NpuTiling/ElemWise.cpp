@@ -17,8 +17,12 @@ using namespace mlir;
 using namespace npux; 
 
 namespace {
+
+// ============================================================================
+// 核心逻辑修改：区分普通的 SPM 算子 (如 GeLU) 和跨存储算子 (如 MatAdd)
+// ============================================================================
 SmallVector<int64_t> calculateAutoElemWiseTile(
-    linalg::GenericOp op, int64_t maxElems) {
+    linalg::GenericOp op, StringRef opName, int64_t spmSize, int64_t accSize) {
   
   auto loopRanges = op.getStaticLoopRanges();
   int64_t rank = loopRanges.size();
@@ -27,8 +31,26 @@ SmallVector<int64_t> calculateAutoElemWiseTile(
   SmallVector<int64_t> tileSizes(rank, 1);
   if (rank == 0) return tileSizes; // 处理 Scalar
 
-  if (maxElems <= 0)
-    return tileSizes;
+  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
+  int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
+  int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
+
+  int64_t maxElems = 0;
+
+  // 1. 根据算子类型计算最大可容纳的元素个数 (考虑到不同的内存映射)
+  if (opName == "npu_matadd") {
+    // MatAdd: 两个输入在 ACC (占据 2 份容量)，输出在 SPM (占据 1 份容量)
+    // 需要同时满足 ACC 和 SPM 的限制，取短板
+    int64_t maxElemsByAcc = accSize / (2 * 4 * bytesPerElem);//acc的精度是int32
+    int64_t maxElemsBySpm = spmSize / (1 * bytesPerElem);
+    maxElems = std::min(maxElemsByAcc, maxElemsBySpm);
+  } else {
+    // 默认情况 (如 GeLU): 全部放在 SPM 中
+    int64_t numOperands = op.getNumDpsInputs() + op.getNumDpsInits(); 
+    maxElems = spmSize / (numOperands * bytesPerElem);
+  }
+
+  if (maxElems <= 0) return tileSizes; // 极度受限时的保护
 
   int64_t remainingElems = maxElems;
 
@@ -41,11 +63,11 @@ SmallVector<int64_t> calculateAutoElemWiseTile(
       if (dimSize <= 0) dimSize = 1; 
 
       if (remainingElems >= dimSize) {
-          // SPM 容量足够放下当前整个维度
+          // 容量足够放下当前整个维度
           tileSizes[i] = dimSize;
           remainingElems /= dimSize; 
       } else {
-          // SPM 容量放不下当前整个维度了，全部分配给当前维度
+          // 容量放不下当前整个维度了，全部分配给当前维度
           // 硬件对齐优化：如果 NPU 的 DMA 对 16 或 32 字节对齐敏感，可以在这里对齐
           int64_t tile = (remainingElems / 16) * 16; 
           if (tile == 0) tile = remainingElems; // 如果连 16 都不到，能放多少放多少
@@ -59,50 +81,18 @@ SmallVector<int64_t> calculateAutoElemWiseTile(
   return tileSizes;
 }
 
-SmallVector<int64_t> getElemWiseTileSizes(
-    linalg::GenericOp op, StringRef opName) {
+SmallVector<int64_t> getElemWiseTileSizes(linalg::GenericOp op, StringRef opName) {
   auto &config = npux::NPUConfig::getInstance();
   int64_t spmSize = config.getSpmSize();
   int64_t accSize = config.getAccSize();
 
-  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
-  int64_t outputElemBits = outputType.getElementType().getIntOrFloatBitWidth();
-  int64_t outputElemBytes = std::max<int64_t>(1, outputElemBits / 8);
-  int64_t numOperands = op.getNumDpsInputs() + op.getNumDpsInits();
-  int64_t bytesPerIteration = std::max<int64_t>(1, numOperands * outputElemBytes);
-  int64_t maxElems = spmSize / bytesPerIteration;
-
-  if (opName == "npu_matadd") {
-    // MatAdd 输入在 ACC（int32）: A + B 两路，各 4B/elem；输出在 SPM（int8）。
-    int64_t maxByAcc = accSize / (2 * 4);
-    int64_t maxBySpm = spmSize / std::max<int64_t>(1, outputElemBytes);
-    maxElems = std::max<int64_t>(1, std::min(maxByAcc, maxBySpm));
-  }
-
-  // 默认获取自动计算的分块大小
-  SmallVector<int64_t> tileSizes = calculateAutoElemWiseTile(op, maxElems);
-
-  if (opName == "npu_matadd") {
-    int64_t rank = tileSizes.size();
-    // MATADD 硬件字段限制：row/col 均为 8bit。
-    if (rank >= 1)
-      tileSizes[rank - 1] = std::max<int64_t>(1, std::min<int64_t>(255, tileSizes[rank - 1]));
-    if (rank >= 2) {
-      // ComputeOpConvert 会把除了最后一维外全部展平为 row，确保乘积 <= 255。
-      int64_t row = 1;
-      for (int64_t i = rank - 2; i >= 0; --i) {
-        int64_t maxForDim = std::max<int64_t>(1, 255 / row);
-        tileSizes[i] = std::max<int64_t>(
-            1, std::min<int64_t>(tileSizes[i], maxForDim));
-        row *= tileSizes[i];
-      }
-    }
-  }
+  // 获取自动计算的分块大小，把 opName 和 accSize 传进去
+  SmallVector<int64_t> tileSizes = calculateAutoElemWiseTile(op, opName, spmSize, accSize);
 
   // 日志打印 (动态拼接维度信息)
   std::string msg;
   llvm::raw_string_ostream os(msg);
-  os << "Tiling [" << opName << "] (Auto, Any-Rank): SPM=" << spmSize
+  os << "Tiling [" << opName << "] (Auto, Any-Rank): SPM=" << spmSize 
      << ", ACC=" << accSize << " Problem=[";
   
   auto loopRanges = op.getStaticLoopRanges();
@@ -129,16 +119,17 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     if (op->hasAttr("npu.tiled")) return failure();
 
     auto libCall = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCall)
-      return failure();
-    if (libCall.getValue() != "npu_gelu" &&
-        libCall.getValue() != "npu_matadd") {
-        return failure(); // 把机会留给 NpuConvTilingPattern
-    }
+    if (!libCall) return failure();
 
     StringRef opName = libCall.getValue();
+    
+    // 【修改点】：允许 npu_gelu 和 npu_matadd 通过
+    if (opName != "npu_gelu" && opName != "npu_matadd") {
+        return failure(); // 把机会留给其他 Tiling Pattern (如 Conv)
+    }
 
     SmallVector<int64_t> rawTileSizes = getElemWiseTileSizes(op, opName);
+    auto loopRanges = op.getStaticLoopRanges();
 
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
     SmallVector<OpFoldResult> tileSizes = getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
@@ -151,6 +142,10 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
     if (failed(tilingResult)) return failure();
 
+    for (auto loop : tilingResult->loops) {
+      loop->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    }
+
     for (Operation *tiledOp : tilingResult->tiledOps) {
       tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
     }
@@ -158,7 +153,6 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     // 【修复 2】: 稳健的 Peeling 逻辑
     // 我们必须确保从内向外 Peel，并且正确处理 Loop 结构的更新
     auto loops = tilingResult->loops;
-    
     SmallVector<Value> finalResults = tilingResult->replacements;
 
     // 倒序遍历处理 Peeling (从内向外)

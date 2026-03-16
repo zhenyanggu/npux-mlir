@@ -27,7 +27,8 @@ namespace {
 // 辅助函数：严格检查上下游是否有 Dequantize -> Op -> Quantize 模式并报警
 // ============================================================================
 static bool hasStrictQDQContext(Operation *op) {
-  if (op->getNumOperands() == 0 || op->getNumResults() == 0) return false;
+  if (op->getNumOperands() == 0 || op->getNumResults() == 0)
+    return false;
 
   // 1. 检查上游 Operand 0 是否有 DequantizeLinearOp
   Value input = op->getOperand(0);
@@ -36,26 +37,41 @@ static bool hasStrictQDQContext(Operation *op) {
   // 2. 检查下游 Result 0 是否有且仅有一个 QuantizeLinearOp
   Value result = op->getResult(0);
   bool hasQ = false;
-  if (result.hasOneUse() && isa<ONNXQuantizeLinearOp>(*result.getUsers().begin())) {
+  if (result.hasOneUse() &&
+      isa<ONNXQuantizeLinearOp>(*result.getUsers().begin())) {
     hasQ = true;
   }
 
   // 3. 满足严格条件，放行
   if (hasDq && hasQ) {
-    return true; 
+    return true;
   }
 
   // 4. 不满足条件，利用 Attr 避免重复报 Warning
   StringRef warningAttrName = "npu_qdq_warning_emitted";
   if (!op->hasAttr(warningAttrName)) {
-    op->emitWarning() << "Operation '" << op->getName() 
+    op->emitWarning() << "Operation '" << op->getName()
                       << "' lacks strict Dequantize -> Op -> Quantize context. "
                       << "Skipping conversion to NPU Linalg.";
     // 打上标签，标记该 Op 已经报过警
     op->setAttr(warningAttrName, UnitAttr::get(op->getContext()));
   }
-  
+
   return false;
+}
+
+// 检查是否是没有广播的 Add
+static bool isSupportedAdd(ONNXAddOp op) {
+  auto typeA = mlir::dyn_cast<RankedTensorType>(op.getA().getType());
+  auto typeB = mlir::dyn_cast<RankedTensorType>(op.getB().getType());
+  auto typeOut = mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
+
+  if (!typeA || !typeB || !typeOut)
+    return false;
+
+  // 只有在输入输出 Shape 完全一致（无广播）的情况下才支持
+  return typeA.getShape() == typeOut.getShape() && 
+         typeB.getShape() == typeOut.getShape();
 }
 
 static bool isSupportedPooling(Operation *op) {
@@ -70,13 +86,16 @@ static bool isSupportedPooling(Operation *op) {
     return false;
   }
 
-  if (!kernelShape || !strides) return false;
+  if (!kernelShape || !strides)
+    return false;
 
-  if (kernelShape.size() != 2 || strides.size() != 2) return false;
+  if (kernelShape.size() != 2 || strides.size() != 2)
+    return false;
 
   auto checkAttr = [](ArrayAttr attr) {
     for (auto val : attr) {
-      if (cast<IntegerAttr>(val).getInt() != 2) return false;
+      if (cast<IntegerAttr>(val).getInt() != 2)
+        return false;
     }
     return true;
   };
@@ -85,92 +104,26 @@ static bool isSupportedPooling(Operation *op) {
 }
 
 static bool isSupportedResize(ONNXResizeOp op) {
-  if (op.getMode() != "nearest") return false;
+  if (op.getMode() != "nearest")
+    return false;
 
   Value scales = op.getScales();
   auto constOp = scales.getDefiningOp<ONNXConstantOp>();
-  if (!constOp) return false;
+  if (!constOp)
+    return false;
 
   ElementsAttr valueAttr = dyn_cast<ElementsAttr>(constOp.getValueAttr());
-  if (!valueAttr) return false;
+  if (!valueAttr)
+    return false;
   bool hasScale2 = false;
   for (auto val : valueAttr.getValues<float>()) {
     float s = std::abs(val);
-    if (std::abs(s - 2.0f) < 1e-5) hasScale2 = true;
-    else if (std::abs(s - 1.0f) > 1e-5) return false; 
+    if (std::abs(s - 2.0f) < 1e-5)
+      hasScale2 = true;
+    else if (std::abs(s - 1.0f) > 1e-5)
+      return false;
   }
   return hasScale2;
-}
-
-static bool isSupportedNpuMatadd(ONNXAddOp op) {
-  if (!hasStrictQDQContext(op.getOperation()))
-    return false;
-
-  auto lhsDq = op.getA().getDefiningOp<ONNXDequantizeLinearOp>();
-  auto rhsDq = op.getB().getDefiningOp<ONNXDequantizeLinearOp>();
-  if (!lhsDq || !rhsDq)
-    return false;
-
-  if (!op.getResult().hasOneUse())
-    return false;
-  auto outQ = dyn_cast<ONNXQuantizeLinearOp>(*op.getResult().getUsers().begin());
-  if (!outQ)
-    return false;
-
-  auto lhsType = dyn_cast<RankedTensorType>(lhsDq.getX().getType());
-  auto rhsType = dyn_cast<RankedTensorType>(rhsDq.getX().getType());
-  auto outType = dyn_cast<RankedTensorType>(outQ.getResult().getType());
-  if (!lhsType || !rhsType || !outType)
-    return false;
-  if (!lhsType.hasStaticShape() || !rhsType.hasStaticShape() ||
-      !outType.hasStaticShape())
-    return false;
-  int64_t outRank = outType.getRank();
-  if (outRank < 1 || outRank > 4)
-    return false;
-  if (lhsType.getRank() != outRank && lhsType.getRank() != outRank - 1)
-    return false;
-  if (rhsType.getRank() != outRank && rhsType.getRank() != outRank - 1)
-    return false;
-  if (!lhsType.getElementType().isInteger(8) ||
-      !rhsType.getElementType().isInteger(8) ||
-      !outType.getElementType().isInteger(8))
-    return false;
-
-  auto isExactOutShape = [&](RankedTensorType t) -> bool {
-    if (t.getRank() != outRank)
-      return false;
-    for (int64_t i = 0; i < outRank; ++i) {
-      if (t.getDimSize(i) != outType.getDimSize(i))
-        return false;
-    }
-    return true;
-  };
-
-  auto isTailBroadcastShape = [&](RankedTensorType t) -> bool {
-    if (t.getRank() != outRank - 1)
-      return false;
-    for (int64_t i = 0; i < t.getRank(); ++i) {
-      if (t.getDimSize(i) != outType.getDimSize(i + 1))
-        return false;
-    }
-    return true;
-  };
-
-  bool lhsOk = isExactOutShape(lhsType) || isTailBroadcastShape(lhsType);
-  bool rhsOk = isExactOutShape(rhsType) || isTailBroadcastShape(rhsType);
-  if (!lhsOk || !rhsOk)
-    return false;
-  if (!isExactOutShape(lhsType) && !isExactOutShape(rhsType))
-    return false;
-
-  // Current compiler matadd path expects symmetric int8 (zp=0) inputs.
-  auto lhsQ = npux::getScalarQuantParams(lhsDq);
-  auto rhsQ = npux::getScalarQuantParams(rhsDq);
-  if (lhsQ.zeroPoint != 0 || rhsQ.zeroPoint != 0)
-    return false;
-
-  return true;
 }
 
 struct ONNXToLinalgNpuPass
@@ -200,57 +153,65 @@ struct ONNXToLinalgNpuPass
     target.addLegalDialect<scf::SCFDialect>();
     target.addLegalDialect<ONNXDialect>();
 
-    bool isEmpty=onnx_mlir::NpuOps.empty();
+    bool isEmpty = onnx_mlir::NpuOps.empty();
 
     // --- 所有目标 Op 全部修改为 DynamicallyLegalOp，强制绑定 QDQ 检查 ---
 
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv)) {
-      target.addDynamicallyLegalOp<ONNXConvOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Conv)) {
+      target.addDynamicallyLegalOp<ONNXConvOp>(
+          [](Operation *op) { return !hasStrictQDQContext(op); });
     }
+    
+    // 【修改点】：结合 QDQ 上下文检查和 Shape (无广播) 检查
     if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Add)) {
       target.addDynamicallyLegalOp<ONNXAddOp>(
-          [](ONNXAddOp op) { return !isSupportedNpuMatadd(op); });
+          [](ONNXAddOp op) { return !(isSupportedAdd(op) && hasStrictQDQContext(op)); });
     }
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
+    
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
       target.addIllegalOp<ONNXQLinearMatMulOp>();
     }
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm)) {
-      target.addDynamicallyLegalOp<ONNXLayerNormalizationOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm)) {
+      target.addDynamicallyLegalOp<ONNXLayerNormalizationOp>(
+          [](Operation *op) { return !hasStrictQDQContext(op); });
     }
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax)) {
-      target.addDynamicallyLegalOp<ONNXSoftmaxOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Softmax)) {
+      target.addDynamicallyLegalOp<ONNXSoftmaxOp>(
+          [](Operation *op) { return !hasStrictQDQContext(op); });
     }
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu)) {
-      target.addDynamicallyLegalOp<ONNXGeluOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu)) {
+      target.addDynamicallyLegalOp<ONNXGeluOp>(
+          [](Operation *op) { return !hasStrictQDQContext(op); });
     }
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm)) {
-      target.addDynamicallyLegalOp<ONNXGemmOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm)) {
+      target.addDynamicallyLegalOp<ONNXGemmOp>(
+          [](Operation *op) { return !hasStrictQDQContext(op); });
     }
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Relu)) {
-      target.addDynamicallyLegalOp<ONNXReluOp, ONNXLeakyReluOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Relu)) {
+      target.addDynamicallyLegalOp<ONNXReluOp, ONNXLeakyReluOp>(
+          [](Operation *op) { return !hasStrictQDQContext(op); });
     }
-    if (isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Transpose)) {
-      target.addDynamicallyLegalOp<ONNXTransposeOp>([](Operation *op) { return !hasStrictQDQContext(op); });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Transpose)) {
+      target.addDynamicallyLegalOp<ONNXTransposeOp>(
+          [](Operation *op) { return !hasStrictQDQContext(op); });
     }
 
     // 组合判定：满足属性支持 且 满足 QDQ 上下文，才视作 Illegal(被 Pattern 拦截改写)
-    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MaxPool)) {
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MaxPool)) {
       target.addDynamicallyLegalOp<ONNXMaxPoolSingleOutOp>(
           [](ONNXMaxPoolSingleOutOp op) {
             return !(isSupportedPooling(op) && hasStrictQDQContext(op));
           });
     }
-    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::AveragePool)) {
-      target.addDynamicallyLegalOp<ONNXAveragePoolOp>(
-          [](ONNXAveragePoolOp op) {
-            return !(isSupportedPooling(op) && hasStrictQDQContext(op));
-          });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::AveragePool)) {
+      target.addDynamicallyLegalOp<ONNXAveragePoolOp>([](ONNXAveragePoolOp op) {
+        return !(isSupportedPooling(op) && hasStrictQDQContext(op));
+      });
     }
-    if(isEmpty||onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Resize)) {
-      target.addDynamicallyLegalOp<ONNXResizeOp>(
-          [](ONNXResizeOp op) {
-            return !(isSupportedResize(op) && hasStrictQDQContext(op));
-          });
+    if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Resize)) {
+      target.addDynamicallyLegalOp<ONNXResizeOp>([](ONNXResizeOp op) {
+        return !(isSupportedResize(op) && hasStrictQDQContext(op));
+      });
     }
 
     RewritePatternSet patterns(context);

@@ -304,6 +304,9 @@ public:
     auto inType = mlir::dyn_cast<MemRefType>(inputMemRef.getType());
     auto outType = mlir::dyn_cast<MemRefType>(outputMemRef.getType());
 
+    auto inshape = inType.getShape();
+    auto outshape = outType.getShape();
+
     // 从属性中提取 N, C, H, W 参数
     // 这些属性是在 Conv.cpp 中 setAttr 的
     auto getIntParam = [&](StringRef name) -> int64_t {
@@ -314,11 +317,20 @@ public:
         // 为了安全起见这里返回 1
         return 1; 
     };
-
-    int64_t n = getIntParam("params_n");
-    int64_t c = getIntParam("params_c");
-    int64_t h = getIntParam("params_h");
-    int64_t w = getIntParam("params_w");
+    int64_t n, c, h, w;
+    if (isPack){
+      n = inshape[0];
+      c = inshape[1];
+      h = inshape[2];
+      w = inshape[3];
+    } else if (isUnpack){
+      n = outshape[0];
+      c = outshape[1];
+      h = outshape[2];
+      w = outshape[3];
+    } else {
+      return failure();
+    }
 
     // 创建 i16 常量作为参数传递给 Op
     Value vN = rewriter.create<arith::ConstantIntOp>(loc, n, 16);

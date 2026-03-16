@@ -49,7 +49,8 @@ static int64_t getStaticTripCount(scf::ForOp forOp) {
 }
 
 static void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) {
-  if (!source || !target) return;
+  if (!source || !target)
+    return;
   if (auto attr = source->getAttr("npu.target"))
     target->setAttr("npu.target", attr);
   if (auto attr = source->getAttr("npu.loop_dim"))
@@ -102,81 +103,66 @@ static LogicalResult peelForLoopLastIteration(
   return success();
 }
 
-
 static SmallVector<int64_t, 3> calculateAutoGemmTile(
     int64_t M, int64_t N, int64_t K, int64_t spmSize, int64_t accSize) {
 
-  // 硬件参数
   const int64_t arraySizeH = 32;
   const int64_t arraySizeW = 32;
-  const int64_t inputDtypeBytes = 1;  // int8 (A 和 B 输入)
-  const int64_t outputDtypeBytes = 1; // int8 (输出到 SPM)
-  const int64_t accDtypeBytes = 4;    // int32 (ACC 累加器)
+  const int64_t inputDtypeBytes = 1; 
+  const int64_t outputDtypeBytes = 1;
+  const int64_t accDtypeBytes = 4;   
 
-  // 辅助 Lambda：向下取整到 32 的倍数，但最小不低于 32
-  auto align_down_32 = [&](int64_t val) -> int64_t {
-    return std::max<int64_t>(32, (val / 32) * 32);
+  // 核心修改 1：支持小于 32 的对齐函数
+  auto get_valid_tile_size = [&](int64_t val) -> int64_t {
+    if (val < 32) return val;
+    return (val / 32) * 32;
   };
 
-  int64_t m_aligned = align_down_32(M);
-  int64_t n_aligned = align_down_32(N);
-
-  // ---------------------------------------------------------
-  // 核心策略: 优先最大化 K，然后 M，最后 N 
-  // 目标: 尽可能将 A 矩阵 (M x K) 完整驻留在 SPM 中
-  // ---------------------------------------------------------
+  int64_t m_aligned = get_valid_tile_size(M);
+  int64_t n_aligned = get_valid_tile_size(N);
 
   // ==========================================
-  // Step 1: 最大化 Tk (K 维度无 32 对齐约束)
+  // Step 1: 最大化 Tk
   // ==========================================
-  // 为了探求 Tk 的绝对物理上限，我们假设 Tm 和 Tn 取硬件支持的最小值 (32x32)
-  // SPM 约束公式: Tm*Tn*1 + Tk*(Tm+Tn)*1 <= spmSize
-  int64_t min_tm = arraySizeH;
-  int64_t min_tn = arraySizeW;
+  // 核心修改 2：计算 Tk 物理上限时，使用真实的最小需求边界
+  int64_t min_tm = std::min<int64_t>(M, arraySizeH);
+  int64_t min_tn = std::min<int64_t>(N, arraySizeW);
   int64_t base_out_spm = min_tm * min_tn * outputDtypeBytes;
   
   int64_t max_tk_spm = 1;
   if (spmSize > base_out_spm) {
     max_tk_spm = (spmSize - base_out_spm) / ((min_tm + min_tn) * inputDtypeBytes);
   }
-  // Tk 尽可能取到 K，且无需对齐
   int64_t t_k = std::max<int64_t>(1, std::min(K, max_tk_spm));
 
   // ==========================================
-  // Step 2: 在固定 Tk 的前提下，最大化 Tm (必须是 32 的倍数)
+  // Step 2: 在固定 Tk 的前提下，最大化 Tm
   // ==========================================
-  // 同样，为了让 Tm 最大，我们假设优先级最低的 Tn 取最小值 (32)
-  // 1. ACC 约束: Tm * 32 * 4 <= accSize
   int64_t max_tm_acc = accSize / (min_tn * accDtypeBytes);
   
-  // 2. SPM 约束: Tm*32*out + Tk*(Tm+32)*in <= spmSize
-  // 推导 -> Tm * (32*out + Tk*in) <= spmSize - 32 * Tk * in
-  int64_t max_tm_spm = arraySizeH; 
+  // 核心修改 3：SPM 约束计算时也要用更新后的 min_tn
+  int64_t max_tm_spm = m_aligned; // 默认最大能取到自身 aligned 后的值
   int64_t spm_rem_for_m = spmSize - min_tn * t_k * inputDtypeBytes; 
   if (spm_rem_for_m > 0) {
     max_tm_spm = spm_rem_for_m / (min_tn * outputDtypeBytes + t_k * inputDtypeBytes);
   }
   
-  // 综合 M 自身大小、ACC 限制和 SPM 限制
   int64_t t_m = std::min({m_aligned, max_tm_acc, max_tm_spm});
-  t_m = align_down_32(t_m);
+  t_m = get_valid_tile_size(t_m);
 
   // ==========================================
-  // Step 3: 在固定 Tk 和 Tm 的前提下，计算剩余的 Tn (必须是 32 的倍数)
+  // Step 3: 在固定 Tk 和 Tm 的前提下，计算剩余的 Tn
   // ==========================================
-  // 1. ACC 约束: Tm * Tn * 4 <= accSize
   int64_t max_tn_acc = accSize / (t_m * accDtypeBytes);
   
-  // 2. SPM 约束: Tm*Tn*out + Tk*(Tm+Tn)*in <= spmSize
-  // 推导 -> Tn * (Tm*out + Tk*in) <= spmSize - Tk * Tm * in
-  int64_t max_tn_spm = arraySizeW;
+  int64_t max_tn_spm = n_aligned;
   int64_t spm_rem_for_n = spmSize - t_k * t_m * inputDtypeBytes;
   if (spm_rem_for_n > 0) {
     max_tn_spm = spm_rem_for_n / (t_m * outputDtypeBytes + t_k * inputDtypeBytes);
   }
 
   int64_t t_n = std::min({n_aligned, max_tn_acc, max_tn_spm});
-  t_n = align_down_32(t_n);
+  t_n = get_valid_tile_size(t_n);
 
   return {t_m, t_n, t_k};
 }
@@ -346,17 +332,23 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
       StringRef label;
       if (rank == 4) { // [Batch, N, M, K]
-        if (dimIdx == 0) label = "Batch";
-        else if (dimIdx == 1) label = "N";
-        else if (dimIdx == 2) label = "M";
+        if (dimIdx == 0)
+          label = "Batch";
+        else if (dimIdx == 1)
+          label = "N";
+        else if (dimIdx == 2)
+          label = "M";
       } else { // rank == 3, [N, M, K]
-        if (dimIdx == 0) label = "N";
-        else if (dimIdx == 1) label = "M";
+        if (dimIdx == 0)
+          label = "N";
+        else if (dimIdx == 1)
+          label = "M";
       }
 
       spatialLoops[currentLoopIdx]->setAttr(
           "npu.loop_dim", rewriter.getStringAttr(label));
-      spatialLoops[currentLoopIdx]->setAttr("npu.target", rewriter.getStringAttr("npu"));
+      spatialLoops[currentLoopIdx]->setAttr(
+          "npu.target", rewriter.getStringAttr("npu"));
       currentLoopIdx++;
     }
 
@@ -427,7 +419,8 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     if (!kTilingResult->loops.empty()) {
       kTilingResult->loops.front()->setAttr(
           "npu.loop_dim", rewriter.getStringAttr("K"));
-      kTilingResult->loops.front()->setAttr("npu.target", rewriter.getStringAttr("npu"));
+      kTilingResult->loops.front()->setAttr(
+          "npu.target", rewriter.getStringAttr("npu"));
     }
 
     // =================================================================
@@ -514,8 +507,6 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
         inheritNpuAttributes(loopOp, partialLoop);
       }
     }
-
-    
 
     return success();
   }

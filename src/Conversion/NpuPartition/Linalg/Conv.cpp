@@ -91,11 +91,6 @@ Operation *createLayoutGeneric(OpBuilder &rewriter, Location loc, Value input,
   op->setAttr("library_call", rewriter.getStringAttr(libraryCallName));
   op->setAttr("npu.layer_name", rewriter.getStringAttr(node_name));
   op->setAttr("npu.target", rewriter.getStringAttr("npu"));
-  op->setAttr("params_n", rewriter.getI32IntegerAttr(n));
-  op->setAttr("params_c", rewriter.getI32IntegerAttr(c));
-  op->setAttr("params_h", rewriter.getI32IntegerAttr(h));
-  op->setAttr("params_w", rewriter.getI32IntegerAttr(w));
-
   return op;
 }
 
