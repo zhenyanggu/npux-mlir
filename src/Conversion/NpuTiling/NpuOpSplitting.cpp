@@ -327,9 +327,51 @@ private:
       tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
     }
 
-    // [新增]: 对生成的空间循环进行边界剥离，消除动态维度 '?'
     auto loops = tilingResult->loops;
-    for (int i = (int)loops.size() - 1; i >= 0; --i) {
+    if (loops.empty())
+      return success();
+
+    // 最内层循环做 Head/Body/Tail 三段剥离，与 TailFusion 路径对齐。
+    scf::ForOp innerLoop = cast<scf::ForOp>(loops.back().getOperation());
+    int64_t tripCount = getStaticTripCount(innerLoop);
+    if (tripCount == 1) {
+      tagInnerComputeOp(innerLoop, "single", rewriter);
+    } else {
+      scf::ForOp restLoop = innerLoop;
+      scf::ForOp headLoop;
+
+      if (succeeded(peelForLoopFirstIteration(rewriter, innerLoop, headLoop))) {
+        inheritNpuAttributes(restLoop, headLoop);
+        tagInnerComputeOp(headLoop, "head", rewriter);
+      }
+
+      int64_t restTripCount = getStaticTripCount(restLoop);
+      if (restTripCount == 1) {
+        tagInnerComputeOp(restLoop, "tail", rewriter);
+      } else {
+        scf::ForOp tailLoop;
+        bool hasTail = false;
+
+        if (succeeded(
+                scf::peelForLoopAndSimplifyBounds(rewriter, restLoop, tailLoop))) {
+          hasTail = true;
+        } else if (succeeded(
+                       peelForLoopLastIteration(rewriter, restLoop, tailLoop))) {
+          hasTail = true;
+        }
+
+        if (hasTail) {
+          inheritNpuAttributes(restLoop, tailLoop);
+          tagInnerComputeOp(tailLoop, "tail", rewriter);
+          tagInnerComputeOp(restLoop, "body", rewriter);
+        } else {
+          tagInnerComputeOp(restLoop, "body", rewriter);
+        }
+      }
+    }
+
+    // 对除最内层以外的循环进行边界剥离，消除动态维度 '?'。
+    for (int i = (int)loops.size() - 2; i >= 0; --i) {
       auto loopOp = cast<scf::ForOp>(loops[i].getOperation());
       scf::ForOp partialLoop;
       if (succeeded(scf::peelForLoopAndSimplifyBounds(
@@ -628,8 +670,50 @@ private:
       tiledOp->setAttr("npu.split_done", rewriter.getUnitAttr());
     }
 
-    // 对生成的循环进行边界剥离，消除动态维度 '?'
-    for (int i = (int)loops.size() - 1; i >= 0; --i) {
+    if (loops.empty())
+      return success();
+
+    // 最内层(K)循环做 Head/Body/Tail 三段剥离，与 TailFusion 路径对齐。
+    scf::ForOp innerLoop = cast<scf::ForOp>(loops.back().getOperation());
+    int64_t tripCount = getStaticTripCount(innerLoop);
+    if (tripCount == 1) {
+      tagInnerComputeOp(innerLoop, "single", rewriter);
+    } else {
+      scf::ForOp restLoop = innerLoop;
+      scf::ForOp headLoop;
+
+      if (succeeded(peelForLoopFirstIteration(rewriter, innerLoop, headLoop))) {
+        inheritNpuAttributes(restLoop, headLoop);
+        tagInnerComputeOp(headLoop, "head", rewriter);
+      }
+
+      int64_t restTripCount = getStaticTripCount(restLoop);
+      if (restTripCount == 1) {
+        tagInnerComputeOp(restLoop, "tail", rewriter);
+      } else {
+        scf::ForOp tailLoop;
+        bool hasTail = false;
+
+        if (succeeded(
+                scf::peelForLoopAndSimplifyBounds(rewriter, restLoop, tailLoop))) {
+          hasTail = true;
+        } else if (succeeded(
+                       peelForLoopLastIteration(rewriter, restLoop, tailLoop))) {
+          hasTail = true;
+        }
+
+        if (hasTail) {
+          inheritNpuAttributes(restLoop, tailLoop);
+          tagInnerComputeOp(tailLoop, "tail", rewriter);
+          tagInnerComputeOp(restLoop, "body", rewriter);
+        } else {
+          tagInnerComputeOp(restLoop, "body", rewriter);
+        }
+      }
+    }
+
+    // 对除最内层以外的循环进行边界剥离，消除动态维度 '?'。
+    for (int i = (int)loops.size() - 2; i >= 0; --i) {
       auto loopOp = cast<scf::ForOp>(loops[i].getOperation());
       scf::ForOp partialLoop;
       if (succeeded(scf::peelForLoopAndSimplifyBounds(
