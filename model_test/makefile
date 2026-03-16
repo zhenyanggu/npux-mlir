@@ -30,10 +30,12 @@ DISABLED_MODEL_MARKERS := $(wildcard $(MODELS_DIR)/*/.disabled)
 DISABLED_MODEL_NAMES_FROM_MARKERS := $(notdir $(patsubst %/,%,$(dir $(DISABLED_MODEL_MARKERS))))
 DISABLED_MODEL_NAMES := $(sort $(filter $(ALL_MODEL_NAMES),$(DISABLED_MODEL_NAMES_FROM_MARKERS) $(SKIP_MODELS)))
 MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(ALL_MODEL_NAMES))
+VGG16_LAYER_MODEL_NAMES := $(sort $(filter vgg16_layer_%,$(ALL_MODEL_NAMES)))
+VGG16_LAYER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(VGG16_LAYER_MODEL_NAMES))
 SELECTIVE_CLEAN_MODELS := $(filter $(ALL_MODEL_NAMES),$(filter-out clean,$(MAKECMDGOALS)))
 
 .PHONY: all init run_one clean clean_cache list check_model \
-	prepare tile mlir llvm zcu102 rebuild \
+	prepare tile mlir llvm zcu102 rebuild vgg16_layers vgg16_layers_all \
 	$(ALL_MODEL_NAMES)
 
 MODEL_PREPARE_TARGETS := $(addsuffix .prepare,$(ALL_MODEL_NAMES))
@@ -45,6 +47,10 @@ MODEL_ZCU102_TARGETS := $(addsuffix .zcu102,$(ALL_MODEL_NAMES))
 .PHONY: $(MODEL_PREPARE_TARGETS) $(MODEL_TILE_TARGETS) $(MODEL_MLIR_TARGETS) $(MODEL_LLVM_TARGETS) $(MODEL_ZCU102_TARGETS)
 
 all: $(MODEL_NAMES)
+
+vgg16_layers: $(VGG16_LAYER_ENABLED_MODEL_NAMES)
+
+vgg16_layers_all: $(VGG16_LAYER_MODEL_NAMES)
 
 init:
 	@mkdir -p $(BUILD_DIR)
@@ -151,6 +157,9 @@ $(BUILD_DIR)/%/.tile.stamp: $(BUILD_DIR)/%/.prepare.stamp
 	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" ]]; then \
 		shape_args="--shape 1,3,224,224"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,224,224"; \
+	elif [[ "$$model" == "vgg16_debug" ]]; then \
+		shape_args="--shape 1,3,32,32"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,32,32"; \
 	fi; \
 	echo "[tile] $$onnx_file -> $$tile_json"; \
 	$(PYTHON) "$(SCRIPTS_DIR)/conv_tile.py" \
@@ -255,6 +264,7 @@ list:
 	@echo "enabled models: $(MODEL_NAMES)"
 	@echo "disabled models: $(DISABLED_MODEL_NAMES)"
 	@echo "usage: make gelu | make gelu.tile | make run_one MODEL=gelu | make zcu102 MODEL=gelu | make tile MODEL=gelu | make llvm MODEL=gelu"
+	@echo "vgg16 layer debug set: make vgg16_layers (enabled only) | make vgg16_layers_all (include disabled)"
 	@echo "skip temporarily: make SKIP_MODELS=\"gelu resize\""
 	@echo "skip persistently: touch models/<model>/.disabled"
 
