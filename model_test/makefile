@@ -171,7 +171,7 @@ $(BUILD_DIR)/%/.mlir.stamp: $(BUILD_DIR)/%/.tile.stamp
 	onnx_file="$$work_dir/model.onnx"; \
 	mlir_file="$$onnx_file.mlir"; \
 	onnx_flags=""; \
-	if [[ "$$model" == "resnet50" ]]; then \
+	if [[ "$$model" == "resnet50" || "$$model" == "conv1x1_stage4" ]]; then \
 		onnx_flags="--enable-conv-opt-pass=false"; \
 		echo "[mlir] $$model disable ConvOptPass to keep 1x1 Conv (avoid Conv->MatMul rewrite)"; \
 	fi; \
