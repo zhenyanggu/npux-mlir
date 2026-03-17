@@ -33,9 +33,18 @@ MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(ALL_MODEL_NAMES))
 VGG16_LAYER_MODEL_NAMES := $(sort $(filter vgg16_layer_%,$(ALL_MODEL_NAMES)))
 VGG16_LAYER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(VGG16_LAYER_MODEL_NAMES))
 SELECTIVE_CLEAN_MODELS := $(filter $(ALL_MODEL_NAMES),$(filter-out clean,$(MAKECMDGOALS)))
+VGG16_CONV_DIAG_MODELS := \
+	vgg16_layer_conv_3x224_to_64x224 \
+	vgg16_layer_conv_3x112_to_64x112 \
+	vgg16_layer_conv_3x56_to_64x56 \
+	vgg16_layer_conv_3x224_to_32x224 \
+	vgg16_layer_conv_32x224_to_64x224 \
+	vgg16_layer_conv_64x224_to_64x224 \
+	vgg16_layer_conv_64x112_to_128x112 \
+	vgg16_layer_conv_64x56_to_128x56
 
 .PHONY: all init run_one clean clean_cache list check_model \
-	prepare tile mlir llvm zcu102 rebuild vgg16_layers vgg16_layers_all \
+	prepare tile mlir llvm zcu102 rebuild vgg16_layers vgg16_layers_all vgg16_conv_diag \
 	$(ALL_MODEL_NAMES)
 
 MODEL_PREPARE_TARGETS := $(addsuffix .prepare,$(ALL_MODEL_NAMES))
@@ -51,6 +60,8 @@ all: $(MODEL_NAMES)
 vgg16_layers: $(VGG16_LAYER_ENABLED_MODEL_NAMES)
 
 vgg16_layers_all: $(VGG16_LAYER_MODEL_NAMES)
+
+vgg16_conv_diag: $(VGG16_CONV_DIAG_MODELS)
 
 init:
 	@mkdir -p $(BUILD_DIR)
@@ -265,6 +276,7 @@ list:
 	@echo "disabled models: $(DISABLED_MODEL_NAMES)"
 	@echo "usage: make gelu | make gelu.tile | make run_one MODEL=gelu | make zcu102 MODEL=gelu | make tile MODEL=gelu | make llvm MODEL=gelu"
 	@echo "vgg16 layer debug set: make vgg16_layers (enabled only) | make vgg16_layers_all (include disabled)"
+	@echo "vgg16 conv diagnostic set: make vgg16_conv_diag"
 	@echo "skip temporarily: make SKIP_MODELS=\"gelu resize\""
 	@echo "skip persistently: touch models/<model>/.disabled"
 

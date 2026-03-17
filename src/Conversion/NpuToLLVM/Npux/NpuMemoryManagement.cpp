@@ -52,8 +52,6 @@ Flatten2DInfo getFlattened2DInfo(
 
   int64_t row = 1;
   int64_t col = 1;
-  // SRAM stride 是 16-bit，col(=stride) 超过该范围会在硬件侧截断并覆盖数据。
-  const int64_t COL_LIMIT = std::numeric_limits<uint16_t>::max();
 
   // 定义分割点索引：从该索引开始（含）往后的所有维度都乘入 col
   int64_t splitIdx = rank - 1;
@@ -85,31 +83,6 @@ Flatten2DInfo getFlattened2DInfo(
   };
 
   std::tie(row, col) = recomputeRowCol(splitIdx);
-  // 若 col 超过 16-bit SRAM stride，向外提升一个维度到 row，直到满足限制。
-  while (col > COL_LIMIT && splitIdx < rank - 1) {
-    ++splitIdx;
-    std::tie(row, col) = recomputeRowCol(splitIdx);
-  }
-
-  if (col > COL_LIMIT) {
-    if (op) {
-      // 如果有 Op 上下文，直接在 IR 位置报 warning
-      op->emitWarning() << "Hardware Constraint: col value (" << col
-                        << ") exceeds 16-bit register limit (" << COL_LIMIT
-                        << ") at Rank " << rank;
-    } else {
-      // 否则使用 llvm::errs 打印到控制台
-      std::string msg;
-      llvm::raw_string_ostream os(msg);
-      os << "[NPU Warning] Col value (" << col
-         << ") exceeds 16-bit register limit (" << COL_LIMIT << ") for shape [";
-      for (size_t i = 0; i < shape.size(); ++i) {
-        os << shape[i] << (i == shape.size() - 1 ? "" : ", ");
-      }
-      os << "]\n";
-      llvm::errs() << os.str();
-    }
-  }
 
   return {row, col, splitIdx};
 }
@@ -208,12 +181,6 @@ public:
     int64_t cols = flattenInfo.col;
     int64_t splitIdx = flattenInfo.splitIdx;
 
-    if (cols > 0 && cols > std::numeric_limits<uint16_t>::max()) {
-      op->emitError() << "DMA col/stride overflow: cols=" << cols
-                      << " exceeds 16-bit SRAM stride limit";
-      return failure();
-    }
-
     Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
     Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
 
@@ -234,10 +201,31 @@ public:
     Value vDramStride =
         rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 32);
 
-    // 3. 获取 SRAM Strides
-    // 通常 SRAM 是连续的，stride 等于 cols。但如果 SRAM 也有 layout，应从
-    // sramType 获取 这里暂时保持和 cols 一致，或者通过 sramType 计算
-    Value vSramStride = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
+    // 3. 获取 SRAM Stride
+    // 语义约束：
+    // - col_num 是 32-bit，可大于 16-bit
+    // - sram_stride 是 16-bit，仅在 row>1 时有意义
+    int64_t sramStrideVal = 0;
+    if (rows > 1) {
+      int64_t sramOffset;
+      SmallVector<int64_t, 4> sramStrides;
+      if (failed(sramType.getStridesAndOffset(sramStrides, sramOffset))) {
+        return failure();
+      }
+      sramStrideVal = cols;
+      if (splitIdx > 0 && (splitIdx - 1) < (int64_t)sramStrides.size()) {
+        sramStrideVal = sramStrides[splitIdx - 1];
+      }
+      if (sramStrideVal < 0 ||
+          sramStrideVal > static_cast<int64_t>(std::numeric_limits<uint16_t>::max())) {
+        op->emitError() << "DMA sram_stride overflow for multi-row transfer: "
+                        << sramStrideVal << " (splitIdx=" << splitIdx
+                        << ", rows=" << rows << ", cols=" << cols << ")";
+        return failure();
+      }
+    }
+    Value vSramStride =
+        rewriter.create<arith::ConstantIntOp>(loc, sramStrideVal, 16);
 
     // 4. Precision Logic: 当前硬件路径统一按 int8 配置。
     Value vPrecision = rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
