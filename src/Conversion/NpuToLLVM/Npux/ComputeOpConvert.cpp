@@ -237,8 +237,8 @@ public:
         // === Case A1: Head / Single (Bias Logic) ===
         OpBuilder::InsertionGuard guard(rewriter);
 
-        StringRef targetDim = (opType == ComputeOpType::gemm) ? "N" : "cout";
-
+        StringRef split_targetDim = (opType == ComputeOpType::gemm) ? "N" : "cout";
+        StringRef loop_targetDim = (opType == ComputeOpType::gemm) ? "N" : "OC";
         scf::ForOp targetLoop = nullptr;
         scf::ForOp outermostFor = nullptr;
         scf::ForOp parentFor = op->getParentOfType<scf::ForOp>();
@@ -250,7 +250,7 @@ public:
           // 优先看当前层是不是 split_dim 匹配
           if (auto splitDim =
                   parentFor->getAttrOfType<StringAttr>("npu.split_dim")) {
-            if (splitDim.getValue() == targetDim) {
+            if (splitDim.getValue() == split_targetDim) {
               targetLoop = parentFor;
               break;
             }
@@ -258,7 +258,7 @@ public:
           // 再看当前层是不是 loop_dim 匹配
           if (auto loopDim =
                   parentFor->getAttrOfType<StringAttr>("npu.loop_dim")) {
-            if (loopDim.getValue() == targetDim) {
+            if (loopDim.getValue() == loop_targetDim) {
               targetLoop = parentFor;
               break;
             }
