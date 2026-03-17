@@ -164,11 +164,14 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
         return failure();
       }
 
-      splitDim = 1;
+      // 关键：按 OC block 维（dim0）切分，而不是按 IC block 维（dim1）。
+      // 若按 dim1 切成 2x1...，后续会生成 row=2 且 sram_stride=9216，
+      // 在 m1 语义下会导致相邻 DMA 发生覆盖重叠。
+      splitDim = 0;
       // 使用 tile=1，确保分块结果不会引入动态尾块维度（?），
       // 避免后续 DMA 参数静态化时出现 col_num=-1 / stride=0。
       splitSize = 1;
-      if (shape[1] <= 1) {
+      if (shape[0] <= 1) {
         op->setAttr("npu.split_done", rewriter.getUnitAttr());
         return failure();
       }
