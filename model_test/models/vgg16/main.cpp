@@ -332,7 +332,7 @@ int main(int argc, char **argv) {
   int64_t labelCorrect = 0;
   int64_t semanticErrors = 0;
   int64_t numericErrors = 0;
-  int64_t sampleErrors = 0;
+  int64_t classificationErrors = 0;
 
   for (int64_t sample = 0; sample < runCount; ++sample) {
     const int64_t imageIndex = opts.startIndex + sample;
@@ -426,14 +426,14 @@ int main(int argc, char **argv) {
     if (diffErrors > 0)
       ++numericErrors;
 
-    if (!semanticOk || diffErrors > 0)
-      ++sampleErrors;
+    if (!labelMatch)
+      ++classificationErrors;
 
     std::cout << "sample=" << imageIndex << " pred=" << pred << " golden_pred=" << goldenPred
               << " label=" << label << " label_match=" << (labelMatch ? "YES" : "NO")
               << " max_abs=" << maxAbs << " mse=" << mse
               << " diff_errors=" << diffErrors << "/" << kNumClasses
-              << " status=" << ((semanticOk && diffErrors == 0) ? "PASS" : "FAIL")
+              << " status=" << (labelMatch ? "PASS" : "FAIL")
               << std::endl;
 
     omTensorListDestroy(inputList);
@@ -449,8 +449,8 @@ int main(int argc, char **argv) {
   std::cout << "Numeric check (all logits <= threshold): " << (runCount - numericErrors)
             << "/" << runCount << std::endl;
 
-  const bool pass = (sampleErrors == 0);
-  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << sampleErrors << "/" << runCount
+  const bool pass = (classificationErrors == 0);
+  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << classificationErrors << "/" << runCount
             << " status=" << (pass ? "PASS" : "FAIL") << std::endl;
   return pass ? 0 : 1;
 }

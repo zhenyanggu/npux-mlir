@@ -269,6 +269,18 @@ $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 	elif [[ -f "$$work_dir/samples.txt" ]]; then \
 		mv -f "$$work_dir/samples.txt" "$$output_dir/$${model}_samples.txt"; \
 	fi; \
+	if [[ -f "$$work_dir/$${model}_samples.csv" ]]; then \
+		mv -f "$$work_dir/$${model}_samples.csv" "$$output_dir/$${model}_samples.csv"; \
+	elif [[ -f "$$work_dir/samples.csv" ]]; then \
+		mv -f "$$work_dir/samples.csv" "$$output_dir/$${model}_samples.csv"; \
+	fi; \
+	if [[ -d "$$work_dir/$${model}_preview_png" ]]; then \
+		rm -rf "$$output_dir/$${model}_preview_png"; \
+		mv "$$work_dir/$${model}_preview_png" "$$output_dir/$${model}_preview_png"; \
+	elif [[ -d "$$work_dir/preview_png" ]]; then \
+		rm -rf "$$output_dir/$${model}_preview_png"; \
+		mv "$$work_dir/preview_png" "$$output_dir/$${model}_preview_png"; \
+	fi; \
 	touch "$@"
 
 list:

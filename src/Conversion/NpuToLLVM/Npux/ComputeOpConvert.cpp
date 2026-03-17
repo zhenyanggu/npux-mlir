@@ -424,6 +424,7 @@ public:
 
       b_row = inBShape[4];
       b_col = inBShape[5];
+      b_stride = inBStrides[4] / inBStrides[5];
 
       out_height = outShape[2];
       out_width = outShape[3];

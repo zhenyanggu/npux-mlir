@@ -1,10 +1,13 @@
 import argparse
+import csv
 import os
+import re
+import shutil
 import subprocess
 import tarfile
 import urllib.request
 from pathlib import Path
-from typing import Any, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import onnx
@@ -49,6 +52,9 @@ IMAGENETTE_SYNSET_TO_IMAGENET_INDEX = {
     "n03425413": 571,  # gas pump
     "n03445777": 574,  # golf ball
     "n03888257": 701,  # parachute
+}
+IMAGENET_INDEX_TO_IMAGENETTE_SYNSET = {
+    v: k for k, v in IMAGENETTE_SYNSET_TO_IMAGENET_INDEX.items()
 }
 
 _PIL_READY = False
@@ -254,20 +260,191 @@ def _check_model_io_shape(session: Any) -> None:
         )
 
 
-def _sample_items(items: Sequence[Tuple[Path, int]], offset: int, count: int) -> Sequence[Tuple[Path, int]]:
+def _interleave_items_by_label(items: Sequence[Tuple[Path, int]]) -> List[Tuple[Path, int]]:
+    by_label: Dict[int, List[Tuple[Path, int]]] = {}
+    for item in items:
+        by_label.setdefault(item[1], []).append(item)
+
+    for label in by_label:
+        by_label[label].sort(key=lambda x: x[0].as_posix())
+
+    label_order = sorted(by_label.keys())
+    cursors = {label: 0 for label in label_order}
+    interleaved: List[Tuple[Path, int]] = []
+    while True:
+        made_progress = False
+        for label in label_order:
+            idx = cursors[label]
+            bucket = by_label[label]
+            if idx < len(bucket):
+                interleaved.append(bucket[idx])
+                cursors[label] = idx + 1
+                made_progress = True
+        if not made_progress:
+            break
+    return interleaved
+
+
+def _sample_items(
+    items: Sequence[Tuple[Path, int]],
+    offset: int,
+    count: int,
+    mode: str,
+) -> Sequence[Tuple[Path, int]]:
     if offset < 0:
         raise ValueError(f"sample_offset must be >= 0, got {offset}")
     if count <= 0:
         raise ValueError(f"sample_count must be > 0, got {count}")
-    if offset >= len(items):
-        raise ValueError(f"sample_offset={offset} out of range, total={len(items)}")
+    if mode not in {"contiguous", "balanced"}:
+        raise ValueError(f"Unsupported sampling mode: {mode}")
 
-    end = min(offset + count, len(items))
-    return items[offset:end]
+    ordered = list(items) if mode == "contiguous" else _interleave_items_by_label(items)
+    if offset >= len(ordered):
+        raise ValueError(f"sample_offset={offset} out of range, total={len(ordered)}")
+
+    end = min(offset + count, len(ordered))
+    return ordered[offset:end]
+
+
+def _resolve_input_image_path(path_text: str, image_list_path: Path, imagenet_root: Path) -> Path:
+    raw = path_text.strip()
+    if not raw:
+        raise ValueError("image path is empty")
+
+    p = Path(raw)
+    candidates: List[Path] = []
+    if p.is_absolute():
+        candidates.append(p)
+    else:
+        candidates.append((image_list_path.parent / p).resolve())
+        candidates.append((imagenet_root / p).resolve())
+        candidates.append(p.resolve())
+
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return c
+
+    raise FileNotFoundError(
+        f"Image path not found for '{raw}'. Tried: "
+        + ", ".join(str(c) for c in candidates)
+    )
+
+
+def _infer_label_from_image_path(image_path: Path) -> int:
+    synset = image_path.parent.name
+    if synset in IMAGENETTE_SYNSET_TO_IMAGENET_INDEX:
+        return IMAGENETTE_SYNSET_TO_IMAGENET_INDEX[synset]
+    raise RuntimeError(
+        f"Cannot infer label from image path '{image_path}'. "
+        "Please provide label explicitly in --image-list."
+    )
+
+
+def _load_samples_from_image_list(image_list_file: Path, imagenet_root: Path) -> List[Tuple[Path, int]]:
+    if not image_list_file.exists():
+        raise FileNotFoundError(f"image list file not found: {image_list_file}")
+
+    samples: List[Tuple[Path, int]] = []
+    for line_no, raw in enumerate(image_list_file.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        label: Optional[int] = None
+        image_text = line
+        if "," in line:
+            image_text, label_text = line.rsplit(",", 1)
+            image_text = image_text.strip()
+            label_text = label_text.strip()
+            if not label_text:
+                raise ValueError(f"Invalid empty label at {image_list_file}:{line_no}")
+            try:
+                label = int(label_text)
+            except ValueError as err:
+                raise ValueError(
+                    f"Invalid label '{label_text}' at {image_list_file}:{line_no}"
+                ) from err
+
+        image_path = _resolve_input_image_path(image_text, image_list_file, imagenet_root)
+        if label is None:
+            label = _infer_label_from_image_path(image_path)
+        samples.append((image_path, int(label)))
+
+    if not samples:
+        raise RuntimeError(f"No valid samples found in image list: {image_list_file}")
+    return samples
+
+
+def _sanitize_filename_token(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z._-]+", "_", text)
 
 
 def _argmax(v: np.ndarray) -> int:
     return int(np.argmax(v, axis=-1))
+
+
+def _label_to_synset(label: int) -> str:
+    return IMAGENET_INDEX_TO_IMAGENETTE_SYNSET.get(label, f"class_{label}")
+
+
+def _safe_rel_path(path: Path, root: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except Exception:
+        return path.as_posix()
+
+
+def _save_preview_png(
+    out_dir: Path,
+    sample_index: int,
+    source_path: Path,
+    image_rgb: np.ndarray,
+    label: int,
+    pred: int,
+) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rel_parent = source_path.parent.name
+    stem = _sanitize_filename_token(source_path.stem)
+    name = (
+        f"{sample_index:04d}_label{label}_pred{pred}_"
+        f"{_sanitize_filename_token(rel_parent)}_{stem}.png"
+    )
+    out_path = out_dir / name
+    title = f"idx={sample_index} label={label} pred={pred}"
+
+    if _try_enable_pillow(auto_install=True):
+        from PIL import Image, ImageDraw  # type: ignore
+
+        img = Image.fromarray(image_rgb, mode="RGB")
+        draw = ImageDraw.Draw(img)
+        draw.rectangle((0, 0, img.width, 20), fill=(0, 0, 0))
+        draw.text((4, 3), title, fill=(255, 255, 0))
+        img.save(out_path, format="PNG")
+        return out_path
+
+    if _try_enable_cv2():
+        import cv2  # type: ignore
+
+        bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+        cv2.rectangle(bgr, (0, 0), (bgr.shape[1] - 1, 22), (0, 0, 0), thickness=-1)
+        cv2.putText(
+            bgr,
+            title,
+            (4, 16),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        ok = cv2.imwrite(str(out_path), bgr)
+        if not ok:
+            raise RuntimeError(f"Failed to write preview png: {out_path}")
+        return out_path
+
+    raise RuntimeError(
+        "Need Pillow or OpenCV to export PNG preview images."
+    )
 
 
 def _fix_batch_dim_to_one(input_model: Path, output_model: Path) -> None:
@@ -398,6 +575,10 @@ def generate_artifacts(
     imagenet_root: Path,
     sample_offset: int,
     sample_count: int,
+    sampling_mode: str,
+    image_list_file: Optional[Path],
+    export_preview_images: bool,
+    preview_dir_name: str,
     print_samples: bool,
 ) -> None:
     if ort is None:
@@ -411,13 +592,25 @@ def generate_artifacts(
     input_name = session.get_inputs()[0].name
     output_name = session.get_outputs()[0].name
 
-    all_samples = _collect_classification_samples(imagenet_root)
-    selected = _sample_items(all_samples, sample_offset, sample_count)
+    if image_list_file is None:
+        all_samples = _collect_classification_samples(imagenet_root)
+    else:
+        all_samples = _load_samples_from_image_list(image_list_file, imagenet_root)
+    selected = _sample_items(all_samples, sample_offset, sample_count, mode=sampling_mode)
 
     images_chw_u8 = []
     labels_i64 = []
     logits_f32 = []
     preview_lines = []
+    manifest_rows: List[Dict[str, str]] = []
+    preview_dir = Path(preview_dir_name)
+    if export_preview_images:
+        if preview_dir.exists():
+            if preview_dir.is_dir():
+                shutil.rmtree(preview_dir)
+            else:
+                preview_dir.unlink()
+        preview_dir.mkdir(parents=True, exist_ok=True)
 
     for i, (image_path, label) in enumerate(selected):
         rgb = _load_image_rgb(image_path)
@@ -436,10 +629,34 @@ def generate_artifacts(
         labels_i64.append(np.int64(label))
         logits_f32.append(out_row)
 
+        sample_index = sample_offset + i
         pred = _argmax(out_row)
-        rel = image_path.relative_to(imagenet_root)
+        rel = _safe_rel_path(image_path, imagenet_root)
+        preview_png = ""
+        if export_preview_images:
+            preview_png = _save_preview_png(
+                out_dir=preview_dir,
+                sample_index=sample_index,
+                source_path=image_path,
+                image_rgb=cropped,
+                label=label,
+                pred=pred,
+            ).as_posix()
         preview_lines.append(
-            f"sample_index={sample_offset + i}, label={label}, pred={pred}, file={rel.as_posix()}"
+            f"sample_index={sample_index}, label={label}, pred={pred}, "
+            f"label_name={_label_to_synset(label)}, pred_name={_label_to_synset(pred)}, file={rel}"
+        )
+        manifest_rows.append(
+            {
+                "sample_index": str(sample_index),
+                "label": str(label),
+                "pred": str(pred),
+                "label_name": _label_to_synset(label),
+                "pred_name": _label_to_synset(pred),
+                "label_match": "YES" if label == pred else "NO",
+                "source_file": rel,
+                "preview_png": preview_png,
+            }
         )
 
     images_np = np.stack(images_chw_u8, axis=0).astype(np.uint8)
@@ -451,12 +668,29 @@ def generate_artifacts(
     prefixed_golden = f"{MODEL_NAME}_output_golden.bin"
     prefixed_legacy_input = f"{MODEL_NAME}_input.bin"
     preview_file = f"{MODEL_NAME}_samples.txt"
+    preview_manifest = f"{MODEL_NAME}_samples.csv"
 
     images_np.tofile(prefixed_images)
     labels_np.tofile(prefixed_labels)
     logits_np.tofile(prefixed_golden)
     _preprocess_to_nchw_f32(images_np[0]).astype(np.float32).tofile(prefixed_legacy_input)
     Path(preview_file).write_text("\n".join(preview_lines) + "\n", encoding="utf-8")
+    with Path(preview_manifest).open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "sample_index",
+                "label",
+                "pred",
+                "label_name",
+                "pred_name",
+                "label_match",
+                "source_file",
+                "preview_png",
+            ],
+        )
+        writer.writeheader()
+        writer.writerows(manifest_rows)
 
     acc = float(np.mean(np.argmax(logits_np, axis=1) == labels_np))
     print("Generated VGG16 test artifacts:")
@@ -465,6 +699,9 @@ def generate_artifacts(
     print(f"  {prefixed_golden}  ({logits_np.shape[0]}x1000 logits, float32)")
     print(f"  {prefixed_legacy_input}  (legacy single-sample preprocessed float32)")
     print(f"  {preview_file}  (sample list)")
+    print(f"  {preview_manifest}  (sample metadata with labels/preds)")
+    if export_preview_images:
+        print(f"  {preview_dir.as_posix()}  (PNG previews with overlaid labels)")
     print(f"Subset semantic top1 accuracy (CPU ORT): {acc * 100.0:.2f}%")
 
     if print_samples:
@@ -488,8 +725,51 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--sample-count", type=int, default=32)
     parser.add_argument("--sample-offset", type=int, default=0)
+    parser.add_argument(
+        "--sampling-mode",
+        choices=["balanced", "contiguous"],
+        default="balanced",
+        help="Sampling mode for generated inference samples (default: balanced)",
+    )
+    parser.add_argument(
+        "--image-list",
+        default="",
+        help=(
+            "Optional image list txt/csv (one per line: <image_path>[,<label>]). "
+            "When provided, selected samples come from this file."
+        ),
+    )
+    parser.add_argument(
+        "--preview-dir",
+        default=f"{MODEL_NAME}_preview_png",
+        help="Directory to export preview PNG images (default: vgg16_preview_png)",
+    )
+    parser.add_argument(
+        "--export-preview-images",
+        dest="export_preview_images",
+        action="store_true",
+        default=True,
+        help="Export labeled preview PNG images (default: enabled)",
+    )
+    parser.add_argument(
+        "--no-export-preview-images",
+        dest="export_preview_images",
+        action="store_false",
+        help="Disable preview PNG export",
+    )
     parser.add_argument("--calibration-count", type=int, default=64)
     parser.add_argument("--calibration-offset", type=int, default=0)
+    parser.add_argument(
+        "--calibration-sampling-mode",
+        choices=["balanced", "contiguous"],
+        default="balanced",
+        help="Sampling mode for calibration set (default: balanced)",
+    )
+    parser.add_argument(
+        "--skip-quantization",
+        action="store_true",
+        help="Skip quantization and use --input-model directly for artifact generation",
+    )
     parser.add_argument("--print-samples", action="store_true")
     parser.add_argument(
         "--auto-download",
@@ -513,11 +793,20 @@ def main() -> None:
 
     input_model = (workdir / args.input_model).resolve()
     output_model = (workdir / args.output_model).resolve()
+    image_list_file = (
+        (Path(args.image_list).expanduser()
+         if Path(args.image_list).is_absolute()
+         else (workdir / Path(args.image_list).expanduser()))
+        .resolve()
+        if args.image_list
+        else None
+    )
 
     if not input_model.exists():
         raise FileNotFoundError(f"Input model not found: {input_model}")
     imagenet_root = _normalize_imagenet_root(Path(args.imagenet_root).resolve())
-    if not imagenet_root.exists():
+    need_imagenet_root = (not args.skip_quantization) or (image_list_file is None)
+    if need_imagenet_root and not imagenet_root.exists():
         if args.auto_download:
             print(f"[info] dataset missing at: {imagenet_root}")
             print(
@@ -531,23 +820,37 @@ def main() -> None:
                 f"Run: {DOWNLOAD_SCRIPT} {DEFAULT_CACHE_DIR}"
             )
 
-    all_samples = _collect_classification_samples(imagenet_root)
-    calibration_samples = _sample_items(all_samples, args.calibration_offset, args.calibration_count)
-    if len(calibration_samples) == 0:
-        raise RuntimeError("No samples selected for calibration")
-    run_qdq_quantization(
-        input_model=input_model,
-        output_model=output_model,
-        calibration_samples=calibration_samples,
-        calibration_count=args.calibration_count,
-    )
+    model_path_for_artifacts = output_model
+    if args.skip_quantization:
+        print("[quant] skipped: using input model directly")
+        model_path_for_artifacts = input_model
+    else:
+        all_samples = _collect_classification_samples(imagenet_root)
+        calibration_samples = _sample_items(
+            all_samples,
+            args.calibration_offset,
+            args.calibration_count,
+            mode=args.calibration_sampling_mode,
+        )
+        if len(calibration_samples) == 0:
+            raise RuntimeError("No samples selected for calibration")
+        run_qdq_quantization(
+            input_model=input_model,
+            output_model=output_model,
+            calibration_samples=calibration_samples,
+            calibration_count=args.calibration_count,
+        )
 
     os.chdir(workdir)
     generate_artifacts(
-        model_path=output_model,
+        model_path=model_path_for_artifacts,
         imagenet_root=imagenet_root,
         sample_offset=args.sample_offset,
         sample_count=args.sample_count,
+        sampling_mode=args.sampling_mode,
+        image_list_file=image_list_file,
+        export_preview_images=args.export_preview_images,
+        preview_dir_name=args.preview_dir,
         print_samples=args.print_samples,
     )
 

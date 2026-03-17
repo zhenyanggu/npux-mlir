@@ -73,7 +73,7 @@
 #define NPU_ERR(fmt, ...) fprintf(stderr, "[NPU_ERROR] " fmt "\n", ##__VA_ARGS__)
 
 #ifndef NPU_CAPI_TRACE
-#define NPU_CAPI_TRACE 1
+#define NPU_CAPI_TRACE 0
 #endif
 
 #if NPU_CAPI_TRACE

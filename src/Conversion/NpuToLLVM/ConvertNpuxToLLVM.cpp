@@ -77,9 +77,29 @@ Value getFlatPtrFromMemRef(Location loc, Value memrefDescVal, Type elemType,
   Value alignedPtr = desc.alignedPtr(rewriter, loc);
   Value offset = desc.offset(rewriter, loc);
 
-  // GEP i8* base + offset
+  // MemRef descriptor offset is in element units, while i8 GEP expects bytes.
+  // Scale offset by element size to avoid under-addressing non-i8 buffers
+  // (e.g. bias i32 subviews).
+  int64_t elemBytes = 1;
+  if (elemType.isIndex()) {
+    elemBytes = 8;
+  } else if (elemType.isIntOrFloat()) {
+    int64_t bitWidth = elemType.getIntOrFloatBitWidth();
+    elemBytes = (bitWidth + 7) / 8;
+    if (elemBytes <= 0)
+      elemBytes = 1;
+  }
+  Value offsetBytes = offset;
+  if (elemBytes != 1) {
+    auto offTy = cast<IntegerType>(offset.getType());
+    Value bytesCst = rewriter.create<LLVM::ConstantOp>(
+        loc, offTy, rewriter.getIntegerAttr(offTy, elemBytes));
+    offsetBytes = rewriter.create<LLVM::MulOp>(loc, offset, bytesCst);
+  }
+
+  // GEP i8* base + byteOffset
   Value finalPtr = rewriter.create<LLVM::GEPOp>(loc, alignedPtr.getType(),
-      rewriter.getI8Type(), alignedPtr, ArrayRef<Value>({offset}));
+      rewriter.getI8Type(), alignedPtr, ArrayRef<Value>({offsetBytes}));
 
   return finalPtr;
 }
