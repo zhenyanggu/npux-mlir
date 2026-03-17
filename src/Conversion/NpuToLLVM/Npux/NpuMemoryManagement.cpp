@@ -11,9 +11,6 @@
 #include "mlir/IR/PatternMatch.h"
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
 #include "src/Dialect/Npux/NpuxOps.hpp"
-#include "llvm/ADT/STLExtras.h"
-#include <limits>
-#include <tuple>
 
 using namespace mlir;
 using namespace npux;
@@ -32,26 +29,22 @@ bool isInNpuKernel(Operation *op) {
   return false;
 }
 
-struct Flatten2DInfo {
-  int64_t row;
-  int64_t col;
-  int64_t splitIdx;
-};
-
-Flatten2DInfo getFlattened2DInfo(
+std::pair<int64_t, int64_t> getFlattened2DShape(
     ArrayRef<int64_t> shape, Operation *op = nullptr) {
   int64_t rank = shape.size();
 
   // 处理低维度情况
   if (rank == 0)
-    return {1, 1, 0};
+    return {1, 1};
   if (rank == 1)
-    return {1, shape[0], 0};
+    return {1, shape[0]};
   if (rank == 2)
-    return {shape[0], shape[1], 1};
+    return {shape[0], shape[1]};
 
   int64_t row = 1;
   int64_t col = 1;
+  const int64_t COL_LIMIT =
+      262144; // 现在已经更改为 32bit寄存器限制，但是spm只有512k，所以限制
 
   // 定义分割点索引：从该索引开始（含）往后的所有维度都乘入 col
   int64_t splitIdx = rank - 1;
@@ -72,19 +65,37 @@ Flatten2DInfo getFlattened2DInfo(
   if (splitIdx < 0)
     splitIdx = 0;
 
-  auto recomputeRowCol = [&](int64_t idx) {
-    int64_t newRow = 1;
-    int64_t newCol = 1;
-    for (int i = idx; i < rank; ++i)
-      newCol *= shape[i];
-    for (int i = 0; i < idx; ++i)
-      newRow *= shape[i];
-    return std::pair<int64_t, int64_t>{newRow, newCol};
-  };
+  // 计算 Col 乘积
+  for (int i = splitIdx; i < rank; ++i) {
+    col *= shape[i];
+  }
 
-  std::tie(row, col) = recomputeRowCol(splitIdx);
+  // 计算 Row 乘积
+  for (int i = 0; i < splitIdx; ++i) {
+    row *= shape[i];
+  }
 
-  return {row, col, splitIdx};
+  if (col > COL_LIMIT) {
+    if (op) {
+      // 如果有 Op 上下文，直接在 IR 位置报 warning
+      op->emitWarning() << "Hardware Constraint: col value (" << col
+                        << ") exceeds 16-bit register limit (" << COL_LIMIT
+                        << ") at Rank " << rank;
+    } else {
+      // 否则使用 llvm::errs 打印到控制台
+      std::string msg;
+      llvm::raw_string_ostream os(msg);
+      os << "[NPU Warning] Col value (" << col
+         << ") exceeds 16-bit register limit (" << COL_LIMIT << ") for shape [";
+      for (size_t i = 0; i < shape.size(); ++i) {
+        os << shape[i] << (i == shape.size() - 1 ? "" : ", ");
+      }
+      os << "]\n";
+      llvm::errs() << os.str();
+    }
+  }
+
+  return {row, col};
 }
 
 // =========================================================
@@ -170,16 +181,7 @@ public:
 
     // 1. 获取物理形状 (通常从逻辑形状一致的 dramType 获取)
     auto shape = dramType.getShape();
-    if (llvm::any_of(shape, [](int64_t d) { return d < 0; })) {
-      op->emitError()
-          << "Dynamic memref shape is unsupported for DMA parameter lowering: "
-          << dramType;
-      return failure();
-    }
-    auto flattenInfo = getFlattened2DInfo(shape, op);
-    int64_t rows = flattenInfo.row;
-    int64_t cols = flattenInfo.col;
-    int64_t splitIdx = flattenInfo.splitIdx;
+    auto [rows, cols] = getFlattened2DShape(shape, op);
 
     Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
     Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
@@ -191,6 +193,19 @@ public:
       return failure();
     }
 
+    int64_t rank = dramType.getRank();
+    int64_t splitIdx = rank - 1;
+
+    // 与 getFlattened2DShape 的分块规则保持一致
+    if (rank == 5) {
+      splitIdx = rank - 2;
+    } else if (rank >= 6) {
+      splitIdx = rank - 5;
+    }
+
+    if (splitIdx < 0)
+      splitIdx = 0;
+
     int64_t dramStrideVal = cols;
     // 对于有 row 维度的情况，优先使用真实 memref stride，兼容非连续 layout。
     // 对于 splitIdx == 0（row=1）则退回 cols。
@@ -201,31 +216,10 @@ public:
     Value vDramStride =
         rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 32);
 
-    // 3. 获取 SRAM Stride
-    // 语义约束：
-    // - col_num 是 32-bit，可大于 16-bit
-    // - sram_stride 是 16-bit，仅在 row>1 时有意义
-    int64_t sramStrideVal = 0;
-    if (rows > 1) {
-      int64_t sramOffset;
-      SmallVector<int64_t, 4> sramStrides;
-      if (failed(sramType.getStridesAndOffset(sramStrides, sramOffset))) {
-        return failure();
-      }
-      sramStrideVal = cols;
-      if (splitIdx > 0 && (splitIdx - 1) < (int64_t)sramStrides.size()) {
-        sramStrideVal = sramStrides[splitIdx - 1];
-      }
-      if (sramStrideVal < 0 ||
-          sramStrideVal > static_cast<int64_t>(std::numeric_limits<uint16_t>::max())) {
-        op->emitError() << "DMA sram_stride overflow for multi-row transfer: "
-                        << sramStrideVal << " (splitIdx=" << splitIdx
-                        << ", rows=" << rows << ", cols=" << cols << ")";
-        return failure();
-      }
-    }
-    Value vSramStride =
-        rewriter.create<arith::ConstantIntOp>(loc, sramStrideVal, 16);
+    // 3. 获取 SRAM Strides
+    // 通常 SRAM 是连续的，stride 等于 cols。但如果 SRAM 也有 layout，应从
+    // sramType 获取 这里暂时保持和 cols 一致，或者通过 sramType 计算
+    Value vSramStride = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
 
     // 4. Precision Logic: 当前硬件路径统一按 int8 配置。
     Value vPrecision = rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
