@@ -26,6 +26,64 @@ struct FixedPointParams {
   int16_t shift;
 };
 
+static bool isReductionLoopLabel(
+    StringRef dimLabel, ComputeOpType opType) {
+  if (opType == ComputeOpType::conv) {
+    return dimLabel == "cin" || dimLabel == "IC";
+  }
+  // GEMM/MATMUL reduction-dim labels.
+  return dimLabel == "K" || dimLabel == "IC" || dimLabel == "cin";
+}
+
+static bool isReductionLoopForOp(Operation *op, ComputeOpType opType) {
+  if (auto splitDim = op->getAttrOfType<StringAttr>("npu.split_dim")) {
+    if (isReductionLoopLabel(splitDim.getValue(), opType))
+      return true;
+  }
+  if (auto loopDim = op->getAttrOfType<StringAttr>("npu.loop_dim")) {
+    if (isReductionLoopLabel(loopDim.getValue(), opType))
+      return true;
+  }
+  return false;
+}
+
+static bool hasReductionLoopAncestor(Operation *op, ComputeOpType opType) {
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (!isa<scf::ForOp>(parent))
+      continue;
+    if (isReductionLoopForOp(parent, opType))
+      return true;
+  }
+  return false;
+}
+
+static Value buildIsFirstReductionIteration(
+    Location loc, Operation *op, ComputeOpType opType, PatternRewriter &rewriter) {
+  Value firstIterCond = nullptr;
+
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    auto forOp = dyn_cast<scf::ForOp>(parent);
+    if (!forOp || !isReductionLoopForOp(parent, opType))
+      continue;
+
+    Value isFirstThisLoop = rewriter.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::eq, forOp.getInductionVar(),
+        forOp.getLowerBound());
+    if (!firstIterCond) {
+      firstIterCond = isFirstThisLoop;
+    } else {
+      firstIterCond =
+          rewriter.create<arith::AndIOp>(loc, firstIterCond, isFirstThisLoop);
+    }
+  }
+
+  if (firstIterCond)
+    return firstIterCond;
+  return rewriter.create<arith::ConstantIntOp>(loc, 1, 1);
+}
+
 FixedPointParams getFixedPointParams(double scale) {
   if (std::abs(scale) < 1e-8)
     return {0, 0};
@@ -66,6 +124,43 @@ int64_t getArrayAttr(
   return defaultVal;
 }
 
+static bool isNpuComputeGenericOp(linalg::GenericOp op) {
+  auto libCall = op.getLibraryCallAttr();
+  if (!libCall)
+    return false;
+  StringRef libName = libCall.getValue();
+  return libName == "npu_conv" || libName == "npu_gemm" ||
+         libName == "npu_matmul";
+}
+
+static bool opOrNestedWritesOutput(Operation *candidate, Value outputMemRef) {
+  if (auto generic = dyn_cast<linalg::GenericOp>(candidate)) {
+    if (isNpuComputeGenericOp(generic) && !generic.getOutputs().empty() &&
+        generic.getOutputs()[0] == outputMemRef) {
+      return true;
+    }
+  }
+
+  for (Region &region : candidate->getRegions()) {
+    for (Block &block : region) {
+      for (Operation &nested : block.getOperations()) {
+        if (opOrNestedWritesOutput(&nested, outputMemRef))
+          return true;
+      }
+    }
+  }
+  return false;
+}
+
+static bool hasPriorComputeWritingSameOutput(
+    linalg::GenericOp op, Value outputMemRef) {
+  for (Operation *prev = op->getPrevNode(); prev; prev = prev->getPrevNode()) {
+    if (opOrNestedWritesOutput(prev, outputMemRef))
+      return true;
+  }
+  return false;
+}
+
 // --- Main Rewrite Pattern ---
 
 class LinalgComputeToNpuxPattern : public OpRewritePattern<linalg::GenericOp> {
@@ -100,10 +195,13 @@ public:
     Value inputAMemRef = op.getInputs()[0];
     Value inputBMemRef = op.getInputs()[1]; // Weight / RHS
     Value outputMemRef = op.getOutputs()[0];
+    bool hasPriorWriteOnSameOutput =
+        hasPriorComputeWritingSameOutput(op, outputMemRef);
 
     Value psumMemRefForOp = nullptr; // Passed to ComputeRunOp
     bool flagAccBias = false;
     bool flagDoAccum = false;
+    bool dynamicBiasOnFirstReductionIter = false;
 
     // 获取 loop_stage 标签，如果没有打标签，默认作为 single 处理以保证安全
     StringRef loopStage = "single";
@@ -120,12 +218,14 @@ public:
     // 提取判断逻辑：判断当前是否是输出块的绝对“第一次计算”
     bool isLoopFirst = (loopStage == "head" || loopStage == "single");
     bool isSplitFirst = (splitStage == "head" || splitStage == "single");
-    bool isFirstCalculation = (isLoopFirst && isSplitFirst);
+    bool isFirstCalculation =
+        (isLoopFirst && isSplitFirst && !hasPriorWriteOnSameOutput);
     bool isLoopLast = (loopStage == "tail" || loopStage == "single");
     bool isSplitLast = (splitStage == "tail" || splitStage == "single");
     bool isLastCalculation = (isLoopLast && isSplitLast);
     bool originalDoRelu = (getIntAttr(op, "do_relu", 0) != 0);
     bool doRelu = originalDoRelu && isLastCalculation;
+    bool forceAccumulateByPriorWrite = hasPriorWriteOnSameOutput;
 
     if (op.getInputs().size() >= 3) {
       // ==========================================
@@ -212,14 +312,23 @@ public:
         rewriter.create<MvinBiasOp>(loc, thirdInput);
 
         // 2. Configure ComputeOp Flags
-        psumMemRefForOp =
-            nullptr;        // Bias 已经在寄存器里了，不需要传入 psum buffer
         flagAccBias = true; // 启用加偏置
 
         // 【核心修改点】：因为需要加偏置，有加法操作，DoAccum 必须为 true
         flagDoAccum = true;
 
-      } else if (loopStage == "body" || loopStage == "tail" ||
+        // 当 head 计算仍处于 cin/IC reduction 循环中时，bias 只能在
+        // 首次 reduction 迭代生效。后续迭代要读回已有 psum 继续累加。
+        if (hasReductionLoopAncestor(op, opType)) {
+          dynamicBiasOnFirstReductionIter = true;
+          psumMemRefForOp = outputMemRef;
+        } else {
+          // 无 reduction 循环时，保持原行为：纯 bias 起算。
+          psumMemRefForOp = nullptr;
+        }
+
+      } else if (forceAccumulateByPriorWrite ||
+                 loopStage == "body" || loopStage == "tail" ||
                  splitStage == "body" || splitStage == "tail") {
         // === Case A2: Body / Tail (Accumulation Logic) ===
         psumMemRefForOp = outputMemRef;
@@ -241,7 +350,8 @@ public:
         // 【核心修改点】：既没有 Bias，也不需要累加 Psum，此时才是真正的 0
         flagDoAccum = false;
 
-      } else if (loopStage == "body" || loopStage == "tail" ||
+      } else if (forceAccumulateByPriorWrite ||
+                 loopStage == "body" || loopStage == "tail" ||
                  splitStage == "body" || splitStage == "tail") {
         // === Case B2: 无 Bias 但处于 Body/Tail 累加阶段 ===
         psumMemRefForOp = outputMemRef;
@@ -419,6 +529,11 @@ public:
     // 8. Flags (Accumulate, ReLU, Bias)
     Value vDoAccum = c1(flagDoAccum);
     Value vAccBias = c1(flagAccBias);
+    if (dynamicBiasOnFirstReductionIter) {
+      Value isFirstReductionIter =
+          buildIsFirstReductionIteration(loc, op, opType, rewriter);
+      vAccBias = rewriter.create<arith::AndIOp>(loc, vAccBias, isFirstReductionIter);
+    }
 
     int64_t reluTypeVal = getIntAttr(op, "relu_type", 0);
     ActivationType actType = static_cast<ActivationType>(reluTypeVal);

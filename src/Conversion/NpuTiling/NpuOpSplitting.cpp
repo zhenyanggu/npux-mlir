@@ -16,6 +16,8 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "src/Pass/Passes.hpp"
+#include <algorithm>
+#include <limits>
 
 using namespace mlir;
 
@@ -115,11 +117,7 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     // 逻辑：分块条件过滤
     // ==============================================================
 
-    // 条件 1: 如果是 weight，不需要分块
-    if (isMvin && dmaType == "weight") {
-      op->setAttr("npu.split_done", rewriter.getUnitAttr());
-      return failure();
-    }
+    bool isWeightMvin = isMvin && dmaType == "weight";
 
     // 条件 2: 对于 MVIN (Input)，检查其输入源是否为 tensor.extract_slice
     if (isMvin && dmaType == "input") {
@@ -146,14 +144,43 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     int rank = inputType.getRank();
 
     int splitDim = -1;
+    int64_t splitSize = 1;
 
-    if (rank == 4) {
+    // Weight DMA 仅在 col(=stride) 超过硬件 16-bit 限制时切分 IC 维，
+    // 避免后续降级把跨块 stride 错误连续化。
+    if (isWeightMvin) {
+      if (!inputType.hasStaticShape() || rank != 6) {
+        op->setAttr("npu.split_done", rewriter.getUnitAttr());
+        return failure();
+      }
+
+      auto shape = inputType.getShape();
+      const int64_t colLimit = std::numeric_limits<uint16_t>::max();
+      int64_t baseCol = shape[2] * shape[3] * shape[4] * shape[5];
+      int64_t totalCol = shape[1] * baseCol;
+
+      if (baseCol <= 0 || totalCol <= colLimit) {
+        op->setAttr("npu.split_done", rewriter.getUnitAttr());
+        return failure();
+      }
+
+      splitDim = 1;
+      // 使用 tile=1，确保分块结果不会引入动态尾块维度（?），
+      // 避免后续 DMA 参数静态化时出现 col_num=-1 / stride=0。
+      splitSize = 1;
+      if (shape[1] <= 1) {
+        op->setAttr("npu.split_done", rewriter.getUnitAttr());
+        return failure();
+      }
+    }
+
+    if (!isWeightMvin && rank == 4) {
       // 四维：对最高维（第0维）分块
       splitDim = 1;
-    } else if (rank == 5) {
+    } else if (!isWeightMvin && rank == 5) {
       // 五维：对第二位（第1维）分块
       splitDim = 1;
-    } else {
+    } else if (!isWeightMvin) {
       // 其他维度暂不处理
       op->setAttr("npu.split_done", rewriter.getUnitAttr());
       return failure();
@@ -162,7 +189,7 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     // 3. 执行分块 (Tiling)
     // 只有选中的 splitDim 设置为 1，其余为 0（代表不在此维度切分）
     SmallVector<OpFoldResult> tileSizes(rank, rewriter.getIndexAttr(0));
-    tileSizes[splitDim] = rewriter.getIndexAttr(1);
+    tileSizes[splitDim] = rewriter.getIndexAttr(splitSize);
 
     scf::SCFTilingOptions options;
     options.setTileSizes(tileSizes);
