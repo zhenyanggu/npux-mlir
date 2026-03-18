@@ -16,17 +16,17 @@ from onnxruntime.quantization import (
 
 
 class MatrixAddModel(nn.Module):
-    def __init__(self, rows, cols, seed):
+    def __init__(self, batch, rows, cols, seed):
         super().__init__()
         rng = np.random.default_rng(seed)
-        bias = rng.standard_normal(size=(rows, cols)).astype(np.float32) * 0.125
-        self.register_buffer("bias", torch.from_numpy(bias))
+        residual = (
+            rng.standard_normal(size=(batch, rows, cols)).astype(np.float32) * 0.125
+        )
+        self.register_buffer("residual", torch.from_numpy(residual))
 
     def forward(self, x):
-        x = x + 1e-3
-        x = x + self.bias
-        x = x - 1e-3
-        return x
+        # Residual-style addition with identical tensor shapes (no broadcasting).
+        return x + self.residual
 
 
 class RandomDataReader(CalibrationDataReader):
@@ -124,7 +124,7 @@ def main():
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
 
-    model = MatrixAddModel(args.rows, args.cols, args.seed).eval()
+    model = MatrixAddModel(args.batch, args.rows, args.cols, args.seed).eval()
     dummy_input = torch.randn(*input_shape, dtype=torch.float32)
 
     torch.onnx.export(
