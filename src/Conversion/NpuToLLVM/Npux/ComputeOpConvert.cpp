@@ -624,12 +624,12 @@ public:
       row_num *= inAShape[i];
     }
 
-    // Matadd 的 col/row 会被 lowering 到 8-bit CAPI 参数，且硬件无 "-1" 语义。
-    // 为避免 256->0 的截断，编译期强制限制在 [1, 255]。
-    if (col_num < 1 || col_num > 255 || row_num < 1 || row_num > 255) {
+    // Matadd 的 col/row 采用 "-1" 语义编码到 8-bit CAPI 参数：
+    // 实际尺寸允许 [1, 256]，编码后范围 [0, 255]。
+    if (col_num < 1 || col_num > 256 || row_num < 1 || row_num > 256) {
       op.emitError() << "npu_matadd shape out of hardware range: col_num="
                      << col_num << ", row_num=" << row_num
-                     << ". Expected 1..255. Please tile/split matadd.";
+                     << ". Expected 1..256. Please tile/split matadd.";
       return failure();
     }
 
@@ -638,8 +638,9 @@ public:
       return rewriter.create<arith::ConstantIntOp>(loc, v, 32);
     };
 
-    Value vColNum = c32(col_num);
-    Value vRowNum = c32(row_num);
+    // npu_matadd_run 约定传入的是 col_num-1 / row_num-1。
+    Value vColNum = c32(col_num - 1);
+    Value vRowNum = c32(row_num - 1);
 
     // 6. Quantization Params
     int64_t outZp = getIntAttr(op, "out_zp", 0);

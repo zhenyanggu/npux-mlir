@@ -967,6 +967,7 @@ public:
     args.push_back(addrA);
     args.push_back(addrB);
     args.push_back(addrOut);
+    // Matadd 形状参数采用 "-1" 语义编码（实际尺寸 - 1）。
     args.push_back(castToI8(loc, adaptor.getColNum(), rewriter));
     args.push_back(castToI8(loc, adaptor.getRowNum(), rewriter));
     args.push_back(adaptor.getOutputZeropoint());

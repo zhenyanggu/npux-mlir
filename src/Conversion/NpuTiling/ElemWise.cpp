@@ -53,23 +53,24 @@ SmallVector<int64_t> calculateAutoElemWiseTile(
 
   if (maxElems <= 0) return tileSizes; // 极度受限时的保护
 
-  // MatAdd 的 shape 参数会直接下发到 8-bit 寄存器（无 -1 语义）：
-  // 1 <= col_num <= 255, 1 <= row_num <= 255。
+  // MatAdd 的 shape 参数按 "-1" 语义编码到 8-bit 寄存器：
+  // 0 <= col_num_m1 <= 255, 0 <= row_num_m1 <= 255，
+  // 即实际尺寸支持 1..256。
   // 其中 col_num 取最后一维，row_num 取其余维度乘积。
   if (opName == "npu_matadd") {
-    constexpr int64_t kMataddRegMax = 255;
+    constexpr int64_t kMataddActualMax = 256;
     SmallVector<int64_t> dims(rank, 1);
     for (int64_t i = 0; i < rank; ++i) {
       dims[i] = loopRanges[i] > 0 ? loopRanges[i] : 1;
     }
 
     int64_t colTile =
-        std::min<int64_t>({dims.back(), maxElems, kMataddRegMax});
+        std::min<int64_t>({dims.back(), maxElems, kMataddActualMax});
     colTile = std::max<int64_t>(1, colTile);
     tileSizes[rank - 1] = colTile;
 
     int64_t rowBudgetByMem = std::max<int64_t>(1, maxElems / colTile);
-    int64_t rowBudget = std::min<int64_t>(kMataddRegMax, rowBudgetByMem);
+    int64_t rowBudget = std::min<int64_t>(kMataddActualMax, rowBudgetByMem);
     int64_t rowProduct = 1;
 
     for (int64_t i = rank - 2; i >= 0; --i) {
