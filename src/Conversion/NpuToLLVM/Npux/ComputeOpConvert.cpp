@@ -11,6 +11,7 @@
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
 #include "src/Dialect/Npux/NpuxOps.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 
@@ -623,6 +624,15 @@ public:
       row_num *= inAShape[i];
     }
 
+    // Matadd 的 col/row 会被 lowering 到 8-bit CAPI 参数，且硬件无 "-1" 语义。
+    // 为避免 256->0 的截断，编译期强制限制在 [1, 255]。
+    if (col_num < 1 || col_num > 255 || row_num < 1 || row_num > 255) {
+      op.emitError() << "npu_matadd shape out of hardware range: col_num="
+                     << col_num << ", row_num=" << row_num
+                     << ". Expected 1..255. Please tile/split matadd.";
+      return failure();
+    }
+
     // 5. Create Constants for Geometry
     auto c32 = [&](int64_t v) {
       return rewriter.create<arith::ConstantIntOp>(loc, v, 32);
@@ -632,14 +642,46 @@ public:
     Value vRowNum = c32(row_num);
 
     // 6. Quantization Params
-    // Matadd 通常使用 output 的 scale 和 zeropoint
-    double outScale = getFloatAttr(op, "out_scale", 1.0);
     int64_t outZp = getIntAttr(op, "out_zp", 0);
+    int64_t outScaleFp = 1;
+    int64_t outShiftFp = 0;
 
-    auto quantParams = getFixedPointParams(outScale);
+    // Prefer fixed-point params prepared in npu-insert-dma.
+    if (auto attr = op->getAttrOfType<IntegerAttr>("npu.matadd_output_scale"))
+      outScaleFp = attr.getValue().getSExtValue();
+    if (auto attr = op->getAttrOfType<IntegerAttr>("npu.matadd_output_shift"))
+      outShiftFp = attr.getValue().getSExtValue();
+
+    // Fallback for legacy IRs without prepared attrs.
+    if (!op->hasAttr("npu.matadd_output_scale") ||
+        !op->hasAttr("npu.matadd_output_shift")) {
+      const double outScale = getFloatAttr(op, "out_scale", 1.0);
+      const double in1Scale =
+          getFloatAttr(op, "in1_scale", getFloatAttr(op, "lhs_scale", 1.0));
+      const double in2Scale =
+          getFloatAttr(op, "in2_scale", getFloatAttr(op, "rhs_scale", 1.0));
+
+      if (in1Scale > 0.0 && in2Scale > 0.0 && outScale > 0.0) {
+        const double ratioA = in1Scale / outScale;
+        const double ratioB = in2Scale / outScale;
+        const double maxRatio = std::max(std::abs(ratioA), std::abs(ratioB));
+        int n = 0;
+        if (maxRatio > 0.0) {
+          while (n < 30 && (maxRatio * std::ldexp(1.0, n + 1) <= 32767.0))
+            ++n;
+        }
+        outScaleFp = 1;
+        outShiftFp = -n;
+      } else {
+        auto quantParams = getFixedPointParams(outScale);
+        outScaleFp = quantParams.multiplier;
+        outShiftFp = quantParams.shift;
+      }
+    }
+
     Value vOutZp = c32(outZp);
-    Value vOutScale = c32(quantParams.multiplier);
-    Value vOutScaleShift = c32(quantParams.shift);
+    Value vOutScale = c32(outScaleFp);
+    Value vOutScaleShift = c32(outShiftFp);
 
     // 7. Replace Op with MataddRunOp
     rewriter.replaceOpWithNewOp<MataddRunOp>(op, inputAMemRef, inputBMemRef,

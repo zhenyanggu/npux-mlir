@@ -8,6 +8,7 @@
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h" // 核心 Tiling 工具
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/IR/PatternMatch.h"
+#include <algorithm>
 
 #include "src/Pass/Passes.hpp"
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
@@ -51,6 +52,37 @@ SmallVector<int64_t> calculateAutoElemWiseTile(
   }
 
   if (maxElems <= 0) return tileSizes; // 极度受限时的保护
+
+  // MatAdd 的 shape 参数会直接下发到 8-bit 寄存器（无 -1 语义）：
+  // 1 <= col_num <= 255, 1 <= row_num <= 255。
+  // 其中 col_num 取最后一维，row_num 取其余维度乘积。
+  if (opName == "npu_matadd") {
+    constexpr int64_t kMataddRegMax = 255;
+    SmallVector<int64_t> dims(rank, 1);
+    for (int64_t i = 0; i < rank; ++i) {
+      dims[i] = loopRanges[i] > 0 ? loopRanges[i] : 1;
+    }
+
+    int64_t colTile =
+        std::min<int64_t>({dims.back(), maxElems, kMataddRegMax});
+    colTile = std::max<int64_t>(1, colTile);
+    tileSizes[rank - 1] = colTile;
+
+    int64_t rowBudgetByMem = std::max<int64_t>(1, maxElems / colTile);
+    int64_t rowBudget = std::min<int64_t>(kMataddRegMax, rowBudgetByMem);
+    int64_t rowProduct = 1;
+
+    for (int64_t i = rank - 2; i >= 0; --i) {
+      int64_t dimSize = dims[i];
+      int64_t maxForDim = std::max<int64_t>(1, rowBudget / rowProduct);
+      int64_t tile = std::min<int64_t>(dimSize, maxForDim);
+      tileSizes[i] = tile;
+      rowProduct *= tile;
+      if (rowProduct >= rowBudget)
+        break;
+    }
+    return tileSizes;
+  }
 
   int64_t remainingElems = maxElems;
 

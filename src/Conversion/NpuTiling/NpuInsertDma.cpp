@@ -12,6 +12,8 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "src/Pass/Passes.hpp"
+#include <algorithm>
+#include <cmath>
 
 using namespace mlir;
 
@@ -88,6 +90,56 @@ static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
   }
 
   return dmaOp.getResult(0);
+}
+
+struct MataddQuantPlan {
+  int16_t mvinScaleA = 1;
+  int16_t mvinScaleB = 1;
+  int16_t mvinShift = 0;
+  int16_t outScale = 1;
+  int16_t outShift = 0;
+};
+
+static double getFloatAttrOr(Operation *op, StringRef name, double defaultVal) {
+  if (auto attr = op->getAttrOfType<FloatAttr>(name))
+    return attr.getValueAsDouble();
+  return defaultVal;
+}
+
+static MataddQuantPlan buildMataddQuantPlan(Operation *op) {
+  MataddQuantPlan plan;
+
+  const double in1Scale =
+      getFloatAttrOr(op, "in1_scale", getFloatAttrOr(op, "lhs_scale", 1.0));
+  const double in2Scale =
+      getFloatAttrOr(op, "in2_scale", getFloatAttrOr(op, "rhs_scale", 1.0));
+  const double outScale = getFloatAttrOr(op, "out_scale", 1.0);
+
+  if (in1Scale <= 0.0 || in2Scale <= 0.0 || outScale <= 0.0)
+    return plan;
+
+  const double ratioA = in1Scale / outScale;
+  const double ratioB = in2Scale / outScale;
+  const double maxRatio = std::max(std::abs(ratioA), std::abs(ratioB));
+  if (maxRatio <= 0.0)
+    return plan;
+
+  int n = 0;
+  while (n < 30 && (maxRatio * std::ldexp(1.0, n + 1) <= 32767.0))
+    ++n;
+
+  auto toI16Scale = [n](double ratio) -> int16_t {
+    long v = std::lround(ratio * std::ldexp(1.0, n));
+    v = std::clamp<long>(v, -32768, 32767);
+    return static_cast<int16_t>(v);
+  };
+
+  plan.mvinScaleA = toI16Scale(ratioA);
+  plan.mvinScaleB = toI16Scale(ratioB);
+  plan.mvinShift = 0;
+  plan.outScale = 1;
+  plan.outShift = static_cast<int16_t>(-n);
+  return plan;
 }
 
 //=============================================================================
@@ -268,9 +320,11 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 
     Location loc = op.getLoc();
     Type i32Type = rewriter.getI32Type();
+    MataddQuantPlan quantPlan = buildMataddQuantPlan(op.getOperation());
 
     // --- 步骤 1: 处理输入，插入提升至 i32 且 encoding=3 的 MVIN ---
     SmallVector<Value> newInputs;
+    int inputIdx = 0;
     for (Value operand : op.getInputs()) {
       auto inputType = cast<RankedTensorType>(operand.getType());
       
@@ -302,8 +356,17 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 
       mvinOp->setAttr("library_call", rewriter.getStringAttr("npu_dma_mvin"));
       mvinOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+      const int16_t mvinScale =
+          (inputIdx == 0) ? quantPlan.mvinScaleA : quantPlan.mvinScaleB;
+      mvinOp->setAttr("npu.is_quant", rewriter.getBoolAttr(true));
+      mvinOp->setAttr("npu.quant_zero", rewriter.getI32IntegerAttr(0));
+      mvinOp->setAttr("npu.quant_scale",
+          rewriter.getIntegerAttr(rewriter.getI16Type(), mvinScale));
+      mvinOp->setAttr("npu.quant_shift",
+          rewriter.getIntegerAttr(rewriter.getI16Type(), quantPlan.mvinShift));
       
       newInputs.push_back(mvinOp.getResult(0));
+      ++inputIdx;
     }
 
     // --- 步骤 2: 准备 Medium Tensor (分配 encoding=2，精度保持原样) ---
@@ -314,16 +377,12 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     }
 
     // --- 步骤 3: 克隆 Matadd 算子并对接新输入/输出 ---
-    int64_t rank = cast<RankedTensorType>(newInputs[0].getType()).getRank();
-    SmallVector<AffineMap> maps(3, rewriter.getMultiDimIdentityMap(rank));
-    SmallVector<utils::IteratorType> iteratorTypes(rank, utils::IteratorType::parallel);
-
     auto newOp = rewriter.create<linalg::GenericOp>(loc,
         TypeRange{mediumTensors[0].getType()},
         newInputs,        // 现在都是 i32, encoding=3
         mediumTensors,    // 输出目标，如 i8, encoding=2
-        maps,
-        iteratorTypes,
+        op.getIndexingMapsArray(),
+        op.getIteratorTypesArray(),
         /*bodyBuilder=*/
         [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
             // args[0] (LHS) 和 args[1] (RHS) 已经是 i32 
@@ -347,6 +406,10 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     for (NamedAttribute attr : op->getAttrs()) {
       newOp->setAttr(attr.getName(), attr.getValue());
     }
+    newOp->setAttr("npu.matadd_output_scale",
+        rewriter.getIntegerAttr(rewriter.getI16Type(), quantPlan.outScale));
+    newOp->setAttr("npu.matadd_output_shift",
+        rewriter.getIntegerAttr(rewriter.getI16Type(), quantPlan.outShift));
     // 打上防重复标记
     newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
 
