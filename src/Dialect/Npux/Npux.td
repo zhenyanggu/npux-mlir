@@ -390,6 +390,7 @@ def Npux_MataddRunOp : Npux_Op<"matadd_run"> {
   let description = [{
     Maps to runtime C-API `npu_matadd_run`.
     Inputs A/B must reside in ACC (space 3), output resides in SPM (space 2).
+    `col_num` / `row_num` use "-1" encoding (actual_dim - 1), 8-bit each.
   }];
 
   let arguments = (ins
@@ -407,7 +408,7 @@ def Npux_MataddRunOp : Npux_Op<"matadd_run"> {
 
   let assemblyFormat = [{
     $input_a `,` $input_b `->` $output
-    `shape` `(` $col_num `x` $row_num `)`
+    `shape_m1` `(` $col_num `x` $row_num `)`
     `quant` `(` $output_zeropoint `,` $output_scale `,` $output_scaleshift `)`
     attr-dict `:` type($input_a) `,` type($input_b) `,` type($output)
   }];
