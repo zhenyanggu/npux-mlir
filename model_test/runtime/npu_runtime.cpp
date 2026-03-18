@@ -73,7 +73,7 @@
 #define NPU_ERR(fmt, ...) fprintf(stderr, "[NPU_ERROR] " fmt "\n", ##__VA_ARGS__)
 
 #ifndef NPU_CAPI_TRACE
-#define NPU_CAPI_TRACE 0
+#define NPU_CAPI_TRACE 1
 #endif
 
 #if NPU_CAPI_TRACE
@@ -839,9 +839,9 @@ void NpuRuntime::run_matadd(const MataddConfig& cfg) {
     NPU_TIMER_TOTAL("run_matadd");
     
     NPU_TIMER_SECTION_BEGIN("run_matadd(pre_reg)")
-    NPU_LOG("Running MATADD (A=0x%X, B=0x%X, Out=0x%X, Col=%d, Row=%d)", 
+    NPU_LOG("Running MATADD (A=0x%X, B=0x%X, Out=0x%X, ColM1=%d, RowM1=%d)", 
             cfg.input_a_addr, cfg.input_b_addr, cfg.output_addr,
-            cfg.col_num, cfg.row_num);
+            cfg.col_num_m1, cfg.row_num_m1);
     NPU_TIMER_SECTION_END()
     
     NPU_TIMER_SECTION_BEGIN("run_matadd(reg_write)")
@@ -858,8 +858,8 @@ void NpuRuntime::run_matadd(const MataddConfig& cfg) {
     
     // 3. MATADD CTRL1 - Output address and dimensions
     uint64_t val_ctrl1 = REG_FIELD(MATADD_CTRL1, OUT_ADDR, cfg.output_addr) |
-                         REG_FIELD(MATADD_CTRL1, COL, cfg.col_num) |
-                         REG_FIELD(MATADD_CTRL1, ROW, cfg.row_num);
+                         REG_FIELD(MATADD_CTRL1, COL, cfg.col_num_m1) |
+                         REG_FIELD(MATADD_CTRL1, ROW, cfg.row_num_m1);
     reg_write64(RegOffset::MATADD_CTRL_1, val_ctrl1);
     
     // 4. Start MATADD
@@ -1545,19 +1545,19 @@ void npu_matadd_run(
     uint32_t input_a_addr,
     uint32_t input_b_addr,
     uint32_t output_addr,
-    uint8_t  col_num,
-    uint8_t  row_num,
+    uint8_t  col_num_m1,
+    uint8_t  row_num_m1,
     uint32_t output_zeropoint,
     uint16_t output_scale,
     uint16_t output_scaleshift
 ) {
     NPU_CAPI_LOG(
-        "npu_matadd_run(input_a_addr=0x%08X, input_b_addr=0x%08X, output_addr=0x%08X, col_num=%u, row_num=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%d)",
+        "npu_matadd_run(input_a_addr=0x%08X, input_b_addr=0x%08X, output_addr=0x%08X, col_num_m1=%u, row_num_m1=%u, output_zeropoint=%u, output_scale=%u, output_scaleshift=%d)",
         input_a_addr,
         input_b_addr,
         output_addr,
-        (unsigned)col_num,
-        (unsigned)row_num,
+        (unsigned)col_num_m1,
+        (unsigned)row_num_m1,
         output_zeropoint,
         (unsigned)output_scale,
         (int)static_cast<int16_t>(output_scaleshift));
@@ -1566,8 +1566,8 @@ void npu_matadd_run(
             input_a_addr,
             input_b_addr,
             output_addr,
-            col_num,
-            row_num,
+            col_num_m1,
+            row_num_m1,
             output_zeropoint,
             output_scale,
             output_scaleshift

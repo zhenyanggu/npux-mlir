@@ -181,6 +181,9 @@ $(BUILD_DIR)/%/.tile.stamp: $(BUILD_DIR)/%/.prepare.stamp
 	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" ]]; then \
 		shape_args="--shape 1,3,224,224"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,224,224"; \
+	elif [[ "$$model" == "bert_base" ]]; then \
+		shape_args="--shape 1,128"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,128 (fixed seq_len=128)"; \
 	elif [[ "$$model" == "vgg16_debug" ]]; then \
 		shape_args="--shape 1,3,32,32"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,32,32"; \
@@ -294,6 +297,12 @@ $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 		rm -rf "$$output_dir/$${model}_preview_png"; \
 		mv "$$work_dir/preview_png" "$$output_dir/$${model}_preview_png"; \
 	fi; \
+	shopt -s nullglob; \
+	for extra_bin in "$$work_dir"/$${model}_*.bin; do \
+		base_name="$$(basename "$$extra_bin")"; \
+		mv -f "$$extra_bin" "$$output_dir/$$base_name"; \
+	done; \
+	shopt -u nullglob; \
 	touch "$@"
 
 list:

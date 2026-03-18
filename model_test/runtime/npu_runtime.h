@@ -217,8 +217,8 @@ struct MataddConfig {
     uint32_t output_addr;      // Output address in SPM
     
     // Dimensions
-    uint8_t  col_num;          // Column number (actual, not -1)
-    uint8_t  row_num;          // Row number (actual, not -1)
+    uint8_t  col_num_m1;       // Column number - 1
+    uint8_t  row_num_m1;       // Row number - 1
     
     // Output Quantization (int32 -> int8)
     uint32_t output_zeropoint;
@@ -705,8 +705,8 @@ extern "C" {
      * @param input_a_addr       输入 A 地址，硬件位宽 32-bit。
      * @param input_b_addr       输入 B 地址，硬件位宽 32-bit。
      * @param output_addr        输出地址，硬件位宽 32-bit。
-     * @param col_num            列数，硬件位宽 8-bit（建议填写实际列数，1~255）。
-     * @param row_num            行数，硬件位宽 8-bit（建议填写实际行数，1~255）。
+     * @param col_num            列数-1，硬件位宽 8-bit（实际列数范围 1~256）。
+     * @param row_num            行数-1，硬件位宽 8-bit（实际行数范围 1~256）。
      * @param output_zeropoint   输出零点，硬件位宽 32-bit。
      * @param output_scale       输出量化 scale，硬件位宽 16-bit。
      * @param output_scaleshift  输出量化 shift，硬件位宽 16-bit。
@@ -715,8 +715,8 @@ extern "C" {
         uint32_t input_a_addr,
         uint32_t input_b_addr,
         uint32_t output_addr,
-        uint8_t  col_num,
-        uint8_t  row_num,
+        uint8_t  col_num_m1,
+        uint8_t  row_num_m1,
         uint32_t output_zeropoint,
         uint16_t output_scale,
         uint16_t output_scaleshift

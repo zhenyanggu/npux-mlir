@@ -6,6 +6,7 @@
 #include <iomanip>
 #include <iostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "OnnxMlirRuntime.h"
@@ -21,6 +22,8 @@ constexpr int64_t kCols = 256;
 constexpr int64_t kPerSampleElements = kRows * kCols;
 constexpr int64_t kAllElements = kBatch * kPerSampleElements;
 constexpr float kThreshold = 0.1f;
+constexpr int64_t kMaxErrorPointsToPrint = 16;
+constexpr int64_t kTopAxisBinsToPrint = 8;
 
 struct Options {
   std::string inputFile;
@@ -35,6 +38,15 @@ struct Summary {
   int64_t errorCount = 0;
   int64_t totalCount = 0;
   bool passed = false;
+};
+
+struct ErrorPoint {
+  int64_t sample = 0;
+  int64_t row = 0;
+  int64_t col = 0;
+  float actual = 0.0f;
+  float golden = 0.0f;
+  float diff = 0.0f;
 };
 
 struct ParseResult {
@@ -154,6 +166,11 @@ void checkOutputShape(const int64_t *shape, int64_t rank) {
 Summary compareRange(const float *actual, const std::vector<float> &golden, int64_t startIndex, int64_t count) {
   Summary summary;
   summary.totalCount = count * kPerSampleElements;
+  std::vector<int64_t> rowErrorCounts(static_cast<size_t>(kRows), 0);
+  std::vector<int64_t> colErrorCounts(static_cast<size_t>(kCols), 0);
+  std::vector<ErrorPoint> firstErrorPoints;
+  firstErrorPoints.reserve(static_cast<size_t>(kMaxErrorPointsToPrint));
+  int64_t edgeErrorCount = 0;
 
   for (int64_t sample = startIndex; sample < startIndex + count; ++sample) {
     const int64_t sampleOffset = sample * kPerSampleElements;
@@ -171,6 +188,16 @@ Summary compareRange(const float *actual, const std::vector<float> &golden, int6
       if (diff > kThreshold) {
         ++summary.errorCount;
         ++sampleErrors;
+        const int64_t row = i / kCols;
+        const int64_t col = i % kCols;
+        ++rowErrorCounts[static_cast<size_t>(row)];
+        ++colErrorCounts[static_cast<size_t>(col)];
+        if (row == 0 || row == (kRows - 1) || col == 0 || col == (kCols - 1))
+          ++edgeErrorCount;
+        if (static_cast<int64_t>(firstErrorPoints.size()) < kMaxErrorPointsToPrint) {
+          firstErrorPoints.push_back(
+              ErrorPoint{sample, row, col, actual[index], golden[static_cast<size_t>(index)], diff});
+        }
       }
     }
 
@@ -187,6 +214,55 @@ Summary compareRange(const float *actual, const std::vector<float> &golden, int6
   std::cout << "Error Count (错误点数量/总点数量): " << summary.errorCount << "/"
             << summary.totalCount << std::endl;
   std::cout << "Threshold Result: " << (summary.passed ? "PASS" : "FAIL") << std::endl;
+
+  if (!summary.passed) {
+    std::cout << "[Error Analysis] first " << firstErrorPoints.size()
+              << " error points (sample,row,col,actual,golden,diff):" << std::endl;
+    for (size_t i = 0; i < firstErrorPoints.size(); ++i) {
+      const auto &p = firstErrorPoints[i];
+      std::cout << "  #" << (i + 1) << " (" << p.sample << "," << p.row << "," << p.col
+                << ") a=" << p.actual << " g=" << p.golden << " d=" << p.diff << std::endl;
+    }
+
+    auto printTopBins = [](const std::vector<int64_t> &counts, const char *axisName) {
+      std::vector<std::pair<int64_t, int64_t>> nonZero; // (count, index)
+      nonZero.reserve(counts.size());
+      int64_t totalAxisErrors = 0;
+      for (size_t i = 0; i < counts.size(); ++i) {
+        if (counts[i] <= 0)
+          continue;
+        totalAxisErrors += counts[i];
+        nonZero.emplace_back(counts[i], static_cast<int64_t>(i));
+      }
+      std::sort(
+          nonZero.begin(), nonZero.end(),
+          [](const std::pair<int64_t, int64_t> &a,
+             const std::pair<int64_t, int64_t> &b) {
+            if (a.first != b.first)
+              return a.first > b.first;
+            return a.second < b.second;
+          });
+
+      std::cout << "[Error Analysis] " << axisName << " non-zero bins: "
+                << nonZero.size() << "/" << counts.size()
+                << ", total errors on axis=" << totalAxisErrors << std::endl;
+      const int64_t topK =
+          std::min<int64_t>(kTopAxisBinsToPrint, static_cast<int64_t>(nonZero.size()));
+      for (int64_t k = 0; k < topK; ++k) {
+        const std::pair<int64_t, int64_t> &item = nonZero[static_cast<size_t>(k)];
+        const int64_t cnt = item.first;
+        const int64_t idx = item.second;
+        std::cout << "  top" << (k + 1) << " " << axisName << "[" << idx << "]=" << cnt
+                  << std::endl;
+      }
+    };
+
+    printTopBins(rowErrorCounts, "row");
+    printTopBins(colErrorCounts, "col");
+    std::cout << "[Error Analysis] edge errors (row in {0," << (kRows - 1)
+              << "} or col in {0," << (kCols - 1) << "}): " << edgeErrorCount << "/"
+              << summary.errorCount << std::endl;
+  }
   return summary;
 }
 
