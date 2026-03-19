@@ -5,8 +5,7 @@ add_onnx_mlir_library(NpuPatition
     NpuMerge.cpp
     NpuCleanPack.cpp
     NpuRegionExtension.cpp
-    ModifyScfRegionEncoding.cpp
-
+    
     Linalg/LayerNorm.cpp
     Linalg/Conv.cpp
     Linalg/Unary.cpp
