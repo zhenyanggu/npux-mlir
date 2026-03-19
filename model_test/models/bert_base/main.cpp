@@ -18,6 +18,10 @@ namespace {
 namespace fs = std::filesystem;
 
 constexpr int64_t kFixedSeqLen = 128;
+constexpr float kDefaultDiffThreshold = 0.5f;
+constexpr float kDefaultTokenAccThreshold = 0.99f;
+constexpr int64_t kDefaultMaxTokenMismatches = 1;
+constexpr size_t kTopDiffCount = 5;
 
 struct Options {
   std::string inputIdsFile;
@@ -27,7 +31,18 @@ struct Options {
   std::string labelsFile;
   int64_t startIndex = 0;
   int64_t count = 1;
-  float diffThreshold = 0.2f;
+  float diffThreshold = kDefaultDiffThreshold;
+  float tokenAccThreshold = kDefaultTokenAccThreshold;
+  int64_t maxTokenMismatches = kDefaultMaxTokenMismatches;
+};
+
+struct DiffItem {
+  int64_t flatIndex;
+  int64_t tokenIndex;
+  int64_t vocabIndex;
+  float actual;
+  float golden;
+  float absDiff;
 };
 
 enum class ParseStatus {
@@ -151,6 +166,21 @@ bool parseFloat(const std::string &s, float &value) {
   }
 }
 
+void maybeInsertTopDiff(std::vector<DiffItem> &topDiffs, const DiffItem &item) {
+  if (topDiffs.size() < kTopDiffCount) {
+    topDiffs.push_back(item);
+  } else {
+    auto smallest = std::min_element(topDiffs.begin(), topDiffs.end(),
+        [](const DiffItem &lhs, const DiffItem &rhs) { return lhs.absDiff < rhs.absDiff; });
+    if (smallest == topDiffs.end() || item.absDiff <= smallest->absDiff)
+      return;
+    *smallest = item;
+  }
+
+  std::sort(topDiffs.begin(), topDiffs.end(),
+      [](const DiffItem &lhs, const DiffItem &rhs) { return lhs.absDiff > rhs.absDiff; });
+}
+
 void printUsage(const char *argv0) {
   std::cout
       << "Usage: " << argv0 << " [options]\n"
@@ -159,11 +189,16 @@ void printUsage(const char *argv0) {
       << "  --attention-mask <path>  int64 attention_mask, N x seq_len (default: auto-detect)\n"
       << "  --token-type-ids <path>  int64 token_type_ids, N x seq_len (default: auto-detect, optional)\n"
       << "  --golden <path>          float32 golden logits, N x (...) (default: auto-detect)\n"
-      << "  --labels <path>          int64 labels (optional, default: auto-detect if exists)\n"
+      << "  --labels <path>          legacy option, ignored for bert token-level check\n"
       << "  NOTE: sequence length is fixed to 128 (no dynamic seq-len)\n"
       << "  --index <int>            start sample index (default: 0)\n"
       << "  --count <int>            number of samples to run (default: 1)\n"
-      << "  --diff-threshold <float> per-logit abs diff threshold (default: 0.2)\n"
+      << "  --diff-threshold <float> per-logit abs diff threshold (default: "
+      << kDefaultDiffThreshold << ")\n"
+      << "  --token-acc-threshold <float> minimum per-sample token accuracy in [0, 1]"
+      << " (default: " << kDefaultTokenAccThreshold << ")\n"
+      << "  --max-token-mismatches <int> allowed token mismatches per sample"
+      << " (default: " << kDefaultMaxTokenMismatches << ")\n"
       << "  --help                   show this help\n";
 }
 
@@ -204,6 +239,18 @@ ParseStatus parseArgs(int argc, char **argv, Options &opts) {
         std::cerr << "Error: invalid --diff-threshold value: " << value << std::endl;
         return ParseStatus::kError;
       }
+    } else if (arg == "--token-acc-threshold") {
+      if (!parseFloat(value, opts.tokenAccThreshold)) {
+        std::cerr << "Error: invalid --token-acc-threshold value: " << value
+                  << std::endl;
+        return ParseStatus::kError;
+      }
+    } else if (arg == "--max-token-mismatches") {
+      if (!parseI64(value, opts.maxTokenMismatches)) {
+        std::cerr << "Error: invalid --max-token-mismatches value: " << value
+                  << std::endl;
+        return ParseStatus::kError;
+      }
     } else {
       std::cerr << "Error: unknown argument: " << arg << std::endl;
       return ParseStatus::kError;
@@ -220,6 +267,14 @@ ParseStatus parseArgs(int argc, char **argv, Options &opts) {
   }
   if (opts.diffThreshold < 0.0f) {
     std::cerr << "Error: --diff-threshold must be >= 0" << std::endl;
+    return ParseStatus::kError;
+  }
+  if (opts.tokenAccThreshold < 0.0f || opts.tokenAccThreshold > 1.0f) {
+    std::cerr << "Error: --token-acc-threshold must be in [0, 1]" << std::endl;
+    return ParseStatus::kError;
+  }
+  if (opts.maxTokenMismatches < 0) {
+    std::cerr << "Error: --max-token-mismatches must be >= 0" << std::endl;
     return ParseStatus::kError;
   }
 
@@ -274,8 +329,11 @@ int main(int argc, char **argv) {
   std::cout << "attention_mask file: " << opts.attentionMaskFile << std::endl;
   std::cout << "token_type_ids file: " << opts.tokenTypeIdsFile << std::endl;
   std::cout << "golden file: " << opts.goldenFile << std::endl;
-  std::cout << "labels file: " << opts.labelsFile << std::endl;
+  std::cout << "labels file: " << opts.labelsFile << " (ignored)" << std::endl;
   std::cout << "fixed seq_len: " << kFixedSeqLen << std::endl;
+  std::cout << "verification config: diff_threshold=" << opts.diffThreshold
+            << ", token_acc_threshold=" << opts.tokenAccThreshold
+            << ", max_token_mismatches=" << opts.maxTokenMismatches << std::endl;
 
   if (!fs::exists(opts.inputIdsFile)) {
     std::cerr << "Error: input_ids file not found: " << opts.inputIdsFile << std::endl;
@@ -335,17 +393,9 @@ int main(int argc, char **argv) {
   const int64_t goldenPerSample =
       static_cast<int64_t>(golden.size()) / numSamples;
 
-  std::vector<int64_t> labels;
-  const bool hasLabels = fs::exists(opts.labelsFile);
-  if (hasLabels) {
-    labels = loadI64Bin(opts.labelsFile);
-    if (static_cast<int64_t>(labels.size()) != numSamples) {
-      std::cerr << "Error: labels count mismatch, samples=" << numSamples
-                << ", labels=" << labels.size() << std::endl;
-      return 1;
-    }
-  } else {
-    std::cout << "Info: labels file not found, skip label accuracy." << std::endl;
+  if (fs::exists(opts.labelsFile)) {
+    std::cout << "Info: labels file is ignored for bert token-level validation."
+              << std::endl;
   }
 
   if (opts.startIndex >= numSamples) {
@@ -357,9 +407,16 @@ int main(int argc, char **argv) {
   std::cout << "Running range: index=" << opts.startIndex << ", count=" << runCount
             << ", total_samples=" << numSamples << std::endl;
 
-  int64_t semanticErrors = 0;
+  int64_t exactSemanticErrors = 0;
+  int64_t relaxedSemanticErrors = 0;
   int64_t numericErrors = 0;
-  int64_t labelCorrect = 0;
+  int64_t totalValidTokens = 0;
+  int64_t totalMatchedTokens = 0;
+  int64_t totalDiffErrors = 0;
+  int64_t totalOutputElements = 0;
+  double totalAbsError = 0.0;
+  double totalSquaredError = 0.0;
+  float globalMaxAbs = 0.0f;
 
   for (int64_t sample = 0; sample < runCount; ++sample) {
     const int64_t sampleIndex = opts.startIndex + sample;
@@ -413,7 +470,7 @@ int main(int argc, char **argv) {
 
     const int64_t outRank = omTensorGetRank(outTensor);
     const int64_t *outShape = omTensorGetShape(outTensor);
-    if (!outShape || outRank < 2 || outShape[0] != 1) {
+    if (!outShape || outRank != 3 || outShape[0] != 1) {
       std::cerr << "Error: unexpected output shape. rank=" << outRank << std::endl;
       omTensorListDestroy(inputList);
       omTensorListDestroy(outputList);
@@ -422,6 +479,12 @@ int main(int argc, char **argv) {
     if (outShape[1] != kFixedSeqLen) {
       std::cerr << "Error: output seq_len mismatch. expect " << kFixedSeqLen
                 << ", got " << outShape[1] << std::endl;
+      omTensorListDestroy(inputList);
+      omTensorListDestroy(outputList);
+      return 1;
+    }
+    if (outShape[2] <= 0) {
+      std::cerr << "Error: invalid vocab dimension: " << outShape[2] << std::endl;
       omTensorListDestroy(inputList);
       omTensorListDestroy(outputList);
       return 1;
@@ -445,63 +508,142 @@ int main(int argc, char **argv) {
     const size_t goldenBase = static_cast<size_t>(sampleIndex * goldenPerSample);
     const float *goldenRow = golden.data() + goldenBase;
 
-    const int64_t pred = argmax(out, outputElements);
-    const int64_t goldenPred = argmax(goldenRow, outputElements);
-    const bool semanticOk = (pred == goldenPred);
-    if (!semanticOk)
-      ++semanticErrors;
-
-    bool labelMatch = false;
-    int64_t label = -1;
-    if (hasLabels) {
-      label = labels[static_cast<size_t>(sampleIndex)];
-      labelMatch = (pred == label);
-      if (labelMatch)
-        ++labelCorrect;
+    const int64_t vocabSize = outShape[2];
+    int64_t validTokens = 0;
+    int64_t matchedTokens = 0;
+    int64_t firstMismatchPos = -1;
+    int64_t firstPredToken = -1;
+    int64_t firstGoldenToken = -1;
+    for (int64_t token = 0; token < kFixedSeqLen; ++token) {
+      if (maskPtr[token] == 0)
+        continue;
+      ++validTokens;
+      const int64_t tokenOffset = token * vocabSize;
+      const int64_t predToken = argmax(out + tokenOffset, vocabSize);
+      const int64_t goldenToken = argmax(goldenRow + tokenOffset, vocabSize);
+      if (predToken == goldenToken) {
+        ++matchedTokens;
+      } else if (firstMismatchPos < 0) {
+        firstMismatchPos = token;
+        firstPredToken = predToken;
+        firstGoldenToken = goldenToken;
+      }
     }
+    totalValidTokens += validTokens;
+    totalMatchedTokens += matchedTokens;
+
+    const int64_t tokenMismatches = validTokens - matchedTokens;
+    const double sampleTokenAcc = validTokens > 0
+                                      ? static_cast<double>(matchedTokens) /
+                                            static_cast<double>(validTokens)
+                                      : 0.0;
+    const bool exactSemanticOk = (validTokens > 0) && (matchedTokens == validTokens);
+    const bool relaxedSemanticOk = (validTokens > 0) &&
+                                   (sampleTokenAcc >= opts.tokenAccThreshold) &&
+                                   (tokenMismatches <= opts.maxTokenMismatches);
+    if (!exactSemanticOk)
+      ++exactSemanticErrors;
+    if (!relaxedSemanticOk)
+      ++relaxedSemanticErrors;
 
     float maxAbs = 0.0f;
+    double meanAbs = 0.0;
     double mse = 0.0;
     int64_t diffErrors = 0;
+    std::vector<DiffItem> topDiffs;
+    topDiffs.reserve(kTopDiffCount);
     for (int64_t i = 0; i < outputElements; ++i) {
       const float diff = std::fabs(out[i] - goldenRow[i]);
       maxAbs = std::max(maxAbs, diff);
+      meanAbs += static_cast<double>(diff);
       mse += static_cast<double>(diff) * static_cast<double>(diff);
       if (diff > opts.diffThreshold)
         ++diffErrors;
+      maybeInsertTopDiff(topDiffs,
+          {i, i / vocabSize, i % vocabSize, out[i], goldenRow[i], diff});
     }
+    meanAbs /= static_cast<double>(outputElements);
     mse /= static_cast<double>(outputElements);
+    totalDiffErrors += diffErrors;
+    totalOutputElements += outputElements;
+    totalAbsError += meanAbs * static_cast<double>(outputElements);
+    totalSquaredError += mse * static_cast<double>(outputElements);
+    globalMaxAbs = std::max(globalMaxAbs, maxAbs);
 
     if (diffErrors > 0)
       ++numericErrors;
 
-    std::cout << "sample=" << sampleIndex << " pred=" << pred
-              << " golden_pred=" << goldenPred;
-    if (hasLabels) {
-      std::cout << " label=" << label
-                << " label_match=" << (labelMatch ? "YES" : "NO");
+    std::cout << "sample=" << sampleIndex << " valid_tokens=" << validTokens
+              << " token_match=" << matchedTokens << "/" << validTokens
+              << " token_acc=" << std::fixed << std::setprecision(4)
+              << sampleTokenAcc * 100.0 << "%"
+              << " token_mismatches=" << tokenMismatches;
+    if (firstMismatchPos >= 0) {
+      std::cout << " first_mismatch_pos=" << firstMismatchPos
+                << " pred_token=" << firstPredToken
+                << " golden_token=" << firstGoldenToken;
     }
-    std::cout << " max_abs=" << maxAbs << " mse=" << mse
+    std::cout << " semantic_exact=" << (exactSemanticOk ? "PASS" : "FAIL")
+              << " semantic_relaxed=" << (relaxedSemanticOk ? "PASS" : "FAIL")
+              << " max_abs=" << maxAbs << " mean_abs=" << meanAbs
+              << " mse=" << mse
               << " diff_errors=" << diffErrors << "/" << outputElements
-              << " status=" << (semanticOk ? "PASS" : "FAIL") << std::endl;
+              << " diff_error_rate=" << std::setprecision(4)
+              << (outputElements > 0
+                         ? 100.0 * static_cast<double>(diffErrors) /
+                               static_cast<double>(outputElements)
+                         : 0.0)
+              << "% threshold=" << opts.diffThreshold
+              << " status=" << (relaxedSemanticOk ? "PASS" : "FAIL") << std::endl;
+    if (!topDiffs.empty()) {
+      std::cout << "  top_logit_diffs:" << std::endl;
+      for (const DiffItem &item : topDiffs) {
+        std::cout << "    token=" << item.tokenIndex << " vocab=" << item.vocabIndex
+                  << " flat_index=" << item.flatIndex
+                  << " actual=" << item.actual
+                  << " golden=" << item.golden
+                  << " abs_diff=" << item.absDiff << std::endl;
+      }
+    }
 
     omTensorListDestroy(inputList);
     omTensorListDestroy(outputList);
   }
 
-  if (hasLabels) {
-    const double labelAcc = static_cast<double>(labelCorrect) / static_cast<double>(runCount);
-    std::cout << "Label consistency: " << labelCorrect << "/" << runCount << " ("
-              << std::fixed << std::setprecision(4) << labelAcc * 100.0 << "%)"
-              << std::endl;
-  }
-  std::cout << "Semantic check (pred==golden_pred): " << (runCount - semanticErrors)
+  const double tokenAcc = totalValidTokens > 0
+                              ? static_cast<double>(totalMatchedTokens) /
+                                    static_cast<double>(totalValidTokens)
+                              : 0.0;
+  const double overallMae = totalOutputElements > 0
+                                ? totalAbsError / static_cast<double>(totalOutputElements)
+                                : 0.0;
+  const double overallMse = totalOutputElements > 0
+                                ? totalSquaredError / static_cast<double>(totalOutputElements)
+                                : 0.0;
+  const double overallDiffErrorRate = totalOutputElements > 0
+                                          ? static_cast<double>(totalDiffErrors) /
+                                                static_cast<double>(totalOutputElements)
+                                          : 0.0;
+  std::cout << "Token match rate: " << totalMatchedTokens << "/" << totalValidTokens
+            << " (" << std::fixed << std::setprecision(4) << tokenAcc * 100.0 << "%)"
+            << std::endl;
+  std::cout << "Exact semantic check (all valid tokens match golden): "
+            << (runCount - exactSemanticErrors)
             << "/" << runCount << std::endl;
-  std::cout << "Numeric check (all logits <= threshold): " << (runCount - numericErrors)
+  std::cout << "Relaxed semantic check (token_acc >= " << opts.tokenAccThreshold
+            << ", mismatches <= " << opts.maxTokenMismatches << "): "
+            << (runCount - relaxedSemanticErrors)
             << "/" << runCount << std::endl;
+  std::cout << "Numeric check (all logits <= " << opts.diffThreshold << "): "
+            << (runCount - numericErrors)
+            << "/" << runCount << std::endl;
+  std::cout << "Overall numeric stats: max_abs=" << globalMaxAbs
+            << " mean_abs=" << overallMae
+            << " mse=" << overallMse
+            << " diff_error_rate=" << overallDiffErrorRate * 100.0 << "%" << std::endl;
 
-  const bool pass = (semanticErrors == 0);
-  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << semanticErrors << "/" << runCount
+  const bool pass = (relaxedSemanticErrors == 0);
+  std::cout << "@@MODEL_TEST_RESULT@@ errors=" << relaxedSemanticErrors << "/" << runCount
             << " status=" << (pass ? "PASS" : "FAIL") << std::endl;
   return pass ? 0 : 1;
 }

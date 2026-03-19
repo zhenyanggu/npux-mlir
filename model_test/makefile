@@ -36,6 +36,8 @@ RESNET50_LAYER_MODEL_NAMES := $(sort $(filter resnet50_layer_%,$(ALL_MODEL_NAMES
 RESNET50_LAYER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(RESNET50_LAYER_MODEL_NAMES))
 RESNET50_BLOCK_MODEL_NAMES := $(sort $(filter resnet50_block_%,$(ALL_MODEL_NAMES)))
 RESNET50_BLOCK_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(RESNET50_BLOCK_MODEL_NAMES))
+BERT_BASE_LAYER_MODEL_NAMES := $(sort $(filter bert_base_layer_%,$(ALL_MODEL_NAMES)))
+BERT_BASE_LAYER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(BERT_BASE_LAYER_MODEL_NAMES))
 SELECTIVE_CLEAN_MODELS := $(filter $(ALL_MODEL_NAMES),$(filter-out clean,$(MAKECMDGOALS)))
 VGG16_CONV_DIAG_MODELS := \
 	vgg16_layer_conv_3x224_to_64x224 \
@@ -50,6 +52,7 @@ VGG16_CONV_DIAG_MODELS := \
 .PHONY: all init run_one clean clean_cache list check_model \
 	prepare tile mlir llvm zcu102 rebuild vgg16_layers vgg16_layers_all vgg16_conv_diag \
 	resnet50_layers resnet50_layers_all resnet50_blocks resnet50_blocks_all \
+	bert_base_layers bert_base_layers_all \
 	$(ALL_MODEL_NAMES)
 
 MODEL_PREPARE_TARGETS := $(addsuffix .prepare,$(ALL_MODEL_NAMES))
@@ -75,6 +78,10 @@ resnet50_layers_all: $(RESNET50_LAYER_MODEL_NAMES)
 resnet50_blocks: $(RESNET50_BLOCK_ENABLED_MODEL_NAMES)
 
 resnet50_blocks_all: $(RESNET50_BLOCK_MODEL_NAMES)
+
+bert_base_layers: $(BERT_BASE_LAYER_ENABLED_MODEL_NAMES)
+
+bert_base_layers_all: $(BERT_BASE_LAYER_MODEL_NAMES)
 
 init:
 	@mkdir -p $(BUILD_DIR)
@@ -313,6 +320,7 @@ list:
 	@echo "vgg16 conv diagnostic set: make vgg16_conv_diag"
 	@echo "resnet50 layer debug set: make resnet50_layers (enabled only) | make resnet50_layers_all (include disabled)"
 	@echo "resnet50 block debug set: make resnet50_blocks (enabled only) | make resnet50_blocks_all (include disabled)"
+	@echo "bert_base layer debug set: make bert_base_layers (enabled only) | make bert_base_layers_all (include disabled)"
 	@echo "skip temporarily: make SKIP_MODELS=\"gelu resize\""
 	@echo "skip persistently: touch models/<model>/.disabled"
 

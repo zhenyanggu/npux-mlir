@@ -317,6 +317,47 @@ def report_matmul_qdq_coverage(quant_model):
     print(f"[quant] MatMul QDQ coverage: {matmul_qdq}/{matmul_total}")
 
 
+def report_layernorm_qdq_coverage(quant_model):
+    model = onnx.load(str(quant_model))
+    producer = {}
+    consumers = {}
+    initializer_shapes = {
+        initializer.name: tuple(int(dim) for dim in initializer.dims)
+        for initializer in model.graph.initializer
+    }
+    for node in model.graph.node:
+        for output in node.output:
+            producer[output] = node.op_type
+        for input_name in node.input:
+            consumers.setdefault(input_name, []).append(node.op_type)
+
+    layernorm_total = 0
+    layernorm_qdq = 0
+    normalized_lengths = []
+    for node in model.graph.node:
+        if node.op_type != "LayerNormalization":
+            continue
+        layernorm_total += 1
+        has_dq_input = producer.get(node.input[0]) == "DequantizeLinear"
+        has_q_output = any(
+            "QuantizeLinear" in consumers.get(output_name, []) for output_name in node.output
+        )
+        if has_dq_input and has_q_output:
+            layernorm_qdq += 1
+        scale_shape = initializer_shapes.get(node.input[1])
+        if scale_shape:
+            normalized_lengths.append(int(np.prod(scale_shape, dtype=np.int64)))
+
+    print(f"[quant] LayerNorm QDQ coverage: {layernorm_qdq}/{layernorm_total}")
+    if normalized_lengths:
+        max_len = max(normalized_lengths)
+        unique_lengths = sorted(set(normalized_lengths))
+        print(
+            f"[quant] LayerNorm normalized length(s): {unique_lengths} "
+            f"(max={max_len})"
+        )
+
+
 def report_qdq_node_counts(quant_model):
     model = onnx.load(str(quant_model))
     q_count = sum(1 for node in model.graph.node if node.op_type == "QuantizeLinear")
@@ -402,6 +443,7 @@ def main():
     )
     verify_int8_zero_points(output_model)
     report_matmul_qdq_coverage(output_model)
+    report_layernorm_qdq_coverage(output_model)
     report_qdq_node_counts(output_model)
 
     quant_session = ort.InferenceSession(
@@ -412,7 +454,6 @@ def main():
     )
 
     logits_samples = []
-    labels = []
     for idx in range(args.sample_count):
         feed = {q_input_ids_name: input_ids[idx : idx + 1]}
         if q_attention_mask_name is not None:
@@ -426,10 +467,8 @@ def main():
             raise RuntimeError(f"Unexpected output batch dim at sample {idx}: {output.shape}")
         sample_logits = output[0]
         logits_samples.append(sample_logits)
-        labels.append(int(np.argmax(sample_logits.reshape(-1))))
 
     logits = np.stack(logits_samples, axis=0).astype(np.float32)
-    labels = np.asarray(labels, dtype=np.int64)
 
     input_ids_path = workdir / f"{MODEL_NAME}_input_ids.bin"
     attention_mask_path = workdir / f"{MODEL_NAME}_attention_mask.bin"
@@ -441,7 +480,7 @@ def main():
     attention_mask[: args.sample_count].tofile(attention_mask_path)
     token_type_ids[: args.sample_count].tofile(token_type_ids_path)
     logits.tofile(golden_path)
-    labels.tofile(labels_path)
+    labels_path.unlink(missing_ok=True)
 
     temp_source.unlink(missing_ok=True)
     temp_static.unlink(missing_ok=True)
@@ -454,7 +493,7 @@ def main():
     print(f"  {attention_mask_path.name} ({(args.sample_count, FIXED_SEQ_LEN)}, int64)")
     print(f"  {token_type_ids_path.name} ({(args.sample_count, FIXED_SEQ_LEN)}, int64)")
     print(f"  {golden_path.name} ({logits.shape}, float32)")
-    print(f"  {labels_path.name} ({labels.shape}, int64)")
+    print("  labels.bin is not generated for bert token-level validation")
     quant_model = onnx.load(str(output_model))
     print(f"Opset imports: {[(x.domain, x.version) for x in quant_model.opset_import]}")
     print(
