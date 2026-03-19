@@ -7,6 +7,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "src/Pass/Passes.hpp"
@@ -35,7 +36,8 @@ struct ConvertLinalgToNpuPass
 
     // A. Npux Dialect 是合法的 (目标)
     target.addLegalDialect<NpuxDialect>();
-    target.addLegalDialect<arith::ArithDialect, memref::MemRefDialect>();
+    target.addLegalDialect<arith::ArithDialect, memref::MemRefDialect,
+        scf::SCFDialect>();
 
     // =========================================================
     // B. Linalg Generic 限制 (修改点 1)

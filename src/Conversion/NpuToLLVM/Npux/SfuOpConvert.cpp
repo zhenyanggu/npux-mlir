@@ -8,9 +8,11 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "src/Dialect/Npux/NpuxOps.hpp"
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
 
+#include <algorithm>
 #include <cmath> 
 
 using namespace mlir;
@@ -43,6 +45,110 @@ FixedPointParams getFixedPointParams(double scale) {
     static_cast<int16_t>(mantissa_scaled),
     static_cast<int16_t>(exponent - 15)
   };
+}
+
+static bool hasOnlyStaticPositiveShape(MemRefType type) {
+  for (int64_t dim : type.getShape()) {
+    if (dim == ShapedType::kDynamic || dim <= 0)
+      return false;
+  }
+  return true;
+}
+
+static Value createIndexConstant(
+    PatternRewriter &rewriter, Location loc, int64_t value) {
+  return rewriter.create<arith::ConstantIndexOp>(loc, value);
+}
+
+static Value createI16Constant(
+    PatternRewriter &rewriter, Location loc, int64_t value) {
+  return rewriter.create<arith::ConstantIntOp>(loc, value, 16);
+}
+
+static SmallVector<int64_t> getPermutation(linalg::GenericOp op) {
+  SmallVector<int64_t> perm;
+  if (op.getIndexingMapsArray().size() < 2)
+    return perm;
+
+  AffineMap outputMap = op.getIndexingMapsArray()[1];
+  if (!outputMap.isPermutation())
+    return {};
+
+  perm.reserve(outputMap.getNumResults());
+  for (AffineExpr expr : outputMap.getResults()) {
+    auto dimExpr = dyn_cast<AffineDimExpr>(expr);
+    if (!dimExpr)
+      return {};
+    perm.push_back(dimExpr.getPosition());
+  }
+  return perm;
+}
+
+static bool matchesPermutation(
+    ArrayRef<int64_t> perm, ArrayRef<int64_t> expected) {
+  return perm.size() == expected.size() &&
+         std::equal(perm.begin(), perm.end(), expected.begin());
+}
+
+static bool matchesRank2TransposeShape(
+    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape) {
+  return inShape.size() == 2 && outShape.size() == 2 &&
+         outShape[0] == inShape[1] && outShape[1] == inShape[0];
+}
+
+static bool matchesRank3BatchLast2TransposeShape(
+    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape) {
+  return inShape.size() == 3 && outShape.size() == 3 &&
+         outShape[0] == inShape[0] &&
+         outShape[1] == inShape[2] &&
+         outShape[2] == inShape[1];
+}
+
+static bool matchesRank4Perm0231Shape(
+    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape) {
+  return inShape.size() == 4 && outShape.size() == 4 &&
+         outShape[0] == inShape[0] &&
+         outShape[1] == inShape[2] &&
+         outShape[2] == inShape[3] &&
+         outShape[3] == inShape[1];
+}
+
+static bool matchesRank4Perm0213Shape(
+    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape) {
+  return inShape.size() == 4 && outShape.size() == 4 &&
+         outShape[0] == inShape[0] &&
+         outShape[1] == inShape[2] &&
+         outShape[2] == inShape[1] &&
+         outShape[3] == inShape[3];
+}
+
+static Value createNpuSubview(
+    PatternRewriter &rewriter, Location loc, Value source,
+    ArrayRef<Value> offsets, ArrayRef<int64_t> resultShape) {
+  auto sourceType = cast<MemRefType>(source.getType());
+  MemRefLayoutAttrInterface layout;
+  auto resultType = MemRefType::get(
+      resultShape, sourceType.getElementType(), layout,
+      sourceType.getMemorySpace());
+  return rewriter
+      .create<npux::SubviewOp>(loc, resultType, source, offsets)
+      .getResult();
+}
+
+static Value createStaticSramAlloc(
+    PatternRewriter &rewriter, Location loc, ArrayRef<int64_t> shape,
+    Type elemType) {
+  MemRefLayoutAttrInterface layout;
+  auto type = MemRefType::get(shape, elemType, layout,
+      IntegerAttr::get(IntegerType::get(rewriter.getContext(), 64), 2));
+  return rewriter.create<npux::SramAllocOp>(loc, type, ValueRange{}).getResult();
+}
+
+static void emitTransposeRun(PatternRewriter &rewriter, Location loc,
+    Value inputMemRef, Value outputMemRef, int64_t colsM1, int64_t rowsM1) {
+  rewriter.create<TransposeOp>(loc, inputMemRef, outputMemRef,
+      createI16Constant(rewriter, loc, colsM1),
+      createI16Constant(rewriter, loc, rowsM1));
 }
 
 // ============================================================================
@@ -162,30 +268,178 @@ public:
 
     // 检查 Memory Space (SRAM=2)
     auto inType = mlir::dyn_cast<MemRefType>(inputMemRef.getType());
-    if (!inType || inType.getMemorySpaceAsInt() != 2) return failure();
+    auto outType = mlir::dyn_cast<MemRefType>(outputMemRef.getType());
+    if (!inType || !outType || inType.getMemorySpaceAsInt() != 2 ||
+        outType.getMemorySpaceAsInt() != 2)
+      return failure();
+    if (!hasOnlyStaticPositiveShape(inType) || !hasOnlyStaticPositiveShape(outType))
+      return failure();
 
-    // 计算 Shape: C API 需要 col_num (W-1) 和 row_num (H-1)
-    // 假设是 2D 或更高维，取最后两维
-    ArrayRef<int64_t> shape = inType.getShape();
-    int rank = shape.size();
-    if (rank < 2) return failure();
+    SmallVector<int64_t> perm = getPermutation(op);
+    if (perm.empty())
+      return failure();
 
-    int64_t rows = shape[rank - 2] - 1;
-    int64_t cols = shape[rank - 1] - 1;
+    ArrayRef<int64_t> inShape = inType.getShape();
+    ArrayRef<int64_t> outShape = outType.getShape();
+    int64_t rank = static_cast<int64_t>(inShape.size());
 
-    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
-    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows, 16);
+    Value c0 = createIndexConstant(rewriter, loc, 0);
+    Value c1 = createIndexConstant(rewriter, loc, 1);
 
-    // 创建 TransposeOp
-    // 不需要量化参数，因为 Transpose 只搬运比特
-    rewriter.replaceOpWithNewOp<TransposeOp>(op,
-        inputMemRef,
-        outputMemRef,
-        vCol,
-        vRow
-    );
+    auto eraseOriginalOp = [&]() -> LogicalResult {
+      rewriter.eraseOp(op);
+      return success();
+    };
 
-    return success();
+    auto emitRank2Transpose = [&]() -> LogicalResult {
+      static constexpr int64_t kPerm2D[] = {1, 0};
+      if (rank != 2 ||
+          !(matchesPermutation(perm, kPerm2D) ||
+            matchesRank2TransposeShape(inShape, outShape)))
+        return failure();
+      emitTransposeRun(rewriter, loc, inputMemRef, outputMemRef,
+          inShape[1] - 1, inShape[0] - 1);
+      return eraseOriginalOp();
+    };
+
+    auto emitRank3BatchLast2Transpose = [&]() -> LogicalResult {
+      static constexpr int64_t kPerm3D[] = {0, 2, 1};
+      if (rank != 3 ||
+          !(matchesPermutation(perm, kPerm3D) ||
+            matchesRank3BatchLast2TransposeShape(inShape, outShape)))
+        return failure();
+
+      Value batchUpper = createIndexConstant(rewriter, loc, inShape[0]);
+      auto batchLoop = rewriter.create<scf::ForOp>(loc, c0, batchUpper, c1);
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPoint(batchLoop.getBody()->getTerminator());
+        Value batch = batchLoop.getInductionVar();
+
+        SmallVector<Value> inOffsets = {batch, c0, c0};
+        SmallVector<Value> outOffsets = {batch, c0, c0};
+
+        Value inSubview = createNpuSubview(
+            rewriter, loc, inputMemRef, inOffsets, {inShape[1], inShape[2]});
+        Value outSubview = createNpuSubview(
+            rewriter, loc, outputMemRef, outOffsets, {inShape[2], inShape[1]});
+
+        emitTransposeRun(rewriter, loc, inSubview, outSubview,
+            inShape[2] - 1, inShape[1] - 1);
+      }
+      return eraseOriginalOp();
+    };
+
+    auto emitRank4Perm0231 = [&]() -> LogicalResult {
+      static constexpr int64_t kPerm0231[] = {0, 2, 3, 1};
+      if (rank != 4 ||
+          !(matchesPermutation(perm, kPerm0231) ||
+            matchesRank4Perm0231Shape(inShape, outShape)))
+        return failure();
+
+      const int64_t batchSize = inShape[0];
+      const int64_t dimA = inShape[1];
+      const int64_t dimB = inShape[2];
+      const int64_t dimC = inShape[3];
+
+      Value batchUpper = createIndexConstant(rewriter, loc, batchSize);
+      auto batchLoop = rewriter.create<scf::ForOp>(loc, c0, batchUpper, c1);
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPoint(batchLoop.getBody()->getTerminator());
+        Value batch = batchLoop.getInductionVar();
+
+        SmallVector<Value> inOffsets = {batch, c0, c0, c0};
+        SmallVector<Value> outOffsets = {batch, c0, c0, c0};
+
+        Value inSubview = createNpuSubview(
+            rewriter, loc, inputMemRef, inOffsets, {dimA, dimB, dimC});
+        Value outSubview = createNpuSubview(
+            rewriter, loc, outputMemRef, outOffsets, {dimB, dimC, dimA});
+
+        emitTransposeRun(rewriter, loc, inSubview, outSubview,
+            dimB * dimC - 1, dimA - 1);
+      }
+      return eraseOriginalOp();
+    };
+
+    auto emitRank4Perm0213 = [&]() -> LogicalResult {
+      static constexpr int64_t kPerm0213[] = {0, 2, 1, 3};
+      if (rank != 4 ||
+          !(matchesPermutation(perm, kPerm0213) ||
+            matchesRank4Perm0213Shape(inShape, outShape)))
+        return failure();
+
+      const int64_t batchSize = inShape[0];
+      const int64_t dimA = inShape[1];
+      const int64_t dimB = inShape[2];
+      const int64_t dimC = inShape[3];
+
+      Value tempBuffer = createStaticSramAlloc(
+          rewriter, loc, {batchSize, dimB, dimC, dimA}, inType.getElementType());
+      Value batchUpper = createIndexConstant(rewriter, loc, batchSize);
+      Value headUpper = createIndexConstant(rewriter, loc, dimB);
+
+      auto stage1Loop = rewriter.create<scf::ForOp>(loc, c0, batchUpper, c1);
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPoint(stage1Loop.getBody()->getTerminator());
+        Value batch = stage1Loop.getInductionVar();
+
+        SmallVector<Value> inOffsets = {batch, c0, c0, c0};
+        SmallVector<Value> tempOffsets = {batch, c0, c0, c0};
+
+        Value inSubview = createNpuSubview(
+            rewriter, loc, inputMemRef, inOffsets, {dimA, dimB, dimC});
+        Value tempSubview = createNpuSubview(
+            rewriter, loc, tempBuffer, tempOffsets, {dimB, dimC, dimA});
+
+        emitTransposeRun(rewriter, loc, inSubview, tempSubview,
+            dimB * dimC - 1, dimA - 1);
+      }
+
+      auto stage2BatchLoop = rewriter.create<scf::ForOp>(loc, c0, batchUpper, c1);
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPoint(stage2BatchLoop.getBody()->getTerminator());
+        Value batch = stage2BatchLoop.getInductionVar();
+
+        auto headLoop = rewriter.create<scf::ForOp>(loc, c0, headUpper, c1);
+        {
+          OpBuilder::InsertionGuard headGuard(rewriter);
+          rewriter.setInsertionPoint(headLoop.getBody()->getTerminator());
+          Value head = headLoop.getInductionVar();
+
+          SmallVector<Value> tempOffsets = {batch, head, c0, c0};
+          SmallVector<Value> outOffsets = {batch, head, c0, c0};
+
+          Value tempSubview = createNpuSubview(
+              rewriter, loc, tempBuffer, tempOffsets, {dimC, dimA});
+          Value outSubview = createNpuSubview(
+              rewriter, loc, outputMemRef, outOffsets, {dimA, dimC});
+
+          emitTransposeRun(rewriter, loc, tempSubview, outSubview,
+              dimA - 1, dimC - 1);
+        }
+      }
+
+      rewriter.create<npux::SramFreeOp>(loc, tempBuffer);
+      return eraseOriginalOp();
+    };
+
+    if (succeeded(emitRank2Transpose()))
+      return success();
+    if (succeeded(emitRank3BatchLast2Transpose()))
+      return success();
+    if (succeeded(emitRank4Perm0231()))
+      return success();
+    if (succeeded(emitRank4Perm0213()))
+      return success();
+
+    op.emitError()
+        << "unsupported npu_transpose permutation for NPU lowering; rank="
+        << rank;
+    return failure();
   }
 };
 
