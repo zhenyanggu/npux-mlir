@@ -192,8 +192,6 @@ std::unique_ptr<mlir::Pass> createNpuRemoveRedundantDmaPass();
 
 std::unique_ptr<mlir::Pass> createRemoveDuplicateMvinBiasPass();
 
-std::unique_ptr<mlir::Pass> createModifyScfRegionEncodingPass();
-
 std::unique_ptr<mlir::Pass> createEraseNpuMemorySpacePass();
 
 void registerBufferDeallocTest();

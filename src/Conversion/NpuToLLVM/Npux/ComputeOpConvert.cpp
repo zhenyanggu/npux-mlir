@@ -30,6 +30,11 @@ struct FixedPointParams {
 FixedPointParams getFixedPointParams(double scale) {
   if (std::abs(scale) < 1e-8)
     return {0, 0};
+
+  // 核心修复：如果 scale 是 1.0 (允许微小浮点误差)，直接返回 multiplier=1, shift=0
+  if (std::abs(scale - 1.0) < 1e-6)
+    return {1, 0};
+
   int exponent;
   double mantissa = std::frexp(scale, &exponent);
   double mantissa_scaled = std::round(mantissa * 32768.0);
@@ -38,7 +43,7 @@ FixedPointParams getFixedPointParams(double scale) {
     exponent += 1;
   }
   return {static_cast<int16_t>(mantissa_scaled),
-      static_cast<int16_t>(exponent - 15)};
+          static_cast<int16_t>(exponent - 15)};
 }
 
 int64_t getIntAttr(Operation *op, StringRef name, int64_t defaultVal) {

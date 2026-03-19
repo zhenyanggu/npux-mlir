@@ -17,6 +17,25 @@ using namespace mlir;
 
 namespace {
 
+struct FixedPointParams {
+  int16_t multiplier;
+  int16_t shift;
+};
+
+static FixedPointParams getFixedPointParams(double scale) {
+  if (std::abs(scale) < 1e-8)
+    return {0, 0};
+  int exponent;
+  double mantissa = std::frexp(scale, &exponent);
+  double mantissa_scaled = std::round(mantissa * 32768.0);
+  if (mantissa_scaled >= 32768.0) {
+    mantissa_scaled /= 2.0;
+    exponent += 1;
+  }
+  return {static_cast<int16_t>(mantissa_scaled),
+          static_cast<int16_t>(exponent - 15)};
+}
+
 //=============================================================================
 // Helper: Change Tensor Encoding
 //=============================================================================
@@ -250,8 +269,8 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 //=============================================================================
 // Pattern: NpuMataddInsertDmaPattern
 // 专门处理 npu_matadd:
-// 1. 输入通过 mvin 时提升至 i32 精度，且 encoding=3
-// 2. 输出使用 encoding=2，保持原精度
+// 1. 读取 in1_scale, in2_scale。若不同，在 mvin 阶段除以 out_scale 做提前对齐，并将后续 matadd scale 设为 1.0。
+// 2. 若相同，mvin 仅处理 Zero Point，缩放留给 matadd 单元执行以获得更高精度。
 //=============================================================================
 struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
@@ -269,12 +288,25 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     Location loc = op.getLoc();
     Type i32Type = rewriter.getI32Type();
 
+    // 提前读取 Scale 属性，判断是否需要提前对齐
+    auto getFloatAttrOr = [&](StringRef name, double def) {
+      if (auto attr = op->getAttrOfType<FloatAttr>(name))
+        return attr.getValueAsDouble();
+      return def;
+    };
+    
+    double in1Scale = getFloatAttrOr("in1_scale", 1.0);
+    double in2Scale = getFloatAttrOr("in2_scale", 1.0);
+    double outScale = getFloatAttrOr("out_scale", 1.0);
+
+    // 判断两个输入 scale 是否相同（允许微小的浮点误差）
+    bool scalesSame = std::abs(in1Scale - in2Scale) < 1e-6;
+
     // --- 步骤 1: 处理输入，插入提升至 i32 且 encoding=3 的 MVIN ---
     SmallVector<Value> newInputs;
+    int operandIdx = 0;
     for (Value operand : op.getInputs()) {
       auto inputType = cast<RankedTensorType>(operand.getType());
-      
-      // 新建带有 i32 且 encoding=3 的输出 TensorType
       auto mvinOutType = RankedTensorType::get(
           inputType.getShape(), i32Type, rewriter.getI64IntegerAttr(3));
           
@@ -293,7 +325,6 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
           /*bodyBuilder=*/
           [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
             Value val = args[0];
-            // 将较低精度的 Int 提升至 i32 (这里默认是有符号提升，适配大多数量化场景)
             if (val.getType() != i32Type && isa<IntegerType>(val.getType())) {
               val = b.create<arith::ExtSIOp>(nestedLoc, i32Type, val);
             }
@@ -303,10 +334,45 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
       mvinOp->setAttr("library_call", rewriter.getStringAttr("npu_dma_mvin"));
       mvinOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
       
+      // ==============================================================
+      // 核心量化逻辑：Zero Point 提取 + 动态 Scale 分配
+      // ==============================================================
+      StringRef zpAttrName = (operandIdx == 0) ? "in1_zp" : "in2_zp";
+      double currentInScale = (operandIdx == 0) ? in1Scale : in2Scale;
+
+      int64_t zpVal = 0;
+      if (auto zpAttr = op->getAttrOfType<IntegerAttr>(zpAttrName)) {
+        zpVal = zpAttr.getInt();
+      }
+      
+      bool isQuant = false;
+      double mvinScaleVal = 1.0;
+
+      if (!scalesSame) {
+        // 场景 A: scale 不同，必须在 Mvin 启用量化通路强行对齐
+        mvinScaleVal = currentInScale / outScale;
+        isQuant = true;
+      } else if (zpVal != 0) {
+        // 场景 B: scale 相同，但输入有 Zero Point 偏移。
+        // 必须通过 Mvin 的硬件扣除 ZP，此时顺带传一个等效 1.0 的 scale (16384, -14)
+        isQuant = true;
+      }
+
+      // 如果既没有 ZP 偏移，scale 也一样，这里就会完全跳过，生成干净的 mvin IR
+      if (isQuant) {
+        mvinOp->setAttr("npu.quant_zero", rewriter.getI32IntegerAttr(zpVal));
+        FixedPointParams qParams = getFixedPointParams(mvinScaleVal);
+        mvinOp->setAttr("npu.quant_scale", rewriter.getI64IntegerAttr(qParams.multiplier));
+        mvinOp->setAttr("npu.quant_shift", rewriter.getI64IntegerAttr(qParams.shift));
+        mvinOp->setAttr("npu.is_quant", rewriter.getBoolAttr(true));
+      }
+      // ==============================================================
+
       newInputs.push_back(mvinOp.getResult(0));
+      operandIdx++;
     }
 
-    // --- 步骤 2: 准备 Medium Tensor (分配 encoding=2，精度保持原样) ---
+    // --- 步骤 2: 准备 Medium Tensor ---
     SmallVector<Value> mediumTensors;
     for (Value originalOutput : op.getOutputs()) {
       Value mediumTensor = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
@@ -320,34 +386,29 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 
     auto newOp = rewriter.create<linalg::GenericOp>(loc,
         TypeRange{mediumTensors[0].getType()},
-        newInputs,        // 现在都是 i32, encoding=3
-        mediumTensors,    // 输出目标，如 i8, encoding=2
-        maps,
-        iteratorTypes,
+        newInputs, mediumTensors, maps, iteratorTypes,
         /*bodyBuilder=*/
         [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
-            // args[0] (LHS) 和 args[1] (RHS) 已经是 i32 
             Value lhs = args[0];
             Value rhs = args[1];
-            
-            // 1. 在 i32 精度下做加法以保证 IR 合法
             Value addRes = b.create<arith::AddIOp>(nestedLoc, lhs, rhs);
-            
-            // 2. 将 i32 结果截断 (Truncate) 回原输出精度 (例如 i8)
             Type outType = args[2].getType();
             Value finalRes = addRes;
             if (addRes.getType() != outType && isa<IntegerType>(outType)) {
                 finalRes = b.create<arith::TruncIOp>(nestedLoc, outType, addRes);
             }
-            
             b.create<linalg::YieldOp>(nestedLoc, finalRes);
         });
 
-    // 将原算子身上的所有 Attribute (scale, zp, library_call 等) 原封不动抄过来
+    // 复制 Attribute 时，如果已经提前对齐了，就覆写 Matadd 自身的 scale 为 1.0
     for (NamedAttribute attr : op->getAttrs()) {
-      newOp->setAttr(attr.getName(), attr.getValue());
+      StringRef name = attr.getName().strref();
+      if (!scalesSame && (name == "in1_scale" || name == "in2_scale" || name == "out_scale")) {
+        newOp->setAttr(name, rewriter.getF32FloatAttr(1.0f));
+      } else {
+        newOp->setAttr(name, attr.getValue());
+      }
     }
-    // 打上防重复标记
     newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
 
     // --- 步骤 4: 插入 MVOUT ---
@@ -355,13 +416,11 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     for (auto [idx, mediumTensor] : llvm::enumerate(mediumTensors)) {
       Value originalOutput = op.getOutputs()[idx];
       Value computedResult = newOp.getResult(idx); 
-      // mvout 输入是 encoding 2，输出被映射回 0 
       Value mvoutResult = createDmaOp(rewriter, loc, computedResult,
           "npu_dma_mvout", 0, "output", originalOutput);
       finalResults.push_back(mvoutResult);
     }
 
-    // --- 步骤 5: 替换原算子 ---
     rewriter.replaceOp(op, finalResults);
 
     return success();

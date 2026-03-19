@@ -264,10 +264,6 @@ void registerNpuPasses() {
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createModifyScfRegionEncodingPass();
-  });
-
-  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createEraseNpuMemorySpacePass();
   });
 
