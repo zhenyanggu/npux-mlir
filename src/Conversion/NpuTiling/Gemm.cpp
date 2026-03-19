@@ -175,17 +175,20 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
 
   // 2. 获取 Loop Ranges
   SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
-  int64_t rank = loopRanges.size(); // 2D Gemm 为 3，3D Batched Gemm 为 4
+  int64_t rank = loopRanges.size(); // 2D为3, 3D为4, 4D为5
 
-  if (rank != 3 && rank != 4) {
+  if (rank != 3 && rank != 4 && rank != 5) {
     return {};
   }
 
-  // 根据新的迭代器顺序 [Batch, N, M, K] 或 [N, M, K] 提取维度
+  // 根据迭代器顺序提取维度
   int64_t K = loopRanges[rank - 1];
   int64_t M = loopRanges[rank - 2];
   int64_t N = loopRanges[rank - 3];
-  int64_t B = (rank == 4) ? loopRanges[0] : 1; // 如果是 3D 的，提取 Batch
+  
+  // 仅用于日志打印，把多维 Batch 乘起来作为一个整体指标
+  int64_t B = (rank >= 4) ? loopRanges[0] : 1; 
+  if (rank == 5) B *= loopRanges[1];
 
   SmallVector<int64_t, 3> computedSizes;
   bool isManual = false;
@@ -213,7 +216,13 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
   SmallVector<int64_t> finalTileSizes(rank, 0);
 
   // 按照 Linalg Generic Iterator 的顺序填充分块大小
-  if (rank == 4) {
+  if (rank == 5) {
+    finalTileSizes[0] = 1;                // B1 按 1 分块
+    finalTileSizes[1] = 1;                // B2 按 1 分块
+    finalTileSizes[2] = computedSizes[1]; // N -> tn
+    finalTileSizes[3] = computedSizes[0]; // M -> tm
+    finalTileSizes[4] = computedSizes[2]; // K -> tk
+  } else if (rank == 4) {
     finalTileSizes[0] = 1;                // Batch 永远按 1 分块
     finalTileSizes[1] = computedSizes[1]; // N -> tn
     finalTileSizes[2] = computedSizes[0]; // M -> tm
@@ -331,18 +340,18 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
         break;
 
       StringRef label;
-      if (rank == 4) { // [Batch, N, M, K]
-        if (dimIdx == 0)
-          label = "Batch";
-        else if (dimIdx == 1)
-          label = "N";
-        else if (dimIdx == 2)
-          label = "M";
+      if (rank == 5) { // [B1, B2, N, M, K] 空间维度没有 K
+        if (dimIdx == 0) label = "Batch1";
+        else if (dimIdx == 1) label = "Batch2";
+        else if (dimIdx == 2) label = "N";
+        else if (dimIdx == 3) label = "M";
+      } else if (rank == 4) { // [Batch, N, M, K]
+        if (dimIdx == 0) label = "Batch";
+        else if (dimIdx == 1) label = "N";
+        else if (dimIdx == 2) label = "M";
       } else { // rank == 3, [N, M, K]
-        if (dimIdx == 0)
-          label = "N";
-        else if (dimIdx == 1)
-          label = "M";
+        if (dimIdx == 0) label = "N";
+        else if (dimIdx == 1) label = "M";
       }
 
       spatialLoops[currentLoopIdx]->setAttr(

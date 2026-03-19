@@ -642,8 +642,11 @@ private:
       } else if (rank == 3) {
         sizes[1] = 32; // N
         sizes[2] = 32; // M
+      } else if (rank == 4) { // 
+        sizes[2] = 32; // N
+        sizes[3] = 32; // M
       }
-    } else {
+    } else { // npu_gemm or npu_matmul
       if (rank == 3) {
         sizes[0] = 32;   // N
         sizes[1] = 32;   // M
@@ -652,14 +655,18 @@ private:
         sizes[1] = 32;   // N
         sizes[2] = 32;   // M
         sizes[3] = 2048; // K
+      } else if (rank == 5) { // 
+        sizes[2] = 32;   // N
+        sizes[3] = 32;   // M
+        sizes[4] = 2048; // K
       }
     }
     
-    // [新增]: 像 Conv 一样输出 Split 信息
+    // [更新]: 适配更高维度的打印逻辑，确保 Log 准确
     if (libCall != "mv_acc_to_spm") {
-      int64_t n_val = (rank == 4) ? sizes[1] : ((rank == 3) ? sizes[0] : 0);
-      int64_t m_val = (rank == 4) ? sizes[2] : ((rank == 3) ? sizes[1] : 0);
-      int64_t k_val = (rank == 4) ? sizes[3] : ((rank == 3) ? sizes[2] : 0);
+      int64_t n_val = (rank >= 5) ? sizes[2] : ((rank == 4) ? sizes[1] : ((rank == 3) ? sizes[0] : 0));
+      int64_t m_val = (rank >= 5) ? sizes[3] : ((rank == 4) ? sizes[2] : ((rank == 3) ? sizes[1] : 0));
+      int64_t k_val = (rank >= 5) ? sizes[4] : ((rank == 4) ? sizes[3] : ((rank == 3) ? sizes[2] : 0));
       llvm::errs() << "[Spliting] Gemm: Tile=[N:" << n_val 
                    << ", M:" << m_val << ", K:" << k_val << "]\n";
     }
