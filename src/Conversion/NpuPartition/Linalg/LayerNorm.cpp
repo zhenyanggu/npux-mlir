@@ -49,6 +49,7 @@ static void createLayerNormBody(OpBuilder &b, Location loc, ValueRange args) {
 static Value createPackedLayerNormOp(
     ConversionPatternRewriter &rewriter, Location loc,
     Value quantizedInput,    // Int8 Input
+    Operation *sourceOp,
     RankedTensorType inputType,
     RankedTensorType outputType,
     double inScale, int64_t inZp, double outScale, int64_t outZp,
@@ -98,6 +99,9 @@ static Value createPackedLayerNormOp(
   // 5. 设置属性
   linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_layernorm"));
   linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  SmallVector<StringRef> fusedOps = {"LayerNormalization"};
+  setNpuProfileAttrs(linalgOp, sourceOp, rewriter,
+      getNpuProfileLayerName(sourceOp), "compute", fusedOps);
   linalgOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
   linalgOp->setAttr("in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
   linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
@@ -146,7 +150,7 @@ struct LayerNormToLinalg : public OpConversionPattern<ONNXLayerNormalizationOp> 
 
     // 5. 创建
     Value result = createPackedLayerNormOp(rewriter, op.getLoc(), 
-        quantizedInput, inputType, outputType, 
+        quantizedInput, op, inputType, outputType, 
         inParams.scale, inParams.zeroPoint, 
         outParams.scale, outParams.zeroPoint, 
         axis, epsilon);

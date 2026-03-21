@@ -1,5 +1,6 @@
 add_onnx_mlir_library(NpuPatition
     ConvertONNXToLinalgNpu.cpp
+    NpuProfileAnnotate.cpp
     NpuOutline.cpp
     LinalgConversionHelper.cpp
     NpuMerge.cpp

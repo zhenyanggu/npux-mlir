@@ -503,6 +503,8 @@ DimAnalysis::DimAnalysis(ArrayRef<Value> vals) {
 DimAnalysis::DimAnalysis(ModuleOp moduleOp) {
   moduleOp.walk([&](Operation *op) {
     if (auto funcOp = mlir::dyn_cast<func::FuncOp>(op)) {
+      if (funcOp.isDeclaration())
+        return;
       // Build dimensions for function arguments and results.
       buildFunctionArgsRes(funcOp);
     } else {
@@ -540,6 +542,9 @@ int64_t DimAnalysis::build(DimT d, int64_t setID) {
 }
 
 void DimAnalysis::buildFunctionArgsRes(func::FuncOp funcOp) {
+  if (funcOp.isDeclaration())
+    return;
+
   // If dim_params are available, try to group dims using dim_params because
   // dimensions wih the same dim_param are supposed to be the same at runtime.
 

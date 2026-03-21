@@ -175,6 +175,10 @@ void registerNpuPasses() {
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuProfileAnnotatePass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
     return npux::createNpuInlinePass();
   });
 

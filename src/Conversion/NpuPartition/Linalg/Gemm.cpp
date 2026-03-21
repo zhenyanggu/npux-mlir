@@ -105,7 +105,9 @@ static Value processNpuLinalgInput(OpBuilder &b, Location loc, Value v) {
 // ==========================================================
 // 生成 Linalg 转置
 // ==========================================================
-static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input) {
+static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input,
+    Operation *sourceOp, StringRef layerName,
+    ArrayRef<StringRef> fusedOps) {
   auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
   if (!inputType || inputType.getRank() < 2)
     return input;
@@ -163,6 +165,8 @@ static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input) {
 
   genericOp->setAttr("library_call", b.getStringAttr("npu_transpose"));
   genericOp->setAttr("npu.target", b.getStringAttr("npu"));
+  setNpuProfileAttrs(
+      genericOp, sourceOp, b, layerName, "layout_in", fusedOps);
 
   return genericOp.getResult(0);
 }
@@ -209,7 +213,9 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
     RankedTensorType outType,  // Final Output Type (e.g., i8)
     float lhsScale, int64_t lhsZp, float rhsScale, int64_t rhsZp,
     float outScale, int64_t outZp, StringRef libCallName, int64_t do_relu = 0,
-    int64_t relu_type = 0, bool transA = false, bool transB = false) {
+    int64_t relu_type = 0, bool transA = false, bool transB = false,
+    Operation *sourceOp = nullptr, StringRef layerName = {},
+    ArrayRef<StringRef> fusedOps = {}) {
   int64_t outRank = outType.getRank();
   assert(outRank >= 2 && "MatMul output rank must be >= 2");
   bool hasBias = (inputs.size() == 3);
@@ -347,6 +353,7 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
 
     gemmOp->setAttr("library_call", b.getStringAttr(libCallName));
     gemmOp->setAttr("npu.target", b.getStringAttr("npu"));
+    setNpuProfileAttrs(gemmOp, sourceOp, b, layerName, "compute", fusedOps);
     gemmOp->setAttr("lhs_scale", b.getF32FloatAttr(lhsScale));
     gemmOp->setAttr("lhs_zp", b.getIntegerAttr(b.getI32Type(), lhsZp));
     gemmOp->setAttr("rhs_scale", b.getF32FloatAttr(rhsScale));
@@ -413,6 +420,7 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
 
     quantOp->setAttr("library_call", b.getStringAttr("mv_acc_to_spm"));
     quantOp->setAttr("npu.target", b.getStringAttr("npu"));
+    setNpuProfileAttrs(quantOp, sourceOp, b, layerName, "quant", fusedOps);
 
     return quantOp.getResult(0);
   };
@@ -430,11 +438,13 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
   // --- 1. 执行输入端 Transpose ---
   Value actualA = processedInputs[0];
   if (transA) {
-    actualA = buildLinalgTranspose(rewriter, loc, actualA);
+    actualA =
+        buildLinalgTranspose(rewriter, loc, actualA, sourceOp, layerName, fusedOps);
   }
   Value actualB = processedInputs[1];
   if (transB) {
-    actualB = buildLinalgTranspose(rewriter, loc, actualB);
+    actualB =
+        buildLinalgTranspose(rewriter, loc, actualB, sourceOp, layerName, fusedOps);
   }
 
   // --- 2. 准备动态尺寸 ---
@@ -535,6 +545,9 @@ struct GemmToLinalg : public OpConversionPattern<ONNXGemmOp> {
     auto paramsA = getScalarQuantParams(dequantA);
     auto paramsB = getScalarQuantParams(dequantB);
     auto paramsOut = getScalarQuantParams(finalQuantOp);
+    SmallVector<StringRef> fusedOps = {"Gemm"};
+    if (do_relu == 1)
+      fusedOps.push_back("Relu");
 
     SmallVector<Value> inputs;
     inputs.push_back(quantInputA);
@@ -552,7 +565,8 @@ struct GemmToLinalg : public OpConversionPattern<ONNXGemmOp> {
     Value result = createGenericMatMulOp(rewriter, op.getLoc(), inputs,
         outputType, paramsA.scale, paramsA.zeroPoint, paramsB.scale,
         paramsB.zeroPoint, paramsOut.scale, paramsOut.zeroPoint, "npu_gemm",
-        do_relu, relu_type, op.getTransA(), op.getTransB());
+        do_relu, relu_type, op.getTransA(), op.getTransB(), op,
+        getNpuProfileLayerName(op), fusedOps);
 
     // =========================================================================
     // 安全擦除
@@ -670,10 +684,14 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
     }
 
     SmallVector<Value> inputs = {inputA, inputB};
+    SmallVector<StringRef> fusedOps = {"QLinearMatMul"};
+    if (do_relu == 1)
+      fusedOps.push_back("Relu");
 
     Value result = createGenericMatMulOp(rewriter, op.getLoc(), inputs,
         outputType, scaleA, zpA, scaleB, zpB, scaleY, zpY, "npu_matmul",
-        do_relu, relu_type, false, false);
+        do_relu, relu_type, false, false, op, getNpuProfileLayerName(op),
+        fusedOps);
 
     // =========================================================================
     // 安全擦除

@@ -39,8 +39,10 @@ static RankedTensorType addEncoding1(RankedTensorType type, OpBuilder &b) {
 // Helper: 创建用于 Layout 转换的 Generic Op (Call CAPI)
 // ============================================================
 Operation *createLayoutGeneric(OpBuilder &rewriter, Location loc, Value input,
-    Value outputInit, StringRef libraryCallName,StringRef node_name, int64_t n, int64_t c,
-    int64_t h, int64_t w, int64_t tileSize) {
+    Value outputInit, StringRef libraryCallName, Operation *sourceOp,
+    StringRef layerName, StringRef layerKind,
+    ArrayRef<StringRef> fusedOps, int64_t n, int64_t c, int64_t h, int64_t w,
+    int64_t tileSize) {
 
   auto inputType = mlir::cast<RankedTensorType>(input.getType());
   auto outputType = mlir::cast<RankedTensorType>(outputInit.getType());
@@ -89,8 +91,8 @@ Operation *createLayoutGeneric(OpBuilder &rewriter, Location loc, Value input,
       });
 
   op->setAttr("library_call", rewriter.getStringAttr(libraryCallName));
-  op->setAttr("npu.layer_name", rewriter.getStringAttr(node_name));
   op->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  setNpuProfileAttrs(op, sourceOp, rewriter, layerName, layerKind, fusedOps);
   return op;
 }
 
@@ -514,9 +516,14 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
         loc, packedInputType1, ValueRange{});
 
     // 注意传入 paddedH 和 paddedW，保证转换是按照 Padded 后的尺寸
+    SmallVector<StringRef> fusedOps = {"Conv"};
+    if (do_relu == 1)
+      fusedOps.push_back("Relu");
+
     Operation *packInputOp =
         createLayoutGeneric(rewriter, loc, paddedInput, packedInputAlloc,
-            "npu_layout_nchw_to_nchwc32", rewriter.getStringAttr(nodeName), N, IC, paddedH, paddedW, inTileFactor);
+            "npu_layout_nchw_to_nchwc32", op, nodeName, "layout_in",
+            fusedOps, N, IC, paddedH, paddedW, inTileFactor);
 
     Value convInput = packInputOp->getResult(0); // 带有 encoding=1
 
@@ -631,6 +638,7 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
 
     convOp->setAttr("library_call", rewriter.getStringAttr("npu_conv"));
     convOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    setNpuProfileAttrs(convOp, op, rewriter, nodeName, "compute", fusedOps);
     auto copyAttr = [&](StringRef name) {
       if (auto attr = op->getAttr(name))
         convOp->setAttr(name, attr);
@@ -680,6 +688,7 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
 
     quantOp->setAttr("library_call", rewriter.getStringAttr("mv_acc_to_spm"));
     quantOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    setNpuProfileAttrs(quantOp, op, rewriter, nodeName, "quant", fusedOps);
 
     Value packedConvResult = quantOp.getResult(0); // 带有 encoding=1
 
@@ -690,7 +699,8 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
 
     Operation *unpackOp =
         createLayoutGeneric(rewriter, loc, packedConvResult, outputInit,
-            "npu_layout_nchwc32_to_nchw", rewriter.getStringAttr(nodeName), N, OC, OH, OW, outTileFactor);
+            "npu_layout_nchwc32_to_nchw", op, nodeName, "layout_out",
+            fusedOps, N, OC, OH, OW, outTileFactor);
 
     Value finalResult = unpackOp->getResult(0); // 带有 encoding=1
 

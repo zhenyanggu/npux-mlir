@@ -1,0 +1,67 @@
+{
+  "summary": {
+    "total_ns": 1804310,
+    "cpu_total_ns": 1581148,
+    "npu_total_ns": 223162,
+    "npu_latency_share": 0.123683,
+    "npu_layer_share": 0.333333,
+    "npu_macs_share": null,
+    "top_hot_layers": [{"layer_id": 0, "total_ns": 1580608}, {"layer_id": 1, "total_ns": 223162}, {"layer_id": 2, "total_ns": 540}]
+  },
+  "layers": [
+    {
+      "layer_id": 0,
+      "device": "cpu",
+      "invocations": 1,
+      "total_ns": 1580608,
+      "avg_ns": 1.58061e+06,
+      "pct_total": 87.6018,
+      "dma_in_ns": 0,
+      "compute_ns": 0,
+      "dma_out_ns": 0,
+      "layout_ns": 0,
+      "wait_irq_ns": 0,
+      "other_ns": 1580608,
+      "mvin_calls": 0,
+      "compute_calls": 0,
+      "mvout_calls": 0,
+      "layout_calls": 0
+    },
+    {
+      "layer_id": 1,
+      "device": "npu",
+      "invocations": 1,
+      "total_ns": 223162,
+      "avg_ns": 223162,
+      "pct_total": 12.3683,
+      "dma_in_ns": 71617,
+      "compute_ns": 82369,
+      "dma_out_ns": 63686,
+      "layout_ns": 0,
+      "wait_irq_ns": 206792,
+      "other_ns": 5490,
+      "mvin_calls": 1,
+      "compute_calls": 1,
+      "mvout_calls": 1,
+      "layout_calls": 0
+    },
+    {
+      "layer_id": 2,
+      "device": "cpu",
+      "invocations": 1,
+      "total_ns": 540,
+      "avg_ns": 540,
+      "pct_total": 0.0299283,
+      "dma_in_ns": 0,
+      "compute_ns": 0,
+      "dma_out_ns": 0,
+      "layout_ns": 0,
+      "wait_irq_ns": 0,
+      "other_ns": 540,
+      "mvin_calls": 0,
+      "compute_calls": 0,
+      "mvout_calls": 0,
+      "layout_calls": 0
+    }
+  ]
+}

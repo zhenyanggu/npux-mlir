@@ -119,6 +119,9 @@ static Value createResampleOp(
     RankedTensorType inputType,  
     RankedTensorType outputType, 
     StringRef libCallName,       
+    Operation *sourceOp,
+    StringRef layerKind,
+    ArrayRef<StringRef> fusedOps,
     AffineMap inputMap,          
     AffineMap outputMap,         
     std::function<void(Operation *)> attrHook = nullptr 
@@ -139,6 +142,8 @@ static Value createResampleOp(
 
   linalgOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
   linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  setNpuProfileAttrs(linalgOp, sourceOp, rewriter,
+      getNpuProfileLayerName(sourceOp), layerKind, fusedOps);
   if (attrHook) attrHook(linalgOp);
 
   // 直接返回 genericOp 的结果
@@ -171,6 +176,7 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
     if (failed(handleQuantizationContext(op, input, outputType, rewriter, ctx))) {
         return failure();
     }
+    SmallVector<StringRef> fusedOps = {"MaxPool"};
 
     int64_t strideH = mlir::cast<IntegerAttr>((*strides)[0]).getInt();
     int64_t strideW = mlir::cast<IntegerAttr>((*strides)[1]).getInt();
@@ -234,6 +240,8 @@ struct MaxPoolToLinalg : public OpConversionPattern<ONNXMaxPoolSingleOutOp> {
 
     linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_maxpool"));
     linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    setNpuProfileAttrs(
+        linalgOp, op, rewriter, getNpuProfileLayerName(op), "compute", fusedOps);
 
     ctx.handleOutputReplacement(linalgOp.getResult(0), rewriter);
     return success();
@@ -277,12 +285,13 @@ struct AveragePoolToLinalg : public OpConversionPattern<ONNXAveragePoolOp> {
 
     auto inputMap = AffineMap::get(rank, 0, inputExprs, rewriter.getContext());
     auto outputMap = rewriter.getMultiDimIdentityMap(rank);
+    SmallVector<StringRef> fusedOps = {"AveragePool"};
 
     Value result = createResampleOp(rewriter, op.getLoc(), 
         ctx.finalInput, 
         mlir::cast<RankedTensorType>(ctx.finalInput.getType()), 
         ctx.finalOutputType, 
-        "npu_avgpool", inputMap, outputMap);
+        "npu_avgpool", op, "compute", fusedOps, inputMap, outputMap);
 
     ctx.handleOutputReplacement(result, rewriter);
     return success();
@@ -327,12 +336,13 @@ struct ResizeToLinalg : public OpConversionPattern<ONNXResizeOp> {
 
     auto inputMap = AffineMap::get(rank, 0, inputExprs, rewriter.getContext());
     auto outputMap = rewriter.getMultiDimIdentityMap(rank);
+    SmallVector<StringRef> fusedOps = {"Resize"};
 
     Value result = createResampleOp(rewriter, op.getLoc(), 
         ctx.finalInput, 
         mlir::cast<RankedTensorType>(ctx.finalInput.getType()), 
         ctx.finalOutputType, 
-        "npu_upsample", inputMap, outputMap);
+        "npu_upsample", op, "compute", fusedOps, inputMap, outputMap);
 
     ctx.handleOutputReplacement(result, rewriter);
     return success();
@@ -381,6 +391,9 @@ struct TransposeToLinalg : public OpConversionPattern<ONNXTransposeOp> {
 
     linalgOp->setAttr("library_call", rewriter.getStringAttr("npu_transpose"));
     linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    SmallVector<StringRef> fusedOps = {"Transpose"};
+    setNpuProfileAttrs(
+        linalgOp, op, rewriter, getNpuProfileLayerName(op), "layout", fusedOps);
 
     ctx.handleOutputReplacement(linalgOp.getResult(0), rewriter);
     return success();
@@ -390,7 +403,7 @@ struct TransposeToLinalg : public OpConversionPattern<ONNXTransposeOp> {
 } // namespace
 
 void npux::populateLinalgResamplePatterns(RewritePatternSet &patterns) {
-  patterns.add<MaxPoolToLinalg>(patterns.getContext());
+  patterns.add<MaxPoolToLinalg, ResizeToLinalg>(patterns.getContext());
 }
 
 void npux::populateLinalgTransposePattern(RewritePatternSet &patterns) {

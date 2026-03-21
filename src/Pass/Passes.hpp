@@ -137,6 +137,8 @@ std::unique_ptr<mlir::Pass> createConvertONNXToTOSAPass();
 namespace npux {
 std::unique_ptr<mlir::Pass> createONNXToLinalgNpuPass();
 
+std::unique_ptr<mlir::Pass> createNpuProfileAnnotatePass();
+
 std::unique_ptr<mlir::Pass> createNpuOutlinePass();
 
 std::unique_ptr<mlir::Pass> createNpuSramPromotionPass();

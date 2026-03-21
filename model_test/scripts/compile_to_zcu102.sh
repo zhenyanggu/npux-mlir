@@ -210,6 +210,13 @@ CMD_LINK="$CROSS_CXX \"${ROOT_DIR}/main.cpp\" \"$NPU_RUNTIME_SRC\" \"$MLIR_RUNNE
 
 run_command "Link C++ Executable" "$CMD_LINK"
 
+# 将编译期 profiling manifest 放到最终输出目录，便于运行期 report 直接补齐 layer_name/op_type
+PROFILE_MANIFEST_SRC="${ROOT_DIR}/NpuPartition/profile_manifest.json"
+PROFILE_MANIFEST_DST="$(dirname "$TARGET_BIN")/profile_manifest.json"
+if [[ -f "$PROFILE_MANIFEST_SRC" ]]; then
+    run_command "Copy Profile Manifest" "cp -f \"$PROFILE_MANIFEST_SRC\" \"$PROFILE_MANIFEST_DST\""
+fi
+
 # ================= Final Report =================
 
 echo ""

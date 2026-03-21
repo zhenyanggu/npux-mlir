@@ -345,6 +345,7 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
 
   if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
       pm.addPass(npux::createONNXToLinalgNpuPass());
+      pm.addPass(npux::createNpuProfileAnnotatePass());
       pm.addPass(npux::createNpuMergePass());
       pm.addPass(npux::createNpuOutlinePass());
       pm.addNestedPass<func::FuncOp>(npux::createNpuTilingPass());

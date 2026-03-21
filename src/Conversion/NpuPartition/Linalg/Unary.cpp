@@ -54,7 +54,8 @@ static Value createPackedUnaryOp(
     RankedTensorType inputType,      // 输入类型
     RankedTensorType outputType,     // 输出类型
     double inScale, int64_t inZp, double outScale, int64_t outZp,
-    StringRef libCallName,          
+    StringRef libCallName, Operation *sourceOp, StringRef layerName,
+    ArrayRef<StringRef> fusedOps,
     std::function<void(Operation *)> attrHook = nullptr
 ) {
   int64_t rank = inputType.getRank();
@@ -90,6 +91,8 @@ static Value createPackedUnaryOp(
     // 4. 设置属性
     linalgOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
     linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    setNpuProfileAttrs(
+        linalgOp, sourceOp, rewriter, layerName, "compute", fusedOps);
     linalgOp->setAttr("in_scale", rewriter.getF32FloatAttr(inScale));
     linalgOp->setAttr("in_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), inZp));
     linalgOp->setAttr("out_scale", rewriter.getF32FloatAttr(outScale));
@@ -126,10 +129,12 @@ struct GeluToLinalg : public OpConversionPattern<ONNXGeluOp> {
 
     auto inParams = getScalarQuantParams(dequantOp);
     auto outParams = getScalarQuantParams(quantOp);
+    SmallVector<StringRef> fusedOps = {"Gelu"};
 
     Value result = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
         inputType, outputType, inParams.scale, inParams.zeroPoint,
-        outParams.scale, outParams.zeroPoint, "npu_gelu");
+        outParams.scale, outParams.zeroPoint, "npu_gelu", op,
+        getNpuProfileLayerName(op), fusedOps);
 
     quantOp.getResult().setType(result.getType());
 
@@ -169,11 +174,13 @@ struct SoftmaxToLinalg
     auto outParams = getScalarQuantParams(quantOp);
 
     int64_t axis = op.getAxis();
+    SmallVector<StringRef> fusedOps = {"Softmax"};
 
     Value result =
         createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput, inputType,
             outputType, inParams.scale, inParams.zeroPoint, outParams.scale,
-            outParams.zeroPoint, "npu_softmax", [&](Operation *genericOp) {
+            outParams.zeroPoint, "npu_softmax", op,
+            getNpuProfileLayerName(op), fusedOps, [&](Operation *genericOp) {
               genericOp->setAttr("axis", rewriter.getI64IntegerAttr(axis));
             });
 

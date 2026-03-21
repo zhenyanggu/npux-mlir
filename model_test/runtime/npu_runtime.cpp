@@ -1,53 +1,774 @@
 #include "npu_runtime.h"
 #include <algorithm>
+#include <cstdlib>
 #include <cstdio>
+#include <fstream>
 #include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
-#include <iostream>
 #include <cstring>
-#include <stdexcept>
-#include <sys/types.h>
 #include <chrono>
+#include <cctype>
+#include <iostream>
+#include <map>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <vector>
 
 // NOTE: Temporary compatibility behavior: MVIN/MVOUT precision is forced to 1
 // regardless of API input. API signature remains unchanged for now; update it
 // in a future revision when the interface change is allowed.
 
 // ==========================================
-// Profiling (Enable with -DNPU_PROFILE)
+// Profiling
 // ==========================================
 #ifdef NPU_PROFILE
-    #define NPU_PROFILE_LOG(fmt, ...) \
-        fprintf(stdout, "[NPU_PROFILE] " fmt "\n", ##__VA_ARGS__)
+#define NPU_PROFILE_LOG(fmt, ...) \
+    fprintf(stderr, "[NPU_PROFILE] " fmt "\n", ##__VA_ARGS__)
 
-    class ScopedTimer {
-    public:
-        explicit ScopedTimer(const char* name)
-            : name_(name), start_(std::chrono::steady_clock::now()) {}
-        ~ScopedTimer() {
-            auto end = std::chrono::steady_clock::now();
-            auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start_).count();
-            NPU_PROFILE_LOG("%s: %lld ns", name_, (long long)ns);
-        }
-    private:
-        const char* name_;
-        std::chrono::steady_clock::time_point start_;
-    };
-    
-    // Profile 模式下的计时宏
-    #define NPU_TIMER_TOTAL(func_name) ScopedTimer _total_timer(func_name "(total)")
-    #define NPU_TIMER_SECTION_BEGIN(name) { ScopedTimer _sec_timer(name);
-    #define NPU_TIMER_SECTION_END() }
+class ScopedLogTimer {
+public:
+    explicit ScopedLogTimer(const char* name)
+        : name_(name), start_(std::chrono::steady_clock::now()) {}
+    ~ScopedLogTimer() {
+        auto end = std::chrono::steady_clock::now();
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start_).count();
+        NPU_PROFILE_LOG("%s: %lld ns", name_, (long long)ns);
+    }
+
+private:
+    const char* name_;
+    std::chrono::steady_clock::time_point start_;
+};
 #else
-    #define NPU_PROFILE_LOG(fmt, ...) do {} while(0)
-    
-    // Release 模式下完全消除计时开销
-    #define NPU_TIMER_TOTAL(func_name) ((void)0)
-    #define NPU_TIMER_SECTION_BEGIN(name) 
-    #define NPU_TIMER_SECTION_END()
+#define NPU_PROFILE_LOG(fmt, ...) do {} while(0)
 #endif
+
+#define NPU_TIMER_TOTAL(func_name) ((void)0)
+#ifdef NPU_PROFILE
+#define NPU_TIMER_SECTION_BEGIN(name) { ScopedLogTimer _sec_timer(name);
+#define NPU_TIMER_SECTION_END() }
+#else
+#define NPU_TIMER_SECTION_BEGIN(name)
+#define NPU_TIMER_SECTION_END()
+#endif
+
+namespace {
+
+enum class ProfileStage {
+    DmaIn,
+    Compute,
+    DmaOut,
+    Layout,
+    WaitIrq
+};
+
+enum class ProfileCallCounter {
+    None,
+    Mvin,
+    Compute,
+    Mvout,
+    Layout
+};
+
+struct LayerProfileRecord {
+    uint64_t invocations = 0;
+    uint64_t totalNs = 0;
+    uint64_t dmaInNs = 0;
+    uint64_t computeNs = 0;
+    uint64_t dmaOutNs = 0;
+    uint64_t layoutNs = 0;
+    uint64_t waitIrqNs = 0;
+    uint64_t mvinCalls = 0;
+    uint64_t computeCalls = 0;
+    uint64_t mvoutCalls = 0;
+    uint64_t layoutCalls = 0;
+};
+
+struct LayerManifestRecord {
+    std::optional<int64_t> layerId;
+    std::string layerName;
+    std::string originOpType;
+    std::string device;
+    std::optional<std::string> fallbackReason;
+    std::vector<std::string> fusedOps;
+};
+
+struct ProfilerState {
+    bool initialized = false;
+    bool registeredAtExit = false;
+    std::string outputPath;
+    std::map<int64_t, LayerProfileRecord> layers;
+    std::mutex mutex;
+};
+
+struct ActiveLayerFrame {
+    bool active = false;
+    int64_t layerId = -1;
+    std::chrono::steady_clock::time_point start;
+};
+
+thread_local ActiveLayerFrame g_activeLayer;
+
+static std::string jsonEscape(const std::string& input) {
+    std::ostringstream escaped;
+    for (char c : input) {
+        switch (c) {
+        case '\\':
+            escaped << "\\\\";
+            break;
+        case '"':
+            escaped << "\\\"";
+            break;
+        case '\n':
+            escaped << "\\n";
+            break;
+        case '\r':
+            escaped << "\\r";
+            break;
+        case '\t':
+            escaped << "\\t";
+            break;
+        default:
+            escaped << c;
+            break;
+        }
+    }
+    return escaped.str();
+}
+
+static bool isProfilingDisabled() {
+    const char* env = std::getenv("NPU_PROFILE_DISABLE");
+    return env && std::strcmp(env, "1") == 0;
+}
+
+static std::string resolveProfileOutputPath(const char* overridePath) {
+    if (overridePath && overridePath[0] != '\0') {
+        return std::string(overridePath);
+    }
+    const char* envPath = std::getenv("NPU_PROFILE_OUT");
+    if (envPath && envPath[0] != '\0') {
+        return std::string(envPath);
+    }
+    return "profile_report.json";
+}
+
+static std::string trimCopy(const std::string& input) {
+    size_t begin = 0;
+    while (begin < input.size() &&
+           std::isspace(static_cast<unsigned char>(input[begin]))) {
+        ++begin;
+    }
+
+    size_t end = input.size();
+    while (end > begin &&
+           std::isspace(static_cast<unsigned char>(input[end - 1]))) {
+        --end;
+    }
+    return input.substr(begin, end - begin);
+}
+
+static std::string stripTrailingComma(const std::string& input) {
+    std::string trimmed = trimCopy(input);
+    if (!trimmed.empty() && trimmed.back() == ',') {
+        trimmed.pop_back();
+    }
+    return trimCopy(trimmed);
+}
+
+static bool hasPrefix(const std::string& input, const std::string& prefix) {
+    return input.rfind(prefix, 0) == 0;
+}
+
+static bool hasSuffix(const std::string& input, const std::string& suffix) {
+    return input.size() >= suffix.size() &&
+           input.compare(input.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+static std::string unescapeJsonString(const std::string& input) {
+    std::ostringstream decoded;
+    for (size_t i = 0; i < input.size(); ++i) {
+        if (input[i] != '\\' || i + 1 >= input.size()) {
+            decoded << input[i];
+            continue;
+        }
+
+        char escaped = input[++i];
+        switch (escaped) {
+        case '\\':
+            decoded << '\\';
+            break;
+        case '"':
+            decoded << '"';
+            break;
+        case 'n':
+            decoded << '\n';
+            break;
+        case 'r':
+            decoded << '\r';
+            break;
+        case 't':
+            decoded << '\t';
+            break;
+        default:
+            decoded << escaped;
+            break;
+        }
+    }
+    return decoded.str();
+}
+
+static std::optional<std::string> parseJsonStringValue(const std::string& rawValue) {
+    const std::string value = stripTrailingComma(rawValue);
+    if (value == "null") {
+        return std::nullopt;
+    }
+    if (value.size() < 2 || value.front() != '"' || value.back() != '"') {
+        return std::nullopt;
+    }
+    return unescapeJsonString(value.substr(1, value.size() - 2));
+}
+
+static std::optional<std::string> parseManifestStringField(
+    const std::string& trimmedLine, const char* key) {
+    const std::string prefix = std::string("\"") + key + "\":";
+    if (!hasPrefix(trimmedLine, prefix)) {
+        return std::nullopt;
+    }
+    return parseJsonStringValue(trimmedLine.substr(prefix.size()));
+}
+
+static std::optional<int64_t> parseManifestIntField(
+    const std::string& trimmedLine, const char* key) {
+    const std::string prefix = std::string("\"") + key + "\":";
+    if (!hasPrefix(trimmedLine, prefix)) {
+        return std::nullopt;
+    }
+
+    const std::string value = stripTrailingComma(trimmedLine.substr(prefix.size()));
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    try {
+        return std::stoll(value);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+static bool fileExists(const std::string& path) {
+    return !path.empty() && access(path.c_str(), F_OK) == 0;
+}
+
+static std::string parentDirectory(const std::string& path) {
+    const size_t pos = path.find_last_of('/');
+    if (pos == std::string::npos) {
+        return ".";
+    }
+    if (pos == 0) {
+        return "/";
+    }
+    return path.substr(0, pos);
+}
+
+static std::string joinPath(const std::string& dir, const std::string& fileName) {
+    if (dir.empty() || dir == ".") {
+        return fileName;
+    }
+    if (dir.back() == '/') {
+        return dir + fileName;
+    }
+    return dir + "/" + fileName;
+}
+
+static std::optional<std::string> replaceSuffix(
+    const std::string& path, const std::string& suffix,
+    const std::string& replacement) {
+    if (!hasSuffix(path, suffix)) {
+        return std::nullopt;
+    }
+    return path.substr(0, path.size() - suffix.size()) + replacement;
+}
+
+static std::string resolveProfileManifestPath(const std::string& outputPath) {
+    const char* envPath = std::getenv("NPU_PROFILE_MANIFEST");
+    if (envPath && envPath[0] != '\0') {
+        return std::string(envPath);
+    }
+
+    const std::string outputDir = parentDirectory(outputPath);
+    std::vector<std::string> candidates;
+
+    if (auto replaced = replaceSuffix(
+            outputPath, "_profile_report.json", "_profile_manifest.json")) {
+        candidates.push_back(*replaced);
+    }
+    if (auto replaced =
+            replaceSuffix(outputPath, "profile_report.json", "profile_manifest.json")) {
+        candidates.push_back(*replaced);
+    }
+
+    candidates.push_back(joinPath(outputDir, "profile_manifest.json"));
+    candidates.push_back(joinPath(outputDir, "NpuPartition/profile_manifest.json"));
+
+    for (const std::string& candidate : candidates) {
+        if (fileExists(candidate)) {
+            return candidate;
+        }
+    }
+    return "";
+}
+
+static std::map<int64_t, LayerManifestRecord> loadManifestMetadata(
+    const std::string& manifestPath) {
+    std::map<int64_t, LayerManifestRecord> manifestLayers;
+    if (manifestPath.empty() || !fileExists(manifestPath)) {
+        return manifestLayers;
+    }
+
+    std::ifstream in(manifestPath);
+    if (!in.is_open()) {
+        return manifestLayers;
+    }
+
+    bool inLayersArray = false;
+    bool inLayerObject = false;
+    bool inFusedOps = false;
+    LayerManifestRecord currentLayer;
+    std::string line;
+
+    while (std::getline(in, line)) {
+        const std::string trimmed = trimCopy(line);
+        if (trimmed.empty()) {
+            continue;
+        }
+
+        if (!inLayersArray) {
+            if (trimmed == "\"layers\": [") {
+                inLayersArray = true;
+            }
+            continue;
+        }
+
+        if (!inLayerObject) {
+            if (trimmed == "{") {
+                currentLayer = LayerManifestRecord{};
+                inLayerObject = true;
+            } else if (trimmed == "]" || trimmed == "],") {
+                break;
+            }
+            continue;
+        }
+
+        if (inFusedOps) {
+            if (trimmed == "]" || trimmed == "],") {
+                inFusedOps = false;
+                continue;
+            }
+            if (auto fusedOp = parseJsonStringValue(trimmed)) {
+                currentLayer.fusedOps.push_back(*fusedOp);
+            }
+            continue;
+        }
+
+        if (trimmed == "}" || trimmed == "},") {
+            if (currentLayer.layerId.has_value()) {
+                manifestLayers[*currentLayer.layerId] = currentLayer;
+            }
+            inLayerObject = false;
+            continue;
+        }
+
+        if (trimmed == "\"fused_ops\": [") {
+            inFusedOps = true;
+            continue;
+        }
+
+        if (auto layerId = parseManifestIntField(trimmed, "layer_id")) {
+            currentLayer.layerId = *layerId;
+            continue;
+        }
+        if (auto layerName = parseManifestStringField(trimmed, "onnx_node_name")) {
+            currentLayer.layerName = *layerName;
+            continue;
+        }
+        if (auto originOpType =
+                parseManifestStringField(trimmed, "origin_op_type")) {
+            currentLayer.originOpType = *originOpType;
+            continue;
+        }
+        if (auto device = parseManifestStringField(trimmed, "device")) {
+            currentLayer.device = *device;
+            continue;
+        }
+        if (hasPrefix(trimmed, "\"fallback_reason\":")) {
+            currentLayer.fallbackReason =
+                parseJsonStringValue(trimmed.substr(std::strlen("\"fallback_reason\":")));
+            continue;
+        }
+    }
+
+    return manifestLayers;
+}
+
+static ProfilerState& getProfilerState() {
+    static ProfilerState state;
+    return state;
+}
+
+static void dumpProfilerReport(const char* pathOverride);
+
+static void ensureProfilerInitialized() {
+    if (isProfilingDisabled()) {
+        return;
+    }
+
+    ProfilerState& state = getProfilerState();
+    if (state.initialized) {
+        return;
+    }
+
+    state.initialized = true;
+    state.outputPath = resolveProfileOutputPath(nullptr);
+    if (!state.registeredAtExit) {
+        std::atexit([]() { dumpProfilerReport(nullptr); });
+        state.registeredAtExit = true;
+    }
+}
+
+static void finishActiveLayer(int64_t expectedLayerId) {
+    if (isProfilingDisabled() || !g_activeLayer.active) {
+        return;
+    }
+
+    const int64_t activeLayerId = g_activeLayer.layerId;
+    if (expectedLayerId >= 0 && activeLayerId != expectedLayerId) {
+        NPU_PROFILE_LOG("layer id mismatch: active=%lld requested=%lld",
+            static_cast<long long>(activeLayerId),
+            static_cast<long long>(expectedLayerId));
+    }
+
+    auto end = std::chrono::steady_clock::now();
+    auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  end - g_activeLayer.start)
+                  .count();
+
+    ProfilerState& state = getProfilerState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    LayerProfileRecord& record = state.layers[activeLayerId];
+    record.totalNs += static_cast<uint64_t>(ns);
+    record.invocations += 1;
+
+    g_activeLayer = ActiveLayerFrame{};
+}
+
+static void beginLayerProfile(int64_t layerId) {
+    if (isProfilingDisabled()) {
+        return;
+    }
+
+    ensureProfilerInitialized();
+    if (g_activeLayer.active) {
+        finishActiveLayer(g_activeLayer.layerId);
+    }
+
+    g_activeLayer.active = true;
+    g_activeLayer.layerId = layerId;
+    g_activeLayer.start = std::chrono::steady_clock::now();
+}
+
+static void endLayerProfile(int64_t layerId) {
+    if (isProfilingDisabled() || !g_activeLayer.active) {
+        return;
+    }
+    finishActiveLayer(layerId);
+}
+
+static void addStageSample(
+    ProfileStage stage, uint64_t ns, ProfileCallCounter counter) {
+    if (isProfilingDisabled() || !g_activeLayer.active || g_activeLayer.layerId < 0) {
+        return;
+    }
+
+    ensureProfilerInitialized();
+    ProfilerState& state = getProfilerState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    LayerProfileRecord& record = state.layers[g_activeLayer.layerId];
+
+    switch (stage) {
+    case ProfileStage::DmaIn:
+        record.dmaInNs += ns;
+        break;
+    case ProfileStage::Compute:
+        record.computeNs += ns;
+        break;
+    case ProfileStage::DmaOut:
+        record.dmaOutNs += ns;
+        break;
+    case ProfileStage::Layout:
+        record.layoutNs += ns;
+        break;
+    case ProfileStage::WaitIrq:
+        record.waitIrqNs += ns;
+        break;
+    }
+
+    switch (counter) {
+    case ProfileCallCounter::Mvin:
+        record.mvinCalls += 1;
+        break;
+    case ProfileCallCounter::Compute:
+        record.computeCalls += 1;
+        break;
+    case ProfileCallCounter::Mvout:
+        record.mvoutCalls += 1;
+        break;
+    case ProfileCallCounter::Layout:
+        record.layoutCalls += 1;
+        break;
+    case ProfileCallCounter::None:
+        break;
+    }
+}
+
+class ScopedStageTimer {
+public:
+    ScopedStageTimer(ProfileStage stage, ProfileCallCounter counter = ProfileCallCounter::None)
+        : stage_(stage), counter_(counter), enabled_(!isProfilingDisabled() && g_activeLayer.active),
+          start_(enabled_ ? std::chrono::steady_clock::now()
+                          : std::chrono::steady_clock::time_point()) {}
+
+    ~ScopedStageTimer() {
+        if (!enabled_) {
+            return;
+        }
+        auto end = std::chrono::steady_clock::now();
+        auto ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(end - start_).count();
+        addStageSample(stage_, static_cast<uint64_t>(ns), counter_);
+    }
+
+private:
+    ProfileStage stage_;
+    ProfileCallCounter counter_;
+    bool enabled_;
+    std::chrono::steady_clock::time_point start_;
+};
+
+static bool layerHasNpuWork(const LayerProfileRecord& record) {
+    return record.dmaInNs > 0 || record.computeNs > 0 || record.dmaOutNs > 0 ||
+           record.layoutNs > 0;
+}
+
+static void writeJsonString(std::ostream& os, const std::string& value) {
+    os << '"' << jsonEscape(value) << '"';
+}
+
+static void writeJsonOptionalString(
+    std::ostream& os, const std::optional<std::string>& value) {
+    if (value.has_value()) {
+        writeJsonString(os, *value);
+        return;
+    }
+    os << "null";
+}
+
+static void writeJsonStringArray(
+    std::ostream& os, const std::vector<std::string>& values) {
+    os << "[";
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (i != 0) {
+            os << ", ";
+        }
+        writeJsonString(os, values[i]);
+    }
+    os << "]";
+}
+
+static void dumpProfilerReport(const char* pathOverride) {
+    if (isProfilingDisabled()) {
+        return;
+    }
+
+    ProfilerState& state = getProfilerState();
+    if (!state.initialized) {
+        return;
+    }
+    if (g_activeLayer.active) {
+        finishActiveLayer(g_activeLayer.layerId);
+    }
+
+    std::map<int64_t, LayerProfileRecord> snapshot;
+    std::string outputPath;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        snapshot = state.layers;
+        outputPath = resolveProfileOutputPath(pathOverride ? pathOverride : state.outputPath.c_str());
+        state.outputPath = outputPath;
+    }
+    const std::string manifestPath = resolveProfileManifestPath(outputPath);
+    const std::map<int64_t, LayerManifestRecord> manifestLayers =
+        loadManifestMetadata(manifestPath);
+
+    uint64_t totalNs = 0;
+    uint64_t cpuTotalNs = 0;
+    uint64_t npuTotalNs = 0;
+    uint64_t npuLayerCount = 0;
+    std::vector<std::pair<int64_t, uint64_t>> hotLayers;
+    hotLayers.reserve(snapshot.size());
+
+    for (const auto& entry : snapshot) {
+        const LayerProfileRecord& record = entry.second;
+        totalNs += record.totalNs;
+        if (layerHasNpuWork(record)) {
+            npuTotalNs += record.totalNs;
+            npuLayerCount += 1;
+        } else {
+            cpuTotalNs += record.totalNs;
+        }
+        hotLayers.emplace_back(entry.first, record.totalNs);
+    }
+
+    std::sort(hotLayers.begin(), hotLayers.end(),
+        [](const auto& lhs, const auto& rhs) { return lhs.second > rhs.second; });
+
+    std::ofstream out(outputPath);
+    if (!out.is_open()) {
+        fprintf(
+            stderr, "[NPU_ERROR] Failed to open profiling report output: %s\n",
+            outputPath.c_str());
+        return;
+    }
+
+    out << "{\n";
+    out << "  \"summary\": {\n";
+    out << "    \"total_ns\": " << totalNs << ",\n";
+    out << "    \"cpu_total_ns\": " << cpuTotalNs << ",\n";
+    out << "    \"npu_total_ns\": " << npuTotalNs << ",\n";
+    out << "    \"npu_latency_share\": "
+        << (totalNs == 0 ? 0.0 : static_cast<double>(npuTotalNs) / static_cast<double>(totalNs))
+        << ",\n";
+    out << "    \"npu_layer_share\": "
+        << (snapshot.empty() ? 0.0
+                             : static_cast<double>(npuLayerCount) /
+                                   static_cast<double>(snapshot.size()))
+        << ",\n";
+    out << "    \"npu_macs_share\": null,\n";
+    out << "    \"top_hot_layers\": [";
+    for (size_t i = 0; i < hotLayers.size() && i < 5; ++i) {
+        if (i != 0) {
+            out << ", ";
+        }
+        const auto metadataIt = manifestLayers.find(hotLayers[i].first);
+        out << "{";
+        out << "\"layer_id\": " << hotLayers[i].first << ", ";
+        if (metadataIt != manifestLayers.end()) {
+            out << "\"layer_name\": ";
+            writeJsonString(out, metadataIt->second.layerName);
+            out << ", ";
+            out << "\"origin_op_type\": ";
+            writeJsonString(out, metadataIt->second.originOpType);
+            out << ", ";
+        }
+        out << "\"total_ns\": " << hotLayers[i].second;
+        out << "}";
+    }
+    out << "]\n";
+    out << "  },\n";
+    out << "  \"layers\": [\n";
+
+    bool firstLayer = true;
+    for (const auto& entry : snapshot) {
+        const int64_t layerId = entry.first;
+        const LayerProfileRecord& record = entry.second;
+        const bool isNpuLayer = layerHasNpuWork(record);
+        const auto metadataIt = manifestLayers.find(layerId);
+        const LayerManifestRecord* metadata =
+            metadataIt == manifestLayers.end() ? nullptr : &metadataIt->second;
+        const std::string device =
+            metadata && !metadata->device.empty() ? metadata->device
+                                                 : (isNpuLayer ? "npu" : "cpu");
+        const uint64_t stagedNs =
+            record.dmaInNs + record.computeNs + record.dmaOutNs + record.layoutNs;
+        const uint64_t otherNs =
+            record.totalNs > stagedNs ? record.totalNs - stagedNs
+                                      : (isNpuLayer ? 0 : record.totalNs);
+
+        if (!firstLayer) {
+            out << ",\n";
+        }
+        firstLayer = false;
+
+        out << "    {\n";
+        out << "      \"layer_id\": " << layerId << ",\n";
+        out << "      \"layer_name\": ";
+        writeJsonOptionalString(
+            out, metadata ? std::optional<std::string>(metadata->layerName)
+                          : std::nullopt);
+        out << ",\n";
+        out << "      \"onnx_node_name\": ";
+        writeJsonOptionalString(
+            out, metadata ? std::optional<std::string>(metadata->layerName)
+                          : std::nullopt);
+        out << ",\n";
+        out << "      \"origin_op_type\": ";
+        writeJsonOptionalString(
+            out, metadata ? std::optional<std::string>(metadata->originOpType)
+                          : std::nullopt);
+        out << ",\n";
+        out << "      \"device\": ";
+        writeJsonString(out, device);
+        out << ",\n";
+        out << "      \"fused_ops\": ";
+        if (metadata) {
+            writeJsonStringArray(out, metadata->fusedOps);
+        } else {
+            out << "[]";
+        }
+        out << ",\n";
+        out << "      \"fallback_reason\": ";
+        writeJsonOptionalString(
+            out, metadata ? metadata->fallbackReason : std::nullopt);
+        out << ",\n";
+        out << "      \"invocations\": " << record.invocations << ",\n";
+        out << "      \"total_ns\": " << record.totalNs << ",\n";
+        out << "      \"avg_ns\": "
+            << (record.invocations == 0
+                    ? 0.0
+                    : static_cast<double>(record.totalNs) /
+                          static_cast<double>(record.invocations))
+            << ",\n";
+        out << "      \"pct_total\": "
+            << (totalNs == 0
+                    ? 0.0
+                    : static_cast<double>(record.totalNs) /
+                          static_cast<double>(totalNs) * 100.0)
+            << ",\n";
+        out << "      \"dma_in_ns\": " << record.dmaInNs << ",\n";
+        out << "      \"compute_ns\": " << record.computeNs << ",\n";
+        out << "      \"dma_out_ns\": " << record.dmaOutNs << ",\n";
+        out << "      \"layout_ns\": " << record.layoutNs << ",\n";
+        out << "      \"wait_irq_ns\": " << record.waitIrqNs << ",\n";
+        out << "      \"other_ns\": " << otherNs << ",\n";
+        out << "      \"mvin_calls\": " << record.mvinCalls << ",\n";
+        out << "      \"compute_calls\": " << record.computeCalls << ",\n";
+        out << "      \"mvout_calls\": " << record.mvoutCalls << ",\n";
+        out << "      \"layout_calls\": " << record.layoutCalls << "\n";
+        out << "    }";
+    }
+    out << "\n  ]\n";
+    out << "}\n";
+    out.close();
+
+    NPU_PROFILE_LOG("report written to %s", outputPath.c_str());
+}
+
+} // namespace
 
 // ==========================================
 // Debug/Release Mode Configuration
@@ -303,6 +1024,7 @@ void NpuRuntime::dump_irq_regs() {
 }
 
 void NpuRuntime::wait_irq() {
+    ScopedStageTimer waitTimer(ProfileStage::WaitIrq);
     NPU_TIMER_SECTION_BEGIN("wait_irq")
     NPU_LOG("Waiting for IRQ (hybrid polling)...");
     
@@ -375,6 +1097,7 @@ uint32_t NpuRuntime::virt_to_phys(void* ptr) {
 
 void NpuRuntime::run_mvin(const MvinConfig& cfg) {
     NPU_TIMER_TOTAL("run_mvin");
+    ScopedStageTimer profileTimer(ProfileStage::DmaIn, ProfileCallCounter::Mvin);
     const uint8_t precision = 1; // force precision regardless of API input
 
     // Some compiler paths may pass constant pointers that are not inside NPU
@@ -453,6 +1176,7 @@ void NpuRuntime::run_mvin(const MvinConfig& cfg) {
 
 void NpuRuntime::run_mvout(const MvoutConfig& cfg) {
     NPU_TIMER_TOTAL("run_mvout");
+    ScopedStageTimer profileTimer(ProfileStage::DmaOut, ProfileCallCounter::Mvout);
     const uint8_t precision = 1; // force precision regardless of API input
     
     uint32_t phys_dram = virt_to_phys(cfg.host_ptr);
@@ -493,6 +1217,7 @@ void NpuRuntime::run_mvout(const MvoutConfig& cfg) {
 
 void NpuRuntime::run_sfu(const SfuConfig& cfg) {
     NPU_TIMER_TOTAL("run_sfu");
+    ScopedStageTimer profileTimer(ProfileStage::Compute, ProfileCallCounter::Compute);
     
     NPU_TIMER_SECTION_BEGIN("run_sfu(pre_reg)")
     NPU_LOG("Running SFU (Op=%d)", cfg.op_type);
@@ -530,6 +1255,7 @@ void NpuRuntime::run_sfu(const SfuConfig& cfg) {
 
 void NpuRuntime::run_conv(const ConvConfig& cfg) {
     NPU_TIMER_TOTAL("run_conv");
+    ScopedStageTimer profileTimer(ProfileStage::Compute, ProfileCallCounter::Compute);
     
     NPU_TIMER_SECTION_BEGIN("run_conv(pre_reg)")
     NPU_LOG("Running CONV (DataFlow=%d)", cfg.dataflow_mode);
@@ -775,6 +1501,7 @@ int NpuRuntime::run_conv_tile(const NpuConvTileConfig& cfg) {
 
 void NpuRuntime::run_gemm(const GemmConfig& cfg) {
     NPU_TIMER_TOTAL("run_gemm");
+    ScopedStageTimer profileTimer(ProfileStage::Compute, ProfileCallCounter::Compute);
     
     NPU_TIMER_SECTION_BEGIN("run_gemm(pre_reg)")
     NPU_LOG("Running GEMM (DataFlow=%d)", cfg.dataflow);
@@ -837,6 +1564,7 @@ void NpuRuntime::run_gemm(const GemmConfig& cfg) {
 
 void NpuRuntime::run_matadd(const MataddConfig& cfg) {
     NPU_TIMER_TOTAL("run_matadd");
+    ScopedStageTimer profileTimer(ProfileStage::Compute, ProfileCallCounter::Compute);
     
     NPU_TIMER_SECTION_BEGIN("run_matadd(pre_reg)")
     NPU_LOG("Running MATADD (A=0x%X, B=0x%X, Out=0x%X, ColM1=%d, RowM1=%d)", 
@@ -873,6 +1601,7 @@ void NpuRuntime::run_matadd(const MataddConfig& cfg) {
 
 void NpuRuntime::run_transpose(const TransposeConfig& cfg) {
     NPU_TIMER_TOTAL("run_transpose");
+    ScopedStageTimer profileTimer(ProfileStage::Layout, ProfileCallCounter::Layout);
     
     NPU_TIMER_SECTION_BEGIN("run_transpose(pre_reg)")
     NPU_LOG("Running TRANSPOSE (In=0x%X, Out=0x%X, Col=%d, Row=%d)", 
@@ -923,6 +1652,7 @@ void NpuRuntime::run_transpose(const TransposeConfig& cfg) {
 
 void NpuRuntime::run_resample(const ResampleConfig& cfg) {
     NPU_TIMER_TOTAL("run_resample");
+    ScopedStageTimer profileTimer(ProfileStage::Compute, ProfileCallCounter::Compute);
     
     NPU_TIMER_SECTION_BEGIN("run_resample(pre_reg)")
     NPU_LOG("Running RESAMPLE (Type=%d, Op=%d, In=0x%X, Out=0x%X, Col=%d, Row=%d)", 
@@ -1245,6 +1975,7 @@ int npu_init() {
 
 void npu_destroy() {
     NPU_CAPI_LOG("npu_destroy()");
+    dumpProfilerReport(nullptr);
     if (g_npu_runtime) { delete g_npu_runtime; g_npu_runtime = nullptr; }
 }
 
@@ -1253,6 +1984,29 @@ void npu_reset() { // <--- [新增]
     if (g_npu_runtime) {
         g_npu_runtime->reset();
     }
+}
+
+void npu_profile_begin(int64_t layer_id) {
+    NPU_CAPI_LOG("npu_profile_begin(layer_id=%lld)", (long long)layer_id);
+    beginLayerProfile(layer_id);
+}
+
+void _mlir_ciface_npu_profile_begin(int64_t layer_id) {
+    npu_profile_begin(layer_id);
+}
+
+void npu_profile_end(int64_t layer_id) {
+    NPU_CAPI_LOG("npu_profile_end(layer_id=%lld)", (long long)layer_id);
+    endLayerProfile(layer_id);
+}
+
+void _mlir_ciface_npu_profile_end(int64_t layer_id) {
+    npu_profile_end(layer_id);
+}
+
+void npu_profile_dump(const char* path) {
+    NPU_CAPI_LOG("npu_profile_dump(path=%s)", path ? path : "(null)");
+    dumpProfilerReport(path);
 }
 
 void* npu_mem_alloc(size_t size) {

@@ -9,6 +9,8 @@
 #include "mlir/Support/LLVM.h"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Builders.h"
+#include "llvm/ADT/ArrayRef.h"
 
 namespace npux {
 
@@ -18,6 +20,14 @@ struct QuantizationParam {
 };
 
 mlir::DenseElementsAttr getConstAttrFromOperand(mlir::Operation *op, int operandIndex);
+
+std::string getNpuProfileOpTypeName(mlir::Operation *op);
+
+std::string getNpuProfileLayerName(mlir::Operation *op);
+
+void setNpuProfileAttrs(mlir::Operation *target, mlir::Operation *source,
+    mlir::Builder &builder, llvm::StringRef layerName,
+    llvm::StringRef layerKind, llvm::ArrayRef<llvm::StringRef> fusedOps);
 
 template <typename OpT>
 QuantizationParam getScalarQuantParams(OpT op) {
@@ -73,4 +83,3 @@ void populateLinalgResamplePatterns(mlir::RewritePatternSet &patterns);
 void populateLinalgTransposePattern(mlir::RewritePatternSet &patterns);
 
 }// namespace npux
-

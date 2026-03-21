@@ -66,7 +66,8 @@ static Value createPackedBinaryOp(
     double in1Scale, int64_t in1Zp, 
     double in2Scale, int64_t in2Zp, 
     double outScale, int64_t outZp,
-    StringRef libCallName,
+    StringRef libCallName, Operation *sourceOp, StringRef layerName,
+    ArrayRef<StringRef> fusedOps,
     std::function<void(Operation *)> attrHook = nullptr) {
   
   int64_t rank = inputTypeA.getRank();
@@ -118,6 +119,8 @@ static Value createPackedBinaryOp(
   // 4. 设置属性
   linalgOp->setAttr("library_call", rewriter.getStringAttr(libCallName));
   linalgOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  setNpuProfileAttrs(
+      linalgOp, sourceOp, rewriter, layerName, "compute", fusedOps);
   // 针对双输入，分别记录 scale 和 zp
   linalgOp->setAttr("in1_scale", rewriter.getF32FloatAttr(in1Scale));
   linalgOp->setAttr("in1_zp", rewriter.getIntegerAttr(rewriter.getI32Type(), in1Zp));
@@ -172,6 +175,7 @@ struct AddToLinalg : public OpConversionPattern<ONNXAddOp> {
     auto outParams = getScalarQuantParams(quantOp);
 
     // 5. 创建 linalgOp，传入 "npu_matadd"
+    SmallVector<StringRef> fusedOps = {"Add"};
     Value result = createPackedBinaryOp(rewriter, op.getLoc(), 
         quantizedInputA, inputTypeA, 
         quantizedInputB, inputTypeB, 
@@ -179,7 +183,7 @@ struct AddToLinalg : public OpConversionPattern<ONNXAddOp> {
         inParamsA.scale, inParamsA.zeroPoint, 
         inParamsB.scale, inParamsB.zeroPoint,
         outParams.scale, outParams.zeroPoint, 
-        "npu_matadd");
+        "npu_matadd", op, getNpuProfileLayerName(op), fusedOps);
 
     quantOp.getResult().setType(result.getType());
 
