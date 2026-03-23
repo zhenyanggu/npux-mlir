@@ -134,6 +134,10 @@ static bool isCpuHelperOp(Operation *op) {
   return isa<ONNXConstantOp, ONNXQuantizeLinearOp, ONNXDequantizeLinearOp>(op);
 }
 
+static bool isConstantLikeOp(Operation *op) {
+  return isa<ONNXConstantOp, arith::ConstantOp>(op);
+}
+
 static bool isPotentialNpuOp(Operation *op) {
   return isa<ONNXConvOp, ONNXAddOp, ONNXQLinearMatMulOp, ONNXGemmOp,
       ONNXLayerNormalizationOp, ONNXSoftmaxOp, ONNXGeluOp, ONNXTransposeOp,
@@ -146,6 +150,19 @@ static bool isCpuProfileCandidate(Operation *op) {
   if (isCpuHelperOp(op))
     return false;
   return op->getNumResults() > 0;
+}
+
+static bool isCpuBeginBoundaryHelper(Operation *op) {
+  auto dqOp = dyn_cast<ONNXDequantizeLinearOp>(op);
+  if (!dqOp || op->getNumOperands() == 0)
+    return false;
+
+  Operation *dataDefOp = op->getOperand(0).getDefiningOp();
+  return !dataDefOp || !isConstantLikeOp(dataDefOp);
+}
+
+static bool isCpuEndBoundaryHelper(Operation *op) {
+  return isa<ONNXQuantizeLinearOp>(op);
 }
 
 static bool isNpuAuxiliaryOp(Operation *op) {
@@ -165,6 +182,59 @@ static Operation *getRepresentativeTaggedOp(const LayerSlice &slice) {
   if (!slice.taggedOps.empty())
     return slice.taggedOps.front();
   return slice.beginOp;
+}
+
+static Operation *findCpuBoundaryBeginOp(Operation *op) {
+  Operation *boundary = op;
+  for (Value operand : op->getOperands()) {
+    Operation *defOp = operand.getDefiningOp();
+    if (!defOp || defOp->getBlock() != op->getBlock())
+      continue;
+    if (!isCpuBeginBoundaryHelper(defOp))
+      continue;
+    if (defOp->isBeforeInBlock(boundary))
+      boundary = defOp;
+  }
+  return boundary;
+}
+
+static Operation *findCpuBoundaryEndOp(Operation *op) {
+  Operation *boundary = op;
+  for (Value result : op->getResults()) {
+    for (Operation *user : result.getUsers()) {
+      if (user->getBlock() != op->getBlock())
+        continue;
+      if (!isCpuEndBoundaryHelper(user))
+        continue;
+      if (boundary->isBeforeInBlock(user))
+        boundary = user;
+    }
+  }
+  return boundary;
+}
+
+static void normalizeBlockLayerBoundaries(MutableArrayRef<LayerSlice> blockLayers) {
+  if (blockLayers.empty())
+    return;
+
+  for (size_t i = 1; i < blockLayers.size(); ++i) {
+    LayerSlice &prev = blockLayers[i - 1];
+    LayerSlice &curr = blockLayers[i];
+    if (!prev.endOp || !curr.beginOp)
+      continue;
+    if (prev.endOp->getBlock() != curr.beginOp->getBlock())
+      continue;
+
+    bool overlapsPrev = curr.beginOp == prev.endOp ||
+                        curr.beginOp->isBeforeInBlock(prev.endOp);
+    if (!overlapsPrev)
+      continue;
+
+    if (Operation *nextOp = prev.endOp->getNextNode())
+      curr.beginOp = nextOp;
+    else if (!curr.ops.empty())
+      curr.beginOp = curr.ops.front();
+  }
 }
 
 static Operation *findTaggedOpByKind(
@@ -452,6 +522,7 @@ struct NpuProfileAnnotatePass
         continue;
 
       for (Block &block : func.getBody().getBlocks()) {
+        size_t blockLayerBegin = layers.size();
         for (Operation *op = block.empty() ? nullptr : &block.front(); op != nullptr;) {
           Operation *next = op->getNextNode();
           auto layerNameAttr = op->getAttrOfType<StringAttr>(kLayerNameAttr);
@@ -502,8 +573,8 @@ struct NpuProfileAnnotatePass
           if (isCpuProfileCandidate(op)) {
             LayerSlice slice;
             slice.layerId = nextLayerId++;
-            slice.beginOp = op;
-            slice.endOp = op;
+            slice.beginOp = findCpuBoundaryBeginOp(op);
+            slice.endOp = findCpuBoundaryEndOp(op);
             slice.device = "cpu";
             slice.ops.push_back(op);
             slice.layerName = npux::getNpuProfileLayerName(op);
@@ -514,6 +585,12 @@ struct NpuProfileAnnotatePass
           }
 
           op = next;
+        }
+
+        if (layers.size() != blockLayerBegin) {
+          MutableArrayRef<LayerSlice> blockLayers(
+              layers.data() + blockLayerBegin, layers.size() - blockLayerBegin);
+          normalizeBlockLayerBoundaries(blockLayers);
         }
       }
     }

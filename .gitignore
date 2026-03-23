@@ -12,6 +12,8 @@ python/*pt
 python/*json
 cache/
 .vscode/
+model_test/output
+model_test/profile
 *.onnx
 # Prerequisites
 *.d

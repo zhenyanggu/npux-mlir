@@ -18,8 +18,14 @@ MODELS_DIR := $(ROOT_DIR)/models
 SCRIPTS_DIR := $(ROOT_DIR)/scripts
 BUILD_DIR := $(ROOT_DIR)/build
 CACHE_DIR := $(ROOT_DIR)/cache
-OUTPUT_DIR := $(BUILD_DIR)/output
-OUTPUT_CPU_DIR := $(BUILD_DIR)/output_cpu
+OUTPUT_ROOT := $(ROOT_DIR)/output
+OUTPUT_NPU_DIR := $(OUTPUT_ROOT)/NPU
+OUTPUT_CPU_DIR := $(OUTPUT_ROOT)/CPU
+NPU_BUILD_DIR_PREFIX := $(BUILD_DIR)/NPU_
+CPU_BUILD_DIR_PREFIX := $(BUILD_DIR)/CPU_
+
+npu_build_dir = $(NPU_BUILD_DIR_PREFIX)$(1)
+cpu_build_dir = $(CPU_BUILD_DIR_PREFIX)$(1)
 
 # 硬件参数（单位: KB），可通过命令行覆盖
 SPM_KB ?= 512
@@ -71,9 +77,9 @@ MODEL_CPU_TARGETS := $(addsuffix .cpu,$(ALL_MODEL_NAMES))
 .PHONY: $(MODEL_PREPARE_TARGETS) $(MODEL_TILE_TARGETS) $(MODEL_MLIR_TARGETS) $(MODEL_LLVM_TARGETS) $(MODEL_CPU_LLVM_TARGETS) $(MODEL_ZCU102_TARGETS) $(MODEL_CPU_TARGETS)
 
 ifeq ($(strip $(MODEL)),)
-CPU_DEFAULT_TARGETS := $(addprefix $(BUILD_DIR)/,$(addsuffix /.cpu.stamp,$(MODEL_NAMES)))
+CPU_DEFAULT_TARGETS := $(addprefix $(CPU_BUILD_DIR_PREFIX),$(addsuffix /.cpu.stamp,$(MODEL_NAMES)))
 else
-CPU_DEFAULT_TARGETS := $(BUILD_DIR)/$(MODEL)/.cpu.stamp
+CPU_DEFAULT_TARGETS := $(call cpu_build_dir,$(MODEL))/.cpu.stamp
 endif
 
 all: $(MODEL_NAMES)
@@ -99,7 +105,7 @@ bert_base_layers: $(BERT_BASE_LAYER_ENABLED_MODEL_NAMES)
 bert_base_layers_all: $(BERT_BASE_LAYER_MODEL_NAMES)
 
 init:
-	@mkdir -p $(BUILD_DIR)
+	@mkdir -p "$(BUILD_DIR)" "$(OUTPUT_ROOT)"
 
 check_model:
 	@if [[ -z "$(MODEL)" ]]; then \
@@ -107,47 +113,49 @@ check_model:
 		exit 2; \
 	fi
 
-run_one: check_model $(BUILD_DIR)/$(MODEL)/.zcu102.stamp
+run_one: check_model $(call npu_build_dir,$(MODEL))/.zcu102.stamp
 
-prepare: check_model $(BUILD_DIR)/$(MODEL)/.prepare.stamp
+prepare: check_model $(call npu_build_dir,$(MODEL))/.prepare.stamp
 
-tile: check_model $(BUILD_DIR)/$(MODEL)/.tile.stamp
+tile: check_model $(call npu_build_dir,$(MODEL))/.tile.stamp
 
-mlir: check_model $(BUILD_DIR)/$(MODEL)/.mlir.stamp
+mlir: check_model $(call npu_build_dir,$(MODEL))/.mlir.stamp
 
-llvm: check_model $(BUILD_DIR)/$(MODEL)/.llvm.stamp
+llvm: check_model $(call npu_build_dir,$(MODEL))/.llvm.stamp
 
-zcu102: check_model $(BUILD_DIR)/$(MODEL)/.zcu102.stamp
+zcu102: check_model $(call npu_build_dir,$(MODEL))/.zcu102.stamp
 
 rebuild: check_model
-	@rm -rf "$(BUILD_DIR)/$(MODEL)"
+	@rm -rf "$(call npu_build_dir,$(MODEL))" "$(call cpu_build_dir,$(MODEL))"
+	@rm -rf "$(OUTPUT_NPU_DIR)/$(MODEL)" "$(OUTPUT_CPU_DIR)/$(MODEL)"
+	@rm -rf "$(BUILD_DIR)/$(MODEL)" "$(BUILD_DIR)/output/$(MODEL)" "$(BUILD_DIR)/output_cpu/$(MODEL)"
 	@$(MAKE) run_one MODEL=$(MODEL)
 
 ifneq (,$(filter clean,$(MAKECMDGOALS)))
 $(ALL_MODEL_NAMES):
 	@:
 else
-$(ALL_MODEL_NAMES): %: $(BUILD_DIR)/%/.zcu102.stamp
+$(ALL_MODEL_NAMES): %: $(NPU_BUILD_DIR_PREFIX)%/.zcu102.stamp
 endif
 
-$(MODEL_PREPARE_TARGETS): %.prepare: $(BUILD_DIR)/%/.prepare.stamp
+$(MODEL_PREPARE_TARGETS): %.prepare: $(NPU_BUILD_DIR_PREFIX)%/.prepare.stamp
 
-$(MODEL_TILE_TARGETS): %.tile: $(BUILD_DIR)/%/.tile.stamp
+$(MODEL_TILE_TARGETS): %.tile: $(NPU_BUILD_DIR_PREFIX)%/.tile.stamp
 
-$(MODEL_MLIR_TARGETS): %.mlir: $(BUILD_DIR)/%/.mlir.stamp
+$(MODEL_MLIR_TARGETS): %.mlir: $(NPU_BUILD_DIR_PREFIX)%/.mlir.stamp
 
-$(MODEL_LLVM_TARGETS): %.llvm: $(BUILD_DIR)/%/.llvm.stamp
+$(MODEL_LLVM_TARGETS): %.llvm: $(NPU_BUILD_DIR_PREFIX)%/.llvm.stamp
 
-$(MODEL_CPU_LLVM_TARGETS): %.cpu_llvm: $(BUILD_DIR)/%/.cpu_llvm.stamp
+$(MODEL_CPU_LLVM_TARGETS): %.cpu_llvm: $(CPU_BUILD_DIR_PREFIX)%/.cpu_llvm.stamp
 
-$(MODEL_ZCU102_TARGETS): %.zcu102: $(BUILD_DIR)/%/.zcu102.stamp
+$(MODEL_ZCU102_TARGETS): %.zcu102: $(NPU_BUILD_DIR_PREFIX)%/.zcu102.stamp
 
-$(MODEL_CPU_TARGETS): %.cpu: $(BUILD_DIR)/%/.cpu.stamp
+$(MODEL_CPU_TARGETS): %.cpu: $(CPU_BUILD_DIR_PREFIX)%/.cpu.stamp
 
-$(BUILD_DIR)/%/.prepare.stamp: | init
+$(BUILD_DIR)/NPU_%/.prepare.stamp: | init
 	@model="$*"; \
 	src_dir="$(MODELS_DIR)/$$model"; \
-	work_dir="$(BUILD_DIR)/$$model"; \
+	work_dir="$(BUILD_DIR)/NPU_$$model"; \
 	if [[ ! -d "$$src_dir" ]]; then \
 		echo "[error] testcase '$$model' 不存在，可用: $(MODEL_NAMES)"; \
 		exit 2; \
@@ -189,9 +197,54 @@ $(BUILD_DIR)/%/.prepare.stamp: | init
 	fi; \
 	touch "$@"
 
-$(BUILD_DIR)/%/.tile.stamp: $(BUILD_DIR)/%/.prepare.stamp
+$(BUILD_DIR)/CPU_%/.prepare.stamp: | init
 	@model="$*"; \
-	work_dir="$(BUILD_DIR)/$$model"; \
+	src_dir="$(MODELS_DIR)/$$model"; \
+	work_dir="$(BUILD_DIR)/CPU_$$model"; \
+	if [[ ! -d "$$src_dir" ]]; then \
+		echo "[error] testcase '$$model' 不存在，可用: $(MODEL_NAMES)"; \
+		exit 2; \
+	fi; \
+	mkdir -p "$$work_dir"; \
+	echo "[mkdir] $$work_dir"; \
+	shopt -s nullglob; \
+	onnx_files=("$$src_dir"/*.onnx); \
+	if (( $${#onnx_files[@]} > 0 )); then \
+		cp -f "$$src_dir"/*.onnx "$$work_dir"/; \
+		echo "[copy] $$src_dir/*.onnx -> $$work_dir/"; \
+	fi; \
+	if [[ -f "$$src_dir/model.py" ]]; then \
+		cp -f "$$src_dir/model.py" "$$work_dir/model.py"; \
+		echo "[gen] python $$work_dir/model.py $(MODEL_PY_ARGS)"; \
+		(cd "$$work_dir" && MODEL_TEST_CACHE_DIR="$(CACHE_DIR)" $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
+	elif [[ -f "$$src_dir/model.onnx" ]]; then \
+		cp -f "$$src_dir/model.onnx" "$$work_dir/model.onnx"; \
+		echo "[copy] $$src_dir/model.onnx -> $$work_dir/model.onnx"; \
+	elif (( $${#onnx_files[@]} > 0 )); then \
+		cp -f "$${onnx_files[0]}" "$$work_dir/model.onnx"; \
+		echo "[copy] 使用预置 ONNX: $${onnx_files[0]} -> $$work_dir/model.onnx"; \
+	else \
+		echo "[error] $$model 缺少 model.py 或任意 .onnx 文件"; \
+		exit 2; \
+	fi; \
+	if [[ ! -f "$$work_dir/model.onnx" ]]; then \
+		work_onnx=("$$work_dir"/*.onnx); \
+		if (( $${#work_onnx[@]} == 0 )); then \
+			echo "[error] $$model 未找到任何 onnx 文件"; \
+			exit 2; \
+		fi; \
+		cp -f "$${work_onnx[0]}" "$$work_dir/model.onnx"; \
+		echo "[copy] $${work_onnx[0]} -> $$work_dir/model.onnx"; \
+	fi; \
+	shopt -u nullglob; \
+	if [[ -f "$$src_dir/main.cpp" ]]; then \
+		cp -f "$$src_dir/main.cpp" "$$work_dir/main.cpp"; \
+	fi; \
+	touch "$@"
+
+$(BUILD_DIR)/NPU_%/.tile.stamp: $(BUILD_DIR)/NPU_%/.prepare.stamp
+	@model="$*"; \
+	work_dir="$(BUILD_DIR)/NPU_$$model"; \
 	onnx_file="$$work_dir/model.onnx"; \
 	tile_json="$$work_dir/tile_config.json"; \
 	if [[ ! -f "$$onnx_file" ]]; then \
@@ -227,9 +280,47 @@ $(BUILD_DIR)/%/.tile.stamp: $(BUILD_DIR)/%/.prepare.stamp
 	fi; \
 	touch "$@"
 
-$(BUILD_DIR)/%/.mlir.stamp: $(BUILD_DIR)/%/.tile.stamp
+$(BUILD_DIR)/CPU_%/.tile.stamp: $(BUILD_DIR)/CPU_%/.prepare.stamp
 	@model="$*"; \
-	work_dir="$(BUILD_DIR)/$$model"; \
+	work_dir="$(BUILD_DIR)/CPU_$$model"; \
+	onnx_file="$$work_dir/model.onnx"; \
+	tile_json="$$work_dir/tile_config.json"; \
+	if [[ ! -f "$$onnx_file" ]]; then \
+		echo "[error] $$model 未生成 model.onnx，无法执行分块"; \
+		exit 2; \
+	fi; \
+	shape_args=""; \
+	if [[ -n "$(SHAPE)" ]]; then \
+		shape_args="--shape $(SHAPE)"; \
+	elif [[ "$$model" == "mnist" ]]; then \
+		shape_args="--shape 1,1,28,28"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,28,28"; \
+	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" ]]; then \
+		shape_args="--shape 1,3,224,224"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,224,224"; \
+	elif [[ "$$model" == "bert_base" ]]; then \
+		shape_args="--shape 1,128"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,128 (fixed seq_len=128)"; \
+	elif [[ "$$model" == "vgg16_debug" ]]; then \
+		shape_args="--shape 1,3,32,32"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,32,32"; \
+	fi; \
+	echo "[tile] $$onnx_file -> $$tile_json"; \
+	$(PYTHON) "$(SCRIPTS_DIR)/conv_tile.py" \
+		-i "$$onnx_file" \
+		-o "$$tile_json" \
+		--spm "$(SPM_KB)" \
+		--acc "$(ACC_KB)" \
+		$$shape_args || { echo "[error] $$model 生成 tile_config.json 失败"; exit 2; }; \
+	if [[ ! -f "$$tile_json" ]]; then \
+		echo "{}" > "$$tile_json"; \
+		echo "[tile] $$model 无 Conv，已写入空 tile_config.json"; \
+	fi; \
+	touch "$@"
+
+$(BUILD_DIR)/NPU_%/.mlir.stamp: $(BUILD_DIR)/NPU_%/.tile.stamp
+	@model="$*"; \
+	work_dir="$(BUILD_DIR)/NPU_$$model"; \
 	onnx_file="$$work_dir/model.onnx"; \
 	mlir_file="$$onnx_file.mlir"; \
 	onnx_flags=""; \
@@ -245,9 +336,27 @@ $(BUILD_DIR)/%/.mlir.stamp: $(BUILD_DIR)/%/.tile.stamp
 	fi; \
 	touch "$@"
 
-$(BUILD_DIR)/%/.llvm.stamp: $(BUILD_DIR)/%/.mlir.stamp
+$(BUILD_DIR)/CPU_%/.mlir.stamp: $(BUILD_DIR)/CPU_%/.tile.stamp
 	@model="$*"; \
-	work_dir="$(BUILD_DIR)/$$model"; \
+	work_dir="$(BUILD_DIR)/CPU_$$model"; \
+	onnx_file="$$work_dir/model.onnx"; \
+	mlir_file="$$onnx_file.mlir"; \
+	onnx_flags=""; \
+	if [[ "$$model" == "resnet50" || "$$model" == "conv1x1_stage4" ]]; then \
+		onnx_flags="--enable-conv-opt-pass=false"; \
+		echo "[mlir] $$model disable ConvOptPass to keep 1x1 Conv (avoid Conv->MatMul rewrite)"; \
+	fi; \
+	echo "[mlir] $$onnx_file -> $$mlir_file"; \
+	(cd "$$work_dir" && $(ONNX_MLIR) $$onnx_flags --EmitONNXIR "model.onnx") || { echo "[error] $$model ONNX 转 MLIR 失败"; exit 2; }; \
+	if [[ ! -f "$$mlir_file" ]]; then \
+		echo "[error] 未找到 MLIR 文件: $$mlir_file"; \
+		exit 2; \
+	fi; \
+	touch "$@"
+
+$(BUILD_DIR)/NPU_%/.llvm.stamp: $(BUILD_DIR)/NPU_%/.mlir.stamp
+	@model="$*"; \
+	work_dir="$(BUILD_DIR)/NPU_$$model"; \
 	mlir_file="$$work_dir/model.onnx.mlir"; \
 	tile_json="$$work_dir/tile_config.json"; \
 	if [[ ! -f "$$tile_json" ]]; then \
@@ -258,9 +367,9 @@ $(BUILD_DIR)/%/.llvm.stamp: $(BUILD_DIR)/%/.mlir.stamp
 	(cd "$$work_dir" && "$(SCRIPTS_DIR)/onnx_to_llvm.sh" "$$mlir_file" "$$tile_json") || { echo "[error] $$model MLIR Lowering 失败"; exit 2; }; \
 	touch "$@"
 
-$(BUILD_DIR)/%/.cpu_llvm.stamp: $(BUILD_DIR)/%/.mlir.stamp
+$(BUILD_DIR)/CPU_%/.cpu_llvm.stamp: $(BUILD_DIR)/CPU_%/.mlir.stamp
 	@model="$*"; \
-	work_dir="$(BUILD_DIR)/$$model"; \
+	work_dir="$(BUILD_DIR)/CPU_$$model"; \
 	mlir_file="$$work_dir/model.onnx.mlir"; \
 	tile_json="$$work_dir/tile_config.json"; \
 	if [[ ! -f "$$tile_json" ]]; then \
@@ -271,10 +380,10 @@ $(BUILD_DIR)/%/.cpu_llvm.stamp: $(BUILD_DIR)/%/.mlir.stamp
 	(cd "$$work_dir" && PIPELINE_MODE=cpu bash "$(SCRIPTS_DIR)/onnx_to_llvm.sh" "$$mlir_file" "$$tile_json") || { echo "[error] $$model CPU MLIR Lowering 失败"; exit 2; }; \
 	touch "$@"
 
-$(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
+$(BUILD_DIR)/NPU_%/.zcu102.stamp: $(BUILD_DIR)/NPU_%/.llvm.stamp
 	@model="$*"; \
-	work_dir="$(BUILD_DIR)/$$model"; \
-	output_root="$(OUTPUT_DIR)"; \
+	work_dir="$(BUILD_DIR)/NPU_$$model"; \
+	output_root="$(OUTPUT_NPU_DIR)"; \
 	output_dir="$$output_root/$$model"; \
 	llvm_mlir="$$work_dir/NpuToLLVM/llvm.mlir"; \
 	output_bin="$$output_dir/$${model}_zcu102"; \
@@ -355,9 +464,9 @@ $(BUILD_DIR)/%/.zcu102.stamp: $(BUILD_DIR)/%/.llvm.stamp
 	shopt -u nullglob; \
 	touch "$@"
 
-$(BUILD_DIR)/%/.cpu.stamp: $(BUILD_DIR)/%/.cpu_llvm.stamp
+$(BUILD_DIR)/CPU_%/.cpu.stamp: $(BUILD_DIR)/CPU_%/.cpu_llvm.stamp
 	@model="$*"; \
-	work_dir="$(BUILD_DIR)/$$model"; \
+	work_dir="$(BUILD_DIR)/CPU_$$model"; \
 	output_root="$(OUTPUT_CPU_DIR)"; \
 	output_dir="$$output_root/$$model"; \
 	llvm_mlir="$$work_dir/CpuToLLVM/llvm.mlir"; \
@@ -406,32 +515,32 @@ $(BUILD_DIR)/%/.cpu.stamp: $(BUILD_DIR)/%/.cpu_llvm.stamp
 	if copy_first_existing_file "$$output_dir/profile_manifest.json" "$$work_dir/CpuPartition/profile_manifest.json"; then \
 		echo "[copy] $$work_dir/CpuPartition/profile_manifest.json -> $$output_dir/profile_manifest.json"; \
 	fi; \
-	if copy_first_existing_file "$$output_dir/$${model}_input.bin" "$$work_dir/$${model}_input.bin" "$$work_dir/input.bin" "$(OUTPUT_DIR)/$$model/$${model}_input.bin"; then \
+	if copy_first_existing_file "$$output_dir/$${model}_input.bin" "$$work_dir/$${model}_input.bin" "$$work_dir/input.bin" "$(OUTPUT_NPU_DIR)/$$model/$${model}_input.bin"; then \
 		echo "[copy] input -> $$output_dir/$${model}_input.bin"; \
 	fi; \
-	if copy_first_existing_file "$$output_dir/$${model}_output_golden.bin" "$$work_dir/$${model}_output_golden.bin" "$$work_dir/output_golden.bin" "$(OUTPUT_DIR)/$$model/$${model}_output_golden.bin"; then \
+	if copy_first_existing_file "$$output_dir/$${model}_output_golden.bin" "$$work_dir/$${model}_output_golden.bin" "$$work_dir/output_golden.bin" "$(OUTPUT_NPU_DIR)/$$model/$${model}_output_golden.bin"; then \
 		echo "[copy] golden -> $$output_dir/$${model}_output_golden.bin"; \
 	fi; \
-	if copy_first_existing_file "$$output_dir/$${model}_labels.bin" "$$work_dir/$${model}_labels.bin" "$$work_dir/labels.bin" "$(OUTPUT_DIR)/$$model/$${model}_labels.bin"; then \
+	if copy_first_existing_file "$$output_dir/$${model}_labels.bin" "$$work_dir/$${model}_labels.bin" "$$work_dir/labels.bin" "$(OUTPUT_NPU_DIR)/$$model/$${model}_labels.bin"; then \
 		echo "[copy] labels -> $$output_dir/$${model}_labels.bin"; \
 	fi; \
-	if copy_first_existing_file "$$output_dir/$${model}_images_u8.bin" "$$work_dir/$${model}_images_u8.bin" "$$work_dir/images_u8.bin" "$(OUTPUT_DIR)/$$model/$${model}_images_u8.bin"; then \
+	if copy_first_existing_file "$$output_dir/$${model}_images_u8.bin" "$$work_dir/$${model}_images_u8.bin" "$$work_dir/images_u8.bin" "$(OUTPUT_NPU_DIR)/$$model/$${model}_images_u8.bin"; then \
 		echo "[copy] images_u8 -> $$output_dir/$${model}_images_u8.bin"; \
 	fi; \
-	if copy_first_existing_file "$$output_dir/$${model}_image.pgm" "$$work_dir/$${model}_image.pgm" "$$work_dir/image.pgm" "$(OUTPUT_DIR)/$$model/$${model}_image.pgm"; then \
+	if copy_first_existing_file "$$output_dir/$${model}_image.pgm" "$$work_dir/$${model}_image.pgm" "$$work_dir/image.pgm" "$(OUTPUT_NPU_DIR)/$$model/$${model}_image.pgm"; then \
 		echo "[copy] image -> $$output_dir/$${model}_image.pgm"; \
 	fi; \
-	if copy_first_existing_file "$$output_dir/$${model}_samples.txt" "$$work_dir/$${model}_samples.txt" "$$work_dir/samples.txt" "$(OUTPUT_DIR)/$$model/$${model}_samples.txt"; then \
+	if copy_first_existing_file "$$output_dir/$${model}_samples.txt" "$$work_dir/$${model}_samples.txt" "$$work_dir/samples.txt" "$(OUTPUT_NPU_DIR)/$$model/$${model}_samples.txt"; then \
 		echo "[copy] samples.txt -> $$output_dir/$${model}_samples.txt"; \
 	fi; \
-	if copy_first_existing_file "$$output_dir/$${model}_samples.csv" "$$work_dir/$${model}_samples.csv" "$$work_dir/samples.csv" "$(OUTPUT_DIR)/$$model/$${model}_samples.csv"; then \
+	if copy_first_existing_file "$$output_dir/$${model}_samples.csv" "$$work_dir/$${model}_samples.csv" "$$work_dir/samples.csv" "$(OUTPUT_NPU_DIR)/$$model/$${model}_samples.csv"; then \
 		echo "[copy] samples.csv -> $$output_dir/$${model}_samples.csv"; \
 	fi; \
-	if copy_first_existing_dir "$$output_dir/$${model}_preview_png" "$$work_dir/$${model}_preview_png" "$$work_dir/preview_png" "$(OUTPUT_DIR)/$$model/$${model}_preview_png"; then \
+	if copy_first_existing_dir "$$output_dir/$${model}_preview_png" "$$work_dir/$${model}_preview_png" "$$work_dir/preview_png" "$(OUTPUT_NPU_DIR)/$$model/$${model}_preview_png"; then \
 		echo "[copy] preview_png -> $$output_dir/$${model}_preview_png"; \
 	fi; \
 	shopt -s nullglob; \
-	for extra_bin in "$$work_dir"/$${model}_*.bin "$(OUTPUT_DIR)/$$model"/$${model}_*.bin; do \
+	for extra_bin in "$$work_dir"/$${model}_*.bin "$(OUTPUT_NPU_DIR)/$$model"/$${model}_*.bin; do \
 		[[ -f "$$extra_bin" ]] || continue; \
 		base_name="$$(basename "$$extra_bin")"; \
 		cp -f "$$extra_bin" "$$output_dir/$$base_name"; \
@@ -454,16 +563,22 @@ list:
 clean:
 	@if [[ -n "$(SELECTIVE_CLEAN_MODELS)" ]]; then \
 		for model in $(SELECTIVE_CLEAN_MODELS); do \
+			rm -rf "$(call npu_build_dir,$$model)"; \
+			rm -rf "$(call cpu_build_dir,$$model)"; \
 			rm -rf "$(BUILD_DIR)/$$model"; \
-			rm -rf "$(OUTPUT_DIR)/$$model"; \
+			rm -rf "$(OUTPUT_NPU_DIR)/$$model"; \
 			rm -rf "$(OUTPUT_CPU_DIR)/$$model"; \
-			echo "[clean] removed $(BUILD_DIR)/$$model"; \
-			echo "[clean] removed $(OUTPUT_DIR)/$$model"; \
+			rm -rf "$(BUILD_DIR)/output/$$model"; \
+			rm -rf "$(BUILD_DIR)/output_cpu/$$model"; \
+			echo "[clean] removed $(call npu_build_dir,$$model)"; \
+			echo "[clean] removed $(call cpu_build_dir,$$model)"; \
+			echo "[clean] removed $(OUTPUT_NPU_DIR)/$$model"; \
 			echo "[clean] removed $(OUTPUT_CPU_DIR)/$$model"; \
 		done; \
 	else \
-		rm -rf $(BUILD_DIR); \
+		rm -rf "$(BUILD_DIR)" "$(OUTPUT_ROOT)"; \
 		echo "[clean] removed $(BUILD_DIR)"; \
+		echo "[clean] removed $(OUTPUT_ROOT)"; \
 	fi
 	@echo "[clean] kept cache $(CACHE_DIR) (use 'make clean_cache' to remove)"
 

@@ -22,13 +22,25 @@ model_test/
 │   └── [model_name]/            
 │       ├── model.py / .onnx     # 模型生成脚本或原始权重
 │       └── main.cpp             # 模型宿主测试程序（必需）
-└── build/                       # 编译工作区（make 时自动生成）
-    └── [model_name]/
-        ├── model.onnx / model.onnx.mlir
-        ├── tile_config.json
-        ├── NpuToLLVM/llvm.mlir
-        ├── Codegen/model.o
-        └── output/
+├── build/                       # 编译工作区（make 时自动生成）
+│   ├── NPU_[model_name]/        # NPU 独立中间产物目录
+│   │   ├── model.onnx / model.onnx.mlir
+│   │   ├── tile_config.json
+│   │   ├── NpuToLLVM/llvm.mlir
+│   │   └── Codegen/model.o
+│   └── CPU_[model_name]/        # CPU 独立中间产物目录
+│       ├── model.onnx / model.onnx.mlir
+│       ├── tile_config.json
+│       ├── CpuToLLVM/llvm.mlir
+│       └── Codegen/model.o
+└── output/                      # 最终可执行与测试输入输出
+    ├── NPU/
+    │   └── [model_name]/
+    │       ├── [model_name]_zcu102
+    │       ├── [model_name]_input.bin
+    │       └── [model_name]_output_golden.bin
+    └── CPU/
+        └── [model_name]/
             ├── [model_name]_zcu102
             ├── [model_name]_input.bin
             └── [model_name]_output_golden.bin
