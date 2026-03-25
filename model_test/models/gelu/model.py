@@ -68,7 +68,7 @@ def main():
     input_path = os.path.join(workdir, f"{model_name}_input.bin")
     golden_path = os.path.join(workdir, f"{model_name}_output_golden.bin")
 
-    input_shape = (1, 768)
+    input_shape = (128, 768)
 
     torch.manual_seed(2026)
     np.random.seed(2026)

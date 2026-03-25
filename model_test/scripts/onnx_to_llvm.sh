@@ -151,6 +151,15 @@ echo ">>> Tiling Config: $TILING_CONFIG"
 echo ">>> Pipeline Mode: $PIPELINE_MODE"
 
 # ------------------------------------------------
+#  Recompose ONNX
+# ------------------------------------------------
+enter_stage "RecomposeONNX"
+
+run_pass "Recompose ONNX" \
+         "--recompose-onnx --canonicalize" \
+         "RecomposeONNX.mlir"
+
+# ------------------------------------------------
 #  Partition + Profiling
 # ------------------------------------------------
 enter_stage "$PARTITION_STAGE"

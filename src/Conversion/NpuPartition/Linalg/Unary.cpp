@@ -3,6 +3,7 @@
 // this file implements the conversion of unary operations (Gelu, Softmax)
 // to linalg operations for NPU partitioning.
 //==============================================================
+#include "src/Dialect/ONNX/DialectBuilder.hpp"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -10,6 +11,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
 #include "mlir/IR/AffineMap.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "src/Conversion/NpuPartition/LinalgConversionHelper.hpp"
@@ -104,6 +106,82 @@ static Value createPackedUnaryOp(
     return linalgOp.getResult(0);
 }
 
+struct GeluQuantizedChain {
+  ONNXDequantizeLinearOp dequantOp;
+  ONNXReshapeOp inputReshapeOp;
+  ONNXReshapeOp outputReshapeOp;
+  UnrealizedConversionCastOp outputCastOp;
+  ONNXQuantizeLinearOp quantOp;
+};
+
+static RankedTensorType getQuantizedTensorTypeLike(
+    RankedTensorType shapedType, RankedTensorType referenceType) {
+  return RankedTensorType::get(shapedType.getShape(),
+      referenceType.getElementType(), referenceType.getEncoding());
+}
+
+static Value createQuantizedReshapeLike(ConversionPatternRewriter &rewriter,
+    Location loc, Value input, ONNXReshapeOp reshapeOp) {
+  auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
+  auto reshapeType =
+      mlir::dyn_cast<RankedTensorType>(reshapeOp.getResult().getType());
+  if (!inputType || !reshapeType)
+    return Value();
+
+  RankedTensorType outputType =
+      getQuantizedTensorTypeLike(reshapeType, inputType);
+  onnx_mlir::MultiDialectBuilder<onnx_mlir::OnnxBuilder> create(rewriter, loc);
+  return create.onnx.reshape(
+      outputType, input, reshapeOp.getShape(), reshapeOp.getAllowzeroAttr());
+}
+
+static bool matchGeluQuantizedChain(ONNXGeluOp op, GeluQuantizedChain &chain) {
+  Value input = op.getX();
+  if (auto dequantOp = input.getDefiningOp<ONNXDequantizeLinearOp>()) {
+    chain.dequantOp = dequantOp;
+  } else if (auto reshapeOp = input.getDefiningOp<ONNXReshapeOp>()) {
+    if (!input.hasOneUse())
+      return false;
+    auto dequantOp = reshapeOp.getData().getDefiningOp<ONNXDequantizeLinearOp>();
+    if (!dequantOp)
+      return false;
+    chain.dequantOp = dequantOp;
+    chain.inputReshapeOp = reshapeOp;
+  } else {
+    return false;
+  }
+
+  Value result = op.getResult();
+  if (!result.hasOneUse())
+    return false;
+
+  Operation *user = *result.getUsers().begin();
+  if (auto castOp = dyn_cast<UnrealizedConversionCastOp>(user)) {
+    if (castOp.getNumResults() != 1 || !castOp.getResult(0).hasOneUse())
+      return false;
+    chain.outputCastOp = castOp;
+    user = *castOp.getResult(0).getUsers().begin();
+  }
+
+  if (auto quantOp = dyn_cast<ONNXQuantizeLinearOp>(user)) {
+    chain.quantOp = quantOp;
+    return true;
+  }
+
+  auto reshapeOp = dyn_cast<ONNXReshapeOp>(user);
+  if (!reshapeOp || !reshapeOp.getResult().hasOneUse())
+    return false;
+
+  auto quantOp =
+      dyn_cast<ONNXQuantizeLinearOp>(*reshapeOp.getResult().getUsers().begin());
+  if (!quantOp)
+    return false;
+
+  chain.outputReshapeOp = reshapeOp;
+  chain.quantOp = quantOp;
+  return true;
+}
+
 // ============================================================================
 // 1. Gelu Pattern
 // ============================================================================
@@ -112,36 +190,70 @@ struct GeluToLinalg : public OpConversionPattern<ONNXGeluOp> {
 
   LogicalResult matchAndRewrite(ONNXGeluOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter) const override {
-    Value originInput = op.getX();
-    auto dequantOp = originInput.getDefiningOp<ONNXDequantizeLinearOp>();
-    if (!dequantOp) return failure();
+    GeluQuantizedChain chain;
+    if (!matchGeluQuantizedChain(op, chain))
+      return failure();
 
-    Value quantizedInput = dequantOp.getX();
-    auto inputType = mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
-    if (!inputType) return failure(); // 移除 Rank 检查
+    Value quantizedInput = chain.dequantOp.getX();
+    auto quantizedInputType =
+        mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
+    auto geluResultType =
+        mlir::dyn_cast<RankedTensorType>(op.getResult().getType());
+    auto finalOutputType =
+        mlir::dyn_cast<RankedTensorType>(chain.quantOp.getResult().getType());
+    if (!quantizedInputType || !geluResultType || !finalOutputType)
+      return failure();
 
-    if (!op.getResult().hasOneUse()) return failure();
-    auto quantOp = mlir::dyn_cast<ONNXQuantizeLinearOp>(
-        *op.getResult().getUsers().begin());
-    if (!quantOp) return failure();
-    auto outputType =
-        mlir::dyn_cast<RankedTensorType>(quantOp.getResult().getType());
+    RankedTensorType packedInputType = quantizedInputType;
+    if (chain.inputReshapeOp) {
+      quantizedInput = createQuantizedReshapeLike(
+          rewriter, op.getLoc(), quantizedInput, chain.inputReshapeOp);
+      if (!quantizedInput)
+        return failure();
+      auto reshapedInputType =
+          mlir::dyn_cast<RankedTensorType>(quantizedInput.getType());
+      if (!reshapedInputType)
+        return failure();
+      packedInputType = reshapedInputType;
+    }
 
-    auto inParams = getScalarQuantParams(dequantOp);
-    auto outParams = getScalarQuantParams(quantOp);
+    RankedTensorType packedOutputType = finalOutputType;
+    if (chain.outputReshapeOp)
+      packedOutputType =
+          getQuantizedTensorTypeLike(geluResultType, finalOutputType);
+
+    auto inParams = getScalarQuantParams(chain.dequantOp);
+    auto outParams = getScalarQuantParams(chain.quantOp);
     SmallVector<StringRef> fusedOps = {"Gelu"};
 
-    Value result = createPackedUnaryOp(rewriter, op.getLoc(), quantizedInput,
-        inputType, outputType, inParams.scale, inParams.zeroPoint,
+    Value packedResult = createPackedUnaryOp(rewriter, op.getLoc(),
+        quantizedInput, packedInputType, packedOutputType, inParams.scale,
+        inParams.zeroPoint,
         outParams.scale, outParams.zeroPoint, "npu_gelu", op,
         getNpuProfileLayerName(op), fusedOps);
 
-    quantOp.getResult().setType(result.getType());
+    Value finalResult = packedResult;
+    if (chain.outputReshapeOp) {
+      finalResult = createQuantizedReshapeLike(
+          rewriter, op.getLoc(), packedResult, chain.outputReshapeOp);
+      if (!finalResult)
+        return failure();
+    }
+
+    chain.quantOp.getResult().setType(finalResult.getType());
 
     // result 现在带有 encoding=1，这会向外顺延影响下游的 Consumer
-    rewriter.replaceOp(quantOp, result);
+    rewriter.replaceAllUsesWith(chain.quantOp.getResult(), finalResult);
+    rewriter.eraseOp(chain.quantOp);
+    if (chain.outputReshapeOp)
+      rewriter.eraseOp(chain.outputReshapeOp);
+    if (chain.outputCastOp && chain.outputCastOp->use_empty())
+      rewriter.eraseOp(chain.outputCastOp);
     rewriter.eraseOp(op);
-    if (dequantOp->hasOneUse()) rewriter.eraseOp(dequantOp);
+    if (chain.inputReshapeOp)
+      rewriter.eraseOp(chain.inputReshapeOp);
+    if (chain.dequantOp->use_empty())
+      rewriter.eraseOp(chain.dequantOp);
     return success();
   }
 };

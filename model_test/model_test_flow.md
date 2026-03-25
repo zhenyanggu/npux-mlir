@@ -26,12 +26,17 @@ model_test/
 │   ├── NPU_[model_name]/        # NPU 独立中间产物目录
 │   │   ├── model.onnx / model.onnx.mlir
 │   │   ├── tile_config.json
+│   │   ├── RecomposeONNX/RecomposeONNX.mlir
+│   │   ├── NpuPartition/ConvertONNXToLinalgNpu.mlir
 │   │   ├── NpuToLLVM/llvm.mlir
+│   │   ├── Codegen/model.ll
 │   │   └── Codegen/model.o
 │   └── CPU_[model_name]/        # CPU 独立中间产物目录
 │       ├── model.onnx / model.onnx.mlir
 │       ├── tile_config.json
+│       ├── RecomposeONNX/RecomposeONNX.mlir
 │       ├── CpuToLLVM/llvm.mlir
+│       ├── Codegen/model.ll
 │       └── Codegen/model.o
 └── output/                      # 最终可执行与测试输入输出
     ├── NPU/
@@ -47,6 +52,13 @@ model_test/
 
 ```
 
+### 1.1 Docker 约定
+
+- 当前推荐编译环境在 docker 容器 `my-npux-dev` 中。
+- 仓库根目录在容器内挂载为 `/workspace`。
+- 所有文档中的命令优先写成下面这种形式，便于直接复制执行：
+  - `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && ...'`
+
 ## 2. 编译与转换链路
 
 以下为标准的模型转换与编译链路。各步骤的输入输出需严格对应：
@@ -55,16 +67,40 @@ model_test/
 2. **量化与校准**：对模型进行 INT8 对称量化。插入 QDQ（`QuantizeLinear` / `DequantizeLinear`）节点。
 3. **策略探索 (可选)**：运行 `conv_tile.py`，生成 `tile_config.json`（无卷积算子可跳过）。
 4. **MLIR 转换**：使用 `onnx-mlir --EmitONNXIR` 将 ONNX 降级为 ONNX Dialect 的 MLIR。
-5. **LLVM IR 编译**：通过 `onnx_to_llvm.sh` 将 MLIR 进一步 Lowering 为 LLVM IR。
-6. **交叉编译**：通过 `compile_to_zcu102.sh` 链接 runtime，生成目标硬件（ZCU102）可执行文件。
+5. **高层模式重组**：通过 `onnx_to_llvm.sh` 中的 `RecomposeONNX` 阶段，把已展开的高层模式重新识别成 `onnx.Gelu` / `LayerNormalization` 等。
+6. **LLVM IR 编译**：通过 `onnx_to_llvm.sh` 将 MLIR 进一步 Lowering 为 LLVM IR。
+7. **交叉编译**：通过 `compile_to_zcu102.sh` 生成 `Codegen/model.ll`、目标文件和 ZCU102 可执行文件。
 
-### 2.1 执行边界与验证规范
+### 2.1 docker 中的标准命令
+
+1. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace/model_test && make -B llvm MODEL=bert_base'`
+2. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace/model_test && make -B zcu102 MODEL=bert_base'`
+3. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && grep -c "library_call = \"npu_gelu\"" model_test/build/NPU_bert_base/NpuPartition/ConvertONNXToLinalgNpu.mlir'`
+4. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && grep -c "@npu_sfu_run(i8 1," model_test/build/NPU_bert_base/Codegen/model.ll'`
+
+### 2.2 执行边界与验证规范
 
 * **自动化边界**：代码/脚本生成后，构建与运行步骤（如 `make`）由开发者手动触发。
-* **图结构要求**：被测试的目标算子必须满足 `DequantizeLinear -> 目标算子 -> QuantizeLinear` 的相邻模式，严禁仅有 `Quantize -> 目标 -> Dequantize` 的反向测试图。
+* **图结构要求**：默认要求目标算子满足 `DequantizeLinear -> 目标算子 -> QuantizeLinear` 的相邻模式。
+* **当前 GELU 特例**：对 unary `Gelu`，NPU partition 额外支持 `DequantizeLinear -> Reshape? -> Gelu -> Reshape? -> QuantizeLinear`。
+* **当前未覆盖场景**：若 `Gelu` 后面直接接浮点算子而没有输出侧 `QuantizeLinear`，则仍会保留在 CPU/浮点路径。
 * **日志输出底线**：`main.cpp` 在结束前，**最后一行必须**输出以下固定格式，且其后禁止打印任何内容：
 > `@@MODEL_TEST_RESULT@@ errors=<错误点数量或误分类数>/<总点数量或总样本数> status=<PASS|FAIL>`
 
+### 2.3 bert_base 的 GELU 验收口径
+
+- 不要只检查 `model.onnx.mlir`。`bert_base` 的源 ONNX 本身就可能把 GELU 展开成 `Div -> Erf -> Add -> Mul -> Mul(0.5)`。
+- 首先检查：
+  - `model_test/build/NPU_bert_base/RecomposeONNX/RecomposeONNX.mlir`
+  - 这里应能看到重组后的 `onnx.Gelu`。
+- 然后检查：
+  - `model_test/build/NPU_bert_base/NpuPartition/ConvertONNXToLinalgNpu.mlir`
+  - 当前应有 12 个 `library_call = "npu_gelu"`。
+- 最终检查：
+  - `model_test/build/NPU_bert_base/Codegen/model.ll`
+  - 当前应有 24 个 `@npu_sfu_run(i8 1, ...)`，对应 12 个 encoder GELU 在 tiling 后拆成两次 SFU 调用。
+- 说明：
+  - `cls/predictions/transform` 的 GELU 目前仍保留为浮点 `onnx.Gelu`，因为它后面直接接 `LayerNormalization`，不满足当前 unary GELU 的输出侧量化约束。
 
 
 ## 3. 测试进度与层级目标

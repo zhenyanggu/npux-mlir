@@ -20,6 +20,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <cmath>
 #include <numeric>
 
 #include "mlir/Analysis/TopologicalSortUtils.h"
@@ -29,6 +30,7 @@
 #include "llvm/Support/Debug.h"
 
 #include "src/Dialect/ONNX/DialectBuilder.hpp"
+#include "src/Dialect/ONNX/ElementsAttr/ElementsAttrHelper.hpp"
 #include "src/Dialect/ONNX/ONNXOps.hpp"
 #include "src/Dialect/ONNX/ONNXOps/OpHelper.hpp"
 #include "src/Dialect/ONNX/ONNXOps/ShapeHelper.hpp"
@@ -418,6 +420,7 @@ struct RecomposeGeluFromMulPattern : public OpRewritePattern<ONNXMulOp> {
 
   static bool matchGeluPattern(ONNXMulOp mulOp, Value &x, bool &isExactGelu) {
     using namespace onnx_mlir;
+    constexpr double kConstTolerance = 1e-6;
     // Subgraph to match:
     // - for exact gelu
     // gelu(x) = 0.5 * x * (1 + erf(x/1.41421354))
@@ -432,9 +435,80 @@ struct RecomposeGeluFromMulPattern : public OpRewritePattern<ONNXMulOp> {
     // Associcative and communitative properties are handled.
 
     // Helper function.
-    auto constOf = [](Value v, double n) {
-      return isDenseONNXConstant(v) && isConstOf(v, n);
+    auto constOf = [&](Value v, double n) {
+      if (isDenseONNXConstant(v) && isConstOf(v, n))
+        return true;
+
+      auto dqOp = v.getDefiningOp<ONNXDequantizeLinearOp>();
+      if (!dqOp || !isScalarConstantTensor(dqOp.getX()) ||
+          !isScalarConstantTensor(dqOp.getXScale()))
+        return false;
+
+      ElementsAttr xAttr = getElementAttributeFromONNXValue(dqOp.getX());
+      ElementsAttr scaleAttr =
+          getElementAttributeFromONNXValue(dqOp.getXScale());
+      if (!xAttr || !scaleAttr)
+        return false;
+
+      double xValue = getElementsSplatWideNum(xAttr).to<double>(
+          btypeOfMlirType(xAttr.getElementType()));
+      double scaleValue = getElementsSplatWideNum(scaleAttr).to<double>(
+          btypeOfMlirType(scaleAttr.getElementType()));
+
+      double zeroPointValue = 0.0;
+      Value zeroPoint = dqOp.getXZeroPoint();
+      if (!isa<NoneType>(zeroPoint.getType())) {
+        if (!isScalarConstantTensor(zeroPoint))
+          return false;
+        ElementsAttr zeroPointAttr = getElementAttributeFromONNXValue(zeroPoint);
+        if (!zeroPointAttr)
+          return false;
+        zeroPointValue = getElementsSplatWideNum(zeroPointAttr).to<double>(
+            btypeOfMlirType(zeroPointAttr.getElementType()));
+      }
+
+      double dequantizedValue = (xValue - zeroPointValue) * scaleValue;
+      return std::abs(dequantizedValue - n) <= kConstTolerance;
     };
+    auto peelSingleUseReshape = [](Value value) -> Value {
+      if (!value.hasOneUse())
+        return value;
+      if (auto reshapeOp = value.getDefiningOp<ONNXReshapeOp>())
+        return reshapeOp.getData();
+      return value;
+    };
+    auto peelSingleUseQDQ = [](Value value) -> Value {
+      auto dqOp = value.getDefiningOp<ONNXDequantizeLinearOp>();
+      if (!dqOp)
+        return value;
+      Value qValue = dqOp.getX();
+      auto qOp = qValue.getDefiningOp<ONNXQuantizeLinearOp>();
+      if (!qOp)
+        return value;
+      Value source = qOp.getX();
+      if (isScalarConstantTensor(source))
+        return source;
+      if (!value.hasOneUse() || !qValue.hasOneUse())
+        return value;
+      return source;
+    };
+    auto getAddWithOptionalQDQ = [&](Value value) -> ONNXAddOp {
+      return peelSingleUseQDQ(value).getDefiningOp<ONNXAddOp>();
+    };
+    auto matchConstLikeAndErf =
+        [&](Value a, Value b, double cst, ONNXErfOp &matchOp) {
+          auto opA = a.getDefiningOp<ONNXErfOp>();
+          auto opB = b.getDefiningOp<ONNXErfOp>();
+          if (constOf(a, cst) && opB) {
+            matchOp = opB;
+            return true;
+          }
+          if (opA && constOf(b, cst)) {
+            matchOp = opA;
+            return true;
+          }
+          return false;
+        };
 
     // Match 0.5 * a * b
     // Two associative cases depending on which Mul 0.5 belongs to:
@@ -495,28 +569,28 @@ struct RecomposeGeluFromMulPattern : public OpRewritePattern<ONNXMulOp> {
     bool foundErf = false;
     ONNXErfOp erfOp;
     // Try the first operand.
-    if (auto add1Op = fstMulVal.getDefiningOp<ONNXAddOp>()) {
-      foundErf = matchConstAndOp<ONNXErfOp>(
-          add1Op.getOperand(0), add1Op.getOperand(1), 1.0, erfOp);
+    if (auto add1Op = getAddWithOptionalQDQ(fstMulVal)) {
+      foundErf = matchConstLikeAndErf(peelSingleUseQDQ(add1Op.getOperand(0)),
+          peelSingleUseQDQ(add1Op.getOperand(1)), 1.0, erfOp);
       if (foundErf)
         x = sndMulVal;
     }
     if (!foundErf) {
       // Try the second operand.
-      if (auto add1Op = sndMulVal.getDefiningOp<ONNXAddOp>()) {
-        foundErf = matchConstAndOp<ONNXErfOp>(
-            add1Op.getOperand(0), add1Op.getOperand(1), 1.0, erfOp);
+      if (auto add1Op = getAddWithOptionalQDQ(sndMulVal)) {
+        foundErf = matchConstLikeAndErf(peelSingleUseQDQ(add1Op.getOperand(0)),
+            peelSingleUseQDQ(add1Op.getOperand(1)), 1.0, erfOp);
         if (foundErf)
           x = fstMulVal;
       }
     }
     if (foundErf) {
       // gelu(x) = 0.5 * x * (1 + erf(x/1.41421354))
-      Value erfInput = erfOp.getOperand();
+      Value erfInput = peelSingleUseReshape(erfOp.getOperand());
       auto divOp = erfInput.getDefiningOp<ONNXDivOp>();
       if (!divOp)
         return reportFailure("[Exact] missing div op");
-      if (divOp.getOperand(0) != x)
+      if (divOp.getOperand(0) != peelSingleUseReshape(x))
         return reportFailure("[Exact] missing x in x/1.41421354");
       if (!constOf(divOp.getOperand(1), 1.41421354))
         return reportFailure("[Exact] missing 1.41421354");

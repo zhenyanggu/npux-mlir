@@ -12,6 +12,8 @@ profiling 相关设计与实现细节已单独整理到 `NPU_Profiling_Design_CN
 
 ```text
 ONNX
+  -> recompose-onnx
+     (把已展开的高层模式重新组合回 ONNXGelu / LayerNorm 等)
   -> convert-npu-onnx-to-linalg
      (把可下沉算子变成带 library_call 的 linalg.generic)
   -> npu-tiling
@@ -34,6 +36,7 @@ ONNX
 说明：
 - 默认 `CompilerPasses.cpp` 的 NPU 管线与 `model_test/scripts/onnx_to_llvm.sh` 不完全一致。
 - 日常调试 NPU 常用的是 `model_test` 脚本链路（分阶段落盘，便于看中间 IR）。
+- 当前 `model_test/scripts/onnx_to_llvm.sh` 已显式加入 `RecomposeONNX` 阶段；像 `bert_base` 这类源 ONNX 已把 GELU 展开的模型，必须先经过这一步，后续 NPU partition 才有机会识别。
 
 ---
 
@@ -198,6 +201,7 @@ ACC 放不下时的分块策略（当前实现）：
 ### 6.2 `model_test/scripts/onnx_to_llvm.sh` 管线
 
 更偏调试和可观测：
+- `--recompose-onnx --canonicalize`
 - `--npu-tiling`
 - `--npu-insert-dma`
 - `--npu-op-splitting --npu-remove-redundant-dma`
@@ -209,7 +213,64 @@ ACC 放不下时的分块策略（当前实现）：
 
 ---
 
-## 7. 常见修改入口（按需求反查）
+## 7. GELU 实战备注（bert_base）
+
+### 7.1 单算子 GELU 与真实 BERT GELU 的差别
+
+- `model_test/build/NPU_gelu/model.onnx.mlir` 这类单算子 case，通常直接保留成 `onnx.Gelu`。
+- `bert_base` 不是这样。它的源 ONNX 在进入 MLIR 前就已经把 exact GELU 展开成：
+  - `Div(x, sqrt(2))`
+  - `Reshape`
+  - `Erf`
+  - `Add(1.0)`
+  - `Mul(x)`
+  - `Mul(0.5)`
+- 其中 `Add` 里的常量 `1.0` 还经常不是裸 `onnx.Constant`，而是 `onnx.DequantizeLinear(Constant<i8>)`。
+
+### 7.2 本次修复的两个关键点
+
+- `src/Dialect/ONNX/Transforms/Recompose.cpp`
+  - exact GELU 重组现在允许跨过单层单 use 的 `onnx.Reshape`。
+  - `Erf` / `Add` 支路允许跨过单层单 use 的 `QuantizeLinear -> DequantizeLinear`。
+  - 同时支持把“直接 `DequantizeLinear` 出来的标量常量”识别成 true constant，这样 `Add(1.0)` 能在 `bert_base` 里重新命中。
+
+- `src/Conversion/NpuPartition/Linalg/Unary.cpp`
+  - `ONNXGeluOp` 现在支持 `Dequantize -> Reshape? -> Gelu -> Reshape? -> Quantize`。
+  - lowering 时会在量化侧显式补 `i8 reshape`，因此 encoder block 中 `1x128x3072` 的 GELU 可以真正落到 `library_call = "npu_gelu"`。
+
+### 7.3 当前 bert_base 的实际结果
+
+- `bert_base` 在 `RecomposeONNX/RecomposeONNX.mlir` 中可重组出 13 个 `onnx.Gelu`。
+- 其中 12 个 encoder intermediate GELU 能进入 NPU partition。
+- `cls/predictions/transform` 那 1 个 GELU 目前仍保留为浮点 `onnx.Gelu`，原因是它后面直接接 `LayerNormalization`，不满足当前量化 unary 的 `DQ -> Reshape? -> Op -> Reshape? -> Q` 输出侧约束。
+
+### 7.4 从中间 IR 到最终 runtime 调用怎么看
+
+- NPU partition 阶段：
+  - `model_test/build/NPU_bert_base/NpuPartition/ConvertONNXToLinalgNpu.mlir`
+  - 这里应出现 12 个 `library_call = "npu_gelu"`。
+- 最终 LLVM IR 阶段：
+  - `model_test/build/NPU_bert_base/Codegen/model.ll`
+  - 这里不会再出现字面 `npu_gelu`，而是统一落成 `@npu_sfu_run(...)`。
+  - `src/Dialect/Npux/Npux.td` 中 `SFU_Op_GELU = 1`，因此 `@npu_sfu_run(i8 1, ...)` 就表示 GELU。
+- 以当前 `bert_base` 为例：
+  - `ConvertONNXToLinalgNpu.mlir` 中有 12 个 `npu_gelu`。
+  - `Codegen/model.ll` 中有 24 个 `@npu_sfu_run(i8 1, ...)`，因为每个 `1x128x3072` 的 GELU 在 tiling 后会被切成两次 SFU 调用。
+
+### 7.5 容器内标准调试命令
+
+- 容器：`my-npux-dev`
+- 仓库根目录：`/workspace`
+- 常用命令：
+  - `docker exec my-npux-dev /bin/bash -lc 'cd /workspace/build && ninja onnx-mlir-opt -j8'`
+  - `docker exec my-npux-dev /bin/bash -lc 'cd /workspace/model_test && make -B llvm MODEL=bert_base'`
+  - `docker exec my-npux-dev /bin/bash -lc 'cd /workspace/model_test && make -B zcu102 MODEL=bert_base'`
+  - `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && grep -c "library_call = \"npu_gelu\"" model_test/build/NPU_bert_base/NpuPartition/ConvertONNXToLinalgNpu.mlir'`
+  - `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && grep -c "@npu_sfu_run(i8 1," model_test/build/NPU_bert_base/Codegen/model.ll'`
+
+---
+
+## 8. 常见修改入口（按需求反查）
 
 - 改 ONNX 算子是否下沉 NPU：
   - `src/Conversion/NpuPartition/ConvertONNXToLinalgNpu.cpp`
@@ -226,14 +287,14 @@ ACC 放不下时的分块策略（当前实现）：
 
 ---
 
-## 8. 当前 GEMM 策略的简化结论
+## 9. 当前 GEMM 策略的简化结论
 
 一句话版：
 - 第一阶段按容量定大 tile（不含 2048 人工截断），第二阶段按硬件规则切成 N/M=32 与必要的 K=2048 子块，再通过 `loop_stage + split_stage` 驱动 bias 首块、psum 累加和末块输出。
 
 ---
 
-## 9. 后续可继续补充（建议）
+## 10. 后续可继续补充（建议）
 
 - 增加一份“从某条 `NPU_CAPI` 日志反推 IR 节点”的对照表。
 - 增加一份“常见性能异常 checklist”（重复 mvin、偏置重复搬运、K split 失效、融合失败）。

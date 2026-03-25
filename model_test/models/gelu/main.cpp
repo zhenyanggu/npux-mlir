@@ -158,7 +158,7 @@ void printFinalSummary(const VerificationSummary &summary) {
 } // namespace
 
 int main(int argc, char **argv) {
-  constexpr int64_t dim0 = 1;
+  constexpr int64_t dim0 = 128;
   constexpr int64_t dim1 = 768;
   constexpr int64_t inputElements = dim0 * dim1;
 

@@ -23,6 +23,18 @@ using namespace mlir;
 
 namespace {
 
+constexpr llvm::StringLiteral kQdqWarningAttrName = "npu_qdq_warning_emitted";
+
+static bool emitQdqWarningOnce(Operation *op, StringRef expectedContext) {
+  if (!op->hasAttr(kQdqWarningAttrName)) {
+    op->emitWarning() << "Operation '" << op->getName() << "' lacks "
+                      << expectedContext
+                      << ". Skipping conversion to NPU Linalg.";
+    op->setAttr(kQdqWarningAttrName, UnitAttr::get(op->getContext()));
+  }
+  return false;
+}
+
 // ============================================================================
 // 辅助函数：严格检查上下游是否有 Dequantize -> Op -> Quantize 模式并报警
 // ============================================================================
@@ -47,17 +59,40 @@ static bool hasStrictQDQContext(Operation *op) {
     return true;
   }
 
-  // 4. 不满足条件，利用 Attr 避免重复报 Warning
-  StringRef warningAttrName = "npu_qdq_warning_emitted";
-  if (!op->hasAttr(warningAttrName)) {
-    op->emitWarning() << "Operation '" << op->getName()
-                      << "' lacks strict Dequantize -> Op -> Quantize context. "
-                      << "Skipping conversion to NPU Linalg.";
-    // 打上标签，标记该 Op 已经报过警
-    op->setAttr(warningAttrName, UnitAttr::get(op->getContext()));
+  return emitQdqWarningOnce(
+      op, "strict Dequantize -> Op -> Quantize context");
+}
+
+static bool hasSupportedGeluQDQContext(ONNXGeluOp op) {
+  Value input = op.getX();
+  bool hasDq = input.getDefiningOp<ONNXDequantizeLinearOp>() != nullptr;
+  if (!hasDq) {
+    if (auto reshapeOp = input.getDefiningOp<ONNXReshapeOp>()) {
+      hasDq = input.hasOneUse() &&
+              reshapeOp.getData().getDefiningOp<ONNXDequantizeLinearOp>() !=
+                  nullptr;
+    }
   }
 
-  return false;
+  bool hasQ = false;
+  Value result = op.getResult();
+  if (result.hasOneUse()) {
+    Operation *user = *result.getUsers().begin();
+    if (isa<ONNXQuantizeLinearOp>(user)) {
+      hasQ = true;
+    } else if (auto reshapeOp = dyn_cast<ONNXReshapeOp>(user)) {
+      hasQ = reshapeOp.getResult().hasOneUse() &&
+             isa<ONNXQuantizeLinearOp>(
+                 *reshapeOp.getResult().getUsers().begin());
+    }
+  }
+
+  if (hasDq && hasQ)
+    return true;
+
+  return emitQdqWarningOnce(
+      op, "supported Dequantize -> Reshape? -> Op -> Reshape? -> Quantize "
+          "context");
 }
 
 // 检查是否是没有广播的 Add
@@ -181,7 +216,7 @@ struct ONNXToLinalgNpuPass
     }
     if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gelu)) {
       target.addDynamicallyLegalOp<ONNXGeluOp>(
-          [](Operation *op) { return !hasStrictQDQContext(op); });
+          [](ONNXGeluOp op) { return !hasSupportedGeluQDQContext(op); });
     }
     if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::Gemm)) {
       target.addDynamicallyLegalOp<ONNXGemmOp>(
