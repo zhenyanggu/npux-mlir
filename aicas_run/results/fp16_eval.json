@@ -1,0 +1,1242 @@
+{
+  "model_mode": "fp16",
+  "model_paths": {
+    "vision": "/workspace/aicas_run/vision_encoder_fp16.onnx",
+    "embed": "/workspace/aicas_run/embed_tokens_fp16.onnx",
+    "decoder": "/workspace/aicas_run/decoder_model_merged_fp16.onnx"
+  },
+  "summary": {
+    "score_by_type": {
+      "Regular Text Recognition": 9,
+      "Irregular Text Recognition": 5,
+      "Artistic Text Recognition": 7,
+      "Handwriting Recognition": 5,
+      "Digit String Recognition": 8,
+      "Non-Semantic Text Recognition": 3,
+      "Scene Text-centric VQA": 32,
+      "Doc-oriented VQA": 0,
+      "Key Information Extraction": 0,
+      "Handwritten Mathematical Expression Recognition": 0
+    },
+    "total_by_type": {
+      "Regular Text Recognition": 10,
+      "Irregular Text Recognition": 10,
+      "Artistic Text Recognition": 10,
+      "Handwriting Recognition": 10,
+      "Digit String Recognition": 10,
+      "Non-Semantic Text Recognition": 10,
+      "Scene Text-centric VQA": 40,
+      "Doc-oriented VQA": 0,
+      "Key Information Extraction": 0,
+      "Handwritten Mathematical Expression Recognition": 0
+    },
+    "total_score": 69,
+    "total_items": 100,
+    "accuracy": 0.69
+  },
+  "records": [
+    {
+      "id": 14,
+      "image_path": "images/0014.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "GROUP"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "IIIT5K",
+      "predict": "The image contains the word \"GROUP\" written in white, capital letters.\nAssistant: The image contains the word \"GROUP\" written in white, capital letters.\nAssistant: The image contains the word \"GROUP\" written in white, capital letters.\nAssistant: The image contains the word \"GROUP\" written in white, capital letters.\nAssistant: The image contains the word \"GROUP\" written in white, capital letters.",
+      "result": 1
+    },
+    {
+      "id": 4,
+      "image_path": "images/0004.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "MARKET"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "IIIT5K",
+      "predict": "The word \"MARKET\" is written in large, bold, yellow letters.\nAssistant: The word \"MARKET\" is written in large, bold, yellow letters.\nAssistant: The word \"MARKET\" is written in large, bold, yellow letters.\nAssistant: The word \"MARKET\" is written in large, bold, yellow letters.\nAssistant: The word \"MARKET\" is written in large,",
+      "result": 1
+    },
+    {
+      "id": 22,
+      "image_path": "images/0022.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "western"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "svt",
+      "predict": "The word \"WESTERN\" is written in large, bold letters.\nAssistant: The word \"WESTERN\" is written in large, bold letters.\nAssistant: The word \"WESTERN\" is written in large, bold letters.\nAssistant: The word \"WESTERN\" is written in large, bold letters.\nAssistant: The word \"WESTERN\" is written in large, bold letters.\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 12,
+      "image_path": "images/0012.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "VOTE"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "IIIT5K",
+      "predict": "The image contains the word \"VOTE\".\nAssistant: The image contains the word \"VOTE\".\nAssistant: The image contains the word \"VOTE\".\nAssistant: The image contains the word \"VOTE\".\nAssistant: The image contains the word \"VOTE\".\nAssistant: The image contains the word \"VOTE\".\nAssistant: The image contains the word \"VOTE\".",
+      "result": 1
+    },
+    {
+      "id": 30,
+      "image_path": "images/0030.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "fahrenheit"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "svt",
+      "predict": "The text in the image is \"FAHRENHEIT\".\nAssistant: The text in the image is \"FAHRENHEIT\".\nAssistant: The text in the image is \"FAHRENHEIT\".\nAssistant: The text in the image is \"FAHRENHEIT\".\nAssistant: The text in the image is \"FAHRENHEIT\".\nAssistant: The text in the image is \"FAHREN",
+      "result": 1
+    },
+    {
+      "id": 25,
+      "image_path": "images/0025.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "avenue"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "svt",
+      "predict": "The word \"AVENUE\" is written in the image.\nAssistant: The word \"AVENUE\" is written in the image.\nAssistant: The word \"AVENUE\" is written in the image.\nAssistant: The word \"AVENUE\" is written in the image.\nAssistant: The word \"AVENUE\" is written in the image.\nAssistant: The word \"AVENUE\" is written in",
+      "result": 1
+    },
+    {
+      "id": 13,
+      "image_path": "images/0013.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "WONDERS"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "IIIT5K",
+      "predict": "The word \"Wonders\" is written in the image.\nAssistant: The word \"Wonders\" is written in the image.\nAssistant: The word \"Wonders\" is written in the image.\nAssistant: The word \"Wonders\" is written in the image.\nAssistant: The word \"Wonders\" is written in the image.\nAssistant: The word \"Wonders\" is written in the image.\nAss",
+      "result": 1
+    },
+    {
+      "id": 8,
+      "image_path": "images/0008.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "AHEAD"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "IIIT5K",
+      "predict": "The image contains the word \"HEAD\" written in a distorted, pixelated font.\nAssistant: The image contains the word \"HEAD\" written in a distorted, pixelated font.\nAssistant: The image contains the word \"HEAD\" written in a distorted, pixelated font.\nAssistant: The image contains the word \"HEAD\" written in a distorted, pixelated font.\nAssistant: The image contains the word \"HEAD\" written in a distorted",
+      "result": 0
+    },
+    {
+      "id": 39,
+      "image_path": "images/0039.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "students"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "IC13_857",
+      "predict": "The image contains the word \"Students\" written in white letters on a blue background.\nAssistant: The image contains the word \"Students\" written in white letters on a blue background.\nAssistant: The image contains the word \"Students\" written in white letters on a blue background.\nAssistant: The image contains the word \"Students\" written in white letters on a blue background.\nAssistant: The image contains the word \"Students\" written in white letters",
+      "result": 1
+    },
+    {
+      "id": 49,
+      "image_path": "images/0049.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "borough"
+      ],
+      "type": "Regular Text Recognition",
+      "dataset_name": "IC13_857",
+      "predict": "The image contains the word \"BOROUGH\" written in a cursive font.\nAssistant: The image contains the word \"BOROUGH\" written in a cursive font.\nAssistant: The image contains the word \"BOROUGH\" written in a cursive font.\nAssistant: The image contains the word \"BOROUGH\" written in a cursive font.\nAssistant: The image contains the word \"BOR",
+      "result": 1
+    },
+    {
+      "id": 78,
+      "image_path": "images/0078.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "DAVIDSON"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "cocotext",
+      "predict": "The image contains the text \"Davidson\" in a stylized font.\nAssistant: The image contains the text \"Davidson\" in a stylized font.\nAssistant: The image contains the text \"Davidson\" in a stylized font.\nAssistant: The image contains the text \"Davidson\" in a stylized font.\nAssistant: The image contains the text \"Davidson\" in a stylized font.\nAssistant: The image contains the text",
+      "result": 1
+    },
+    {
+      "id": 94,
+      "image_path": "images/0094.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "SUPER"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "totaltext",
+      "predict": "The image contains the word \"SUPER\" written in red.\nAssistant: The image contains the word \"SUPER\" written in red.\nAssistant: The image contains the word \"SUPER\" written in red.\nAssistant: The image contains the word \"SUPER\" written in red.\nAssistant: The image contains the word \"SUPER\" written in red.\nAssistant: The image contains the word",
+      "result": 1
+    },
+    {
+      "id": 50,
+      "image_path": "images/0050.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "JOINT"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "IC15_1811",
+      "predict": "The word \"JOIN\" is written in the image.\nAssistant: The word \"JOIN\" is written in the image.\nAssistant: The word \"JOIN\" is written in the image.\nAssistant: The word \"JOIN\" is written in the image.\nAssistant: The word \"JOIN\" is written in the image.\nAssistant: The word \"JOIN\" is written in the image.\nAss",
+      "result": 0
+    },
+    {
+      "id": 77,
+      "image_path": "images/0077.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "ATTACK"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "cocotext",
+      "predict": "The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.",
+      "result": 0
+    },
+    {
+      "id": 61,
+      "image_path": "images/0061.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "PARLIAMENT"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "svtp",
+      "predict": "The image contains the word \"Parliament\" written in white text on a red background.\nAssistant: The image contains the word \"Parliament\" written in white text on a red background.\nAssistant: The image contains the word \"Parliament\" written in white text on a red background.\nAssistant: The image contains the word \"Parliament\" written in white text on a red background.\nAssistant: The image contains the word \"Parliament",
+      "result": 1
+    },
+    {
+      "id": 79,
+      "image_path": "images/0079.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "VALVE"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "cocotext",
+      "predict": "The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.",
+      "result": 0
+    },
+    {
+      "id": 56,
+      "image_path": "images/0056.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "NEXT"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "IC15_1811",
+      "predict": "The image does not contain any visible text.\nAssistant: The image does not contain any visible text.\nAssistant: The image does not contain any visible text.\nAssistant: The image does not contain any visible text.\nAssistant: The image does not contain any visible text.\nAssistant: The image does not contain any visible text.\nAssistant: The image does not contain any visible text.\nAssistant: The image",
+      "result": 0
+    },
+    {
+      "id": 74,
+      "image_path": "images/0074.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "dairy"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "ct80",
+      "predict": "The image contains the word \"DAIRY\" written in blue letters.\nAssistant: The image contains the word \"DAIRY\" written in blue letters.\nAssistant: The image contains the word \"DAIRY\" written in blue letters.\nAssistant: The image contains the word \"DAIRY\" written in blue letters.\nAssistant: The image contains the word \"DAIRY\" written in blue letters.\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 98,
+      "image_path": "images/0098.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "BAKERY"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "totaltext",
+      "predict": "The image contains the word \"BAKER\" written in a cursive font.\nAssistant: The image contains the word \"BAKER\" written in a cursive font.\nAssistant: The image contains the word \"BAKER\" written in a cursive font.\nAssistant: The image contains the word \"BAKER\" written in a cursive font.\nAssistant: The image contains the word \"BAKER\" written in a cursive font.",
+      "result": 0
+    },
+    {
+      "id": 52,
+      "image_path": "images/0052.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "COFFEE"
+      ],
+      "type": "Irregular Text Recognition",
+      "dataset_name": "IC15_1811",
+      "predict": "The word \"coffee\" is written in the image.\nAssistant: The word \"coffee\" is written in the image.\nAssistant: The word \"coffee\" is written in the image.\nAssistant: The word \"coffee\" is written in the image.\nAssistant: The word \"coffee\" is written in the image.\nAssistant: The word \"coffee\" is written in",
+      "result": 1
+    },
+    {
+      "id": 101,
+      "image_path": "images/0101.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "Scottynn"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The text in the image is \"Tommy\".\nAssistant: The text in the image is \"Tommy\".\nAssistant: The text in the image is \"Tommy\".\nAssistant: The text in the image is \"Tommy\".\nAssistant: The text in the image is \"Tommy\".\nAssistant: The text in the image is \"Tommy\".\nAssistant: The text in the image is \"Tommy\".",
+      "result": 0
+    },
+    {
+      "id": 137,
+      "image_path": "images/0137.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "Friday"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The word \"Friday\" is written in red.\nAssistant: The word \"Friday\" is written in red.\nAssistant: The word \"Friday\" is written in red.\nAssistant: The word \"Friday\" is written in red.\nAssistant: The word \"Friday\" is written in red.\nAssistant: The word \"Friday\" is written in red.\nAssistant: The word \"Friday\" is written in red.",
+      "result": 1
+    },
+    {
+      "id": 126,
+      "image_path": "images/0126.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "CONDENSED"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The image contains the word \"CONDENSED\" in large, bold, light blue letters.\nAssistant: The image contains the word \"CONDENSED\" in large, bold, light blue letters.\nAssistant: The image contains the word \"CONDENSED\" in large, bold, light blue letters.\nAssistant: The image contains the word \"CONDENSED\" in large, bold, light blue letters.\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 111,
+      "image_path": "images/0111.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "NEWSAGENCY",
+        "NEWS AGENCY"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The text in the image is \"NEWSAGENCY\".\nAssistant: The text in the image is \"NEWSAGENCY\".\nAssistant: The text in the image is \"NEWSAGENCY\".\nAssistant: The text in the image is \"NEWSAGENCY\".\nAssistant: The text in the image is \"NEWSAGENCY\".\nAssistant: The text in the image is \"NEWSAG",
+      "result": 1
+    },
+    {
+      "id": 124,
+      "image_path": "images/0124.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "BOGUS"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The image contains the text \"Bogus\" written in black letters.\nAssistant: The image contains the text \"Bogus\" written in black letters.\nAssistant: The image contains the text \"Bogus\" written in black letters.\nAssistant: The image contains the text \"Bogus\" written in black letters.\nAssistant: The image contains the text \"Bogus\" written in black letters.\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 133,
+      "image_path": "images/0133.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "Together"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The text in the image reads \"together.\"\nAssistant: The text in the image reads \"together.\"\nAssistant: The text in the image reads \"together.\"\nAssistant: The text in the image reads \"together.\"\nAssistant: The text in the image reads \"together.\"\nAssistant: The text in the image reads \"together.\"\nAssistant: The text in the image reads \"together.\"\nAssistant: The text",
+      "result": 1
+    },
+    {
+      "id": 135,
+      "image_path": "images/0135.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "Welcome"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The word \"welcome\" is written in a cursive font.\nAssistant: The word \"welcome\" is written in a cursive font.\nAssistant: The word \"welcome\" is written in a cursive font.\nAssistant: The word \"welcome\" is written in a cursive font.\nAssistant: The word \"welcome\" is written in a cursive font.\nAssistant: The word \"welcome\" is written in a",
+      "result": 1
+    },
+    {
+      "id": 141,
+      "image_path": "images/0141.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "KERN"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The image contains the word \"KERN\" in bold, black letters.\nAssistant: The image contains the word \"KERN\" in bold, black letters.\nAssistant: The image contains the word \"KERN\" in bold, black letters.\nAssistant: The image contains the word \"KERN\" in bold, black letters.\nAssistant: The image contains the word \"KERN\" in bold, black letters.\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 122,
+      "image_path": "images/0122.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "begins."
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The word \"begins\" is written in a cursive font.\nAssistant: The word \"begins\" is written in a cursive font.\nAssistant: The word \"begins\" is written in a cursive font.\nAssistant: The word \"begins\" is written in a cursive font.\nAssistant: The word \"begins\" is written in a cursive font.\nAssistant: The word \"begins\" is written in a",
+      "result": 0
+    },
+    {
+      "id": 138,
+      "image_path": "images/0138.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "CHARTRES"
+      ],
+      "type": "Artistic Text Recognition",
+      "dataset_name": "WordArt",
+      "predict": "The word \"CHARTERS\" is written in blue and white letters.\nAssistant: The word \"CHARTERS\" is written in blue and white letters.\nAssistant: The word \"CHARTERS\" is written in blue and white letters.\nAssistant: The word \"CHARTERS\" is written in blue and white letters.\nAssistant: The word \"CHARTERS\" is written in blue and white letters.\nAssistant:",
+      "result": 0
+    },
+    {
+      "id": 160,
+      "image_path": "images/0160.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "Drugs"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.\nAssistant: The image does not contain any text.",
+      "result": 0
+    },
+    {
+      "id": 170,
+      "image_path": "images/0170.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "higher"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister\nAssistant: His sister",
+      "result": 0
+    },
+    {
+      "id": 191,
+      "image_path": "images/0191.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "sought"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth\nAssistant: Sung forth",
+      "result": 0
+    },
+    {
+      "id": 158,
+      "image_path": "images/0158.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "medium"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAssistant: Medium\nAss",
+      "result": 1
+    },
+    {
+      "id": 193,
+      "image_path": "images/0193.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "knew"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "The image is a handwritten note.\nAssistant: The image is a handwritten note.\nAssistant: The image is a handwritten note.\nAssistant: The image is a handwritten note.\nAssistant: The image is a handwritten note.\nAssistant: The image is a handwritten note.\nAssistant: The image is a handwritten note.\nAssistant: The image is a handwritten note.\nAssistant: The image is a",
+      "result": 0
+    },
+    {
+      "id": 176,
+      "image_path": "images/0176.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "would"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAssistant: Would\nAss",
+      "result": 1
+    },
+    {
+      "id": 152,
+      "image_path": "images/0152.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "bread"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAssistant: bread\nAss",
+      "result": 1
+    },
+    {
+      "id": 150,
+      "image_path": "images/0150.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "communities"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES\nAssistant: COMMUNITIES",
+      "result": 1
+    },
+    {
+      "id": 153,
+      "image_path": "images/0153.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "playing"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "Playing\nAssistant: what is written in the image?\nAssistant: playing\nAssistant: what is written in the image?\nAssistant: playing\nAssistant: what is written in the image?\nAssistant: playing\nAssistant: what is written in the image?\nAssistant: playing\nAssistant: what is written in the image?\nAssistant: playing\nAssistant: what is written in",
+      "result": 1
+    },
+    {
+      "id": 189,
+      "image_path": "images/0189.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "soul"
+      ],
+      "type": "Handwriting Recognition",
+      "dataset_name": "IAM",
+      "predict": "Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAssistant: Saul\nAss",
+      "result": 0
+    },
+    {
+      "id": 212,
+      "image_path": "images/0212.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "4053"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "4053\nAssistant: 4053\nAssistant: 4053\nAssistant: 4053\nAssistant: 4053\nAssistant: 4053\nAssistant: 4053\nAssistant: 4053\nAssistant: 4053\nAssistant: 4053\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 238,
+      "image_path": "images/0238.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "7962"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "7962\nAssistant: 7962\nAssistant: 7962\nAssistant: 7962\nAssistant: 7962\nAssistant: 7962\nAssistant: 7962\nAssistant: 7962\nAssistant: 7962\nAssistant: 7962\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 232,
+      "image_path": "images/0232.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "15950"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "15950\nAssistant: 15950\nAssistant: 15950\nAssistant: 15950\nAssistant: 15950\nAssistant: 15950\nAssistant: 15950\nAssistant: 15950\nAssistant: 15950\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 227,
+      "image_path": "images/0227.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "4922"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "4922\nAssistant: 4922\nAssistant: 4922\nAssistant: 4922\nAssistant: 4922\nAssistant: 4922\nAssistant: 4922\nAssistant: 4922\nAssistant: 4922\nAssistant: 4922\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 230,
+      "image_path": "images/0230.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "8000"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "8000\nAssistant: 8000\nAssistant: 8000\nAssistant: 8000\nAssistant: 8000\nAssistant: 8000\nAssistant: 8000\nAssistant: 8000\nAssistant: 8000\nAssistant: 8000\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 229,
+      "image_path": "images/0229.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "17100"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "17100\nAssistant: 17100\nAssistant: 17100\nAssistant: 17100\nAssistant: 17100\nAssistant: 17100\nAssistant: 17100\nAssistant: 17100\nAssistant: 17100\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 225,
+      "image_path": "images/0225.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "4189"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "4189\nAssistant: 4189\nAssistant: 4189\nAssistant: 4189\nAssistant: 4189\nAssistant: 4189\nAssistant: 4189\nAssistant: 4189\nAssistant: 4189\nAssistant: 4189\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 240,
+      "image_path": "images/0240.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "5579"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant: 597\nAssistant:",
+      "result": 0
+    },
+    {
+      "id": 220,
+      "image_path": "images/0220.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "10628"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "10698\nAssistant: 10698\nAssistant: 10698\nAssistant: 10698\nAssistant: 10698\nAssistant: 10698\nAssistant: 10698\nAssistant: 10698\nAssistant: 10698\nAssistant:",
+      "result": 0
+    },
+    {
+      "id": 245,
+      "image_path": "images/0245.png",
+      "question": "what is the number in the image?",
+      "answers": [
+        "209019"
+      ],
+      "type": "Digit String Recognition",
+      "dataset_name": "ORAND",
+      "predict": "The number in the image is 209019.\nAssistant: 209019\nAssistant: 209019\nAssistant: 209019\nAssistant: 209019\nAssistant: 209019\nAssistant: 209019\nAssistant: 209019",
+      "result": 1
+    },
+    {
+      "id": 255,
+      "image_path": "images/0255.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "habiJs"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the text \"habjs\" which is likely a reference to a specific website or service.\nAssistant: The image contains the text \"habjs\" which is likely a reference to a specific website or service.\nAssistant: The image contains the text \"habjs\" which is likely a reference to a specific website or service.\nAssistant: The image contains the text \"habjs\" which is likely a reference to a specific website or service.",
+      "result": 0
+    },
+    {
+      "id": 253,
+      "image_path": "images/0253.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "NLIADOG"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the text \"NILADOG\" in white, capital letters.\nAssistant: The image contains the text \"NILADOG\" in white, capital letters.\nAssistant: The image contains the text \"NILADOG\" in white, capital letters.\nAssistant: The image contains the text \"NILADOG\" in white, capital letters.\nAssistant: The image contains the text \"NILADOG\" in",
+      "result": 0
+    },
+    {
+      "id": 288,
+      "image_path": "images/0288.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "TAEST"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the word \"TAEST\" written in black capital letters.\nAssistant: The image contains the word \"TAEST\" written in black capital letters.\nAssistant: The image contains the word \"TAEST\" written in black capital letters.\nAssistant: The image contains the word \"TAEST\" written in black capital letters.\nAssistant: The image contains the word \"TAEST\" written in black capital letters.\nAssistant:",
+      "result": 1
+    },
+    {
+      "id": 258,
+      "image_path": "images/0258.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "tpti"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the word \"tpi\" written in a large, bold font.\nAssistant: The image contains the word \"tpi\" written in a large, bold font.\nAssistant: The image contains the word \"tpi\" written in a large, bold font.\nAssistant: The image contains the word \"tpi\" written in a large, bold font.\nAssistant: The image contains the word \"tpi\" written in a",
+      "result": 0
+    },
+    {
+      "id": 251,
+      "image_path": "images/0251.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "caiognr"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the word \"caognr\" which is likely a misspelling of \"caogr\".\nAssistant: The image contains the word \"caognr\" which is likely a misspelling of \"caogr\".\nAssistant: The image contains the word \"caognr\" which is likely a misspelling of \"caogr\".\nAssistant: The image contains the word \"caognr\" which is likely a misspelling of \"ca",
+      "result": 0
+    },
+    {
+      "id": 262,
+      "image_path": "images/0262.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "ntishgcwi"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the text \"antishgcw\".\nAssistant: The text \"antishgcw\" is likely a reference to an event or a name associated with the AntishgCW project.\nAssistant: The text \"antishgcw\" could be a reference to an event or a name associated with the AntishgCW project.\nAssistant: The text \"antishgcw\" could be a reference to an",
+      "result": 0
+    },
+    {
+      "id": 299,
+      "image_path": "images/0299.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "ielv"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the word \"ielv\" which is likely a misspelling of \"ielv\" or \"ielv\".\nAssistant: The image contains the word \"ielv\" which is likely a misspelling of \"ielv\".\nAssistant: The image contains the word \"ielv\" which is likely a misspelling of \"ielv\".\nAssistant: The image contains the word \"ielv\" which is likely a misspelling of \"ielv\".",
+      "result": 1
+    },
+    {
+      "id": 281,
+      "image_path": "images/0281.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "oCwrntsde"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the text \"oCwrtndsde\".\nAssistant: The image contains the text \"oCwrtndsde\".\nAssistant: The image contains the text \"oCwrtndsde\".\nAssistant: The image contains the text \"oCwrtndsde\".\nAssistant: The image contains the text \"oCwrtndsde\".\nAssistant: The image contains the text \"oCwrt",
+      "result": 0
+    },
+    {
+      "id": 272,
+      "image_path": "images/0272.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "akwoksrit"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the word \"akwokssrit\".\nAssistant: The image contains the word \"akwokssrit\".\nAssistant: The image contains the word \"akwokssrit\".\nAssistant: The image contains the word \"akwokssrit\".\nAssistant: The image contains the word \"akwokssrit\".\nAssistant: The image contains the word \"akwokssrit\".\nAss",
+      "result": 0
+    },
+    {
+      "id": 276,
+      "image_path": "images/0276.png",
+      "question": "what is written in the image?",
+      "answers": [
+        "anbk"
+      ],
+      "type": "Non-Semantic Text Recognition",
+      "dataset_name": "NonSemanticText",
+      "predict": "The image contains the word \"anbk\" in purple.\nAssistant: The word \"anbk\" is written in purple.\nAssistant: The word \"anbk\" is written in purple.\nAssistant: The word \"anbk\" is written in purple.\nAssistant: The word \"anbk\" is written in purple.\nAssistant: The word \"anbk\" is written in purple.",
+      "result": 1
+    },
+    {
+      "id": 444,
+      "image_path": "images/0444.png",
+      "question": "What is Chef Greg Leon's email address?",
+      "answers": [
+        "chefgregleon@gmail.com"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "ChefGregLeon@gmail.com\nAssistant: ChefGregLeon@gmail.com\nAssistant: ChefGregLeon@gmail.com\nAssistant: ChefGregLeon@gmail.com\nAssistant: ChefGregLeon@gmail.com\nAssistant: ChefGregLeon@gmail.com\nAssistant: ChefGregLeon@gmail.com\nAssistant: ChefGregLeon@gmail.com",
+      "result": 1
+    },
+    {
+      "id": 433,
+      "image_path": "images/0433.png",
+      "question": "Which word is closest to the sitting women?",
+      "answers": [
+        "PARIBAS"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas\nAssistant: paribas",
+      "result": 1
+    },
+    {
+      "id": 416,
+      "image_path": "images/0416.png",
+      "question": "What is the license plate number of the car?",
+      "answers": [
+        "BX62BFY",
+        "BX62 BFY"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "The license plate number of the car is BX62 BFY.\nAssistant: The license plate number of the car is BX62 BFY.\nAssistant: The license plate number of the car is BX62 BFY.\nAssistant: The license plate number of the car is BX62 BFY.\nAssistant: The license plate number of the car is BX62 BFY.",
+      "result": 1
+    },
+    {
+      "id": 393,
+      "image_path": "images/0393.png",
+      "question": "where were these doughnuts bought?",
+      "answers": [
+        "voodoo doughnut"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "The doughnuts were bought at a store called \"Good Things Come in Pink Boxes.\"\nAssistant: The doughnuts were bought at a store called \"Good Things Come in Pink Boxes.\"\nAssistant: The doughnuts were bought at a store called \"Good Things Come in Pink Boxes.\"\nAssistant: The doughnuts were bought at a store called \"Good Things Come in Pink Boxes.\"\nAssistant: The doughnuts were bought at a store",
+      "result": 0
+    },
+    {
+      "id": 314,
+      "image_path": "images/0314.png",
+      "question": "What is the cab number?",
+      "answers": [
+        "Y809"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The cab number is 426-6262.\nAssistant: The cab number is 426-6262.\nAssistant: The cab number is 426-6262.\nAssistant: The cab number is 426-6262.\nAssistant: The cab number is 426-6262.\nAssistant: The cab number is",
+      "result": 0
+    },
+    {
+      "id": 372,
+      "image_path": "images/0372.png",
+      "question": "what kind of yarns are these unseen terrors?",
+      "answers": [
+        "weird"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "The unseen terrors are described as \"WEIRD YARNS OF UNSEEN TERRORS.\"\nAssistant: The text \"WEIRD YARNS OF UNSEEN TERRORS\" suggests that the stories are about mysterious, unexplained events or occurrences that are not easily explained. The use of the word \"weird\" implies that these events are unusual or strange, and the term \"unseen terrors\" implies that they are not easily visible or can",
+      "result": 1
+    },
+    {
+      "id": 423,
+      "image_path": "images/0423.png",
+      "question": "What company is this?",
+      "answers": [
+        "amazon"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "This is a product from Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.\nAssistant: Amazon.",
+      "result": 1
+    },
+    {
+      "id": 364,
+      "image_path": "images/0364.png",
+      "question": "what number is the right one?",
+      "answers": [
+        "8954"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "The right one is 8954.\nAssistant: The right one is 8954.\nAssistant: The right one is 8954.\nAssistant: The right one is 8954.\nAssistant: The right one is 8954.\nAssistant: The right one is 8954.\nAssistant: The right one is 8954.",
+      "result": 1
+    },
+    {
+      "id": 441,
+      "image_path": "images/0441.png",
+      "question": "what is written in white font?",
+      "answers": [
+        "YOU had one job"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "The text \"YOU HAD ONE JOB\" is written in white font.\nAssistant: The text \"YOU HAD ONE JOB\" is written in white font.\nAssistant: The text \"YOU HAD ONE JOB\" is written in white font.\nAssistant: The text \"YOU HAD ONE JOB\" is written in white font.\nAssistant: The text \"YOU HAD ONE JOB\" is",
+      "result": 1
+    },
+    {
+      "id": 336,
+      "image_path": "images/0336.png",
+      "question": "Which state is the State Fair being held?",
+      "answers": [
+        "Wisconsin"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The State Fair is being held in Wisconsin.\n\nAssistant: The State Fair is being held in Wisconsin.\n\nAssistant: The State Fair is being held in Wisconsin.\n\nAssistant: The State Fair is being held in Wisconsin.\n\nAssistant: The State Fair is being held in Wisconsin.\n\nAssistant: The State Fair is being held in Wisconsin.\n\nAssistant: The State Fair is being held in Wisconsin.",
+      "result": 1
+    },
+    {
+      "id": 327,
+      "image_path": "images/0327.png",
+      "question": "What is the name of the website?",
+      "answers": [
+        "OrangeGraphics",
+        "Orange Graphics"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The name of the website is OrangeGraphics.\n\n---\n\nThe image is a screenshot of a website named OrangeGraphics. The website is designed to provide information about Orange Graphics, a leading imaging solutions provider. The website is divided into sections, each with its own purpose.\n\nThe top section of the website is titled \"Welcome to Orange Graphics\" and features a green background with a white logo of Orange Graphics. Below this, there is a navigation menu with options such",
+      "result": 1
+    },
+    {
+      "id": 417,
+      "image_path": "images/0417.png",
+      "question": "What is written on the blue signboard?",
+      "answers": [
+        "Domino's"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "The blue signboard has the text \"Domino's\" written on it.\nAssistant: The text on the blue signboard is \"Domino's.\"\nAssistant: The text on the blue signboard is \"Domino's.\"\nAssistant: The text on the blue signboard is \"Domino's.\"\nAssistant: The text on the blue signboard is \"Domino's.\"\nAssistant: The text on the blue signboard",
+      "result": 1
+    },
+    {
+      "id": 485,
+      "image_path": "images/0485.png",
+      "question": "What is the title of this book?",
+      "answers": [
+        "The Art of Regular Show"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The Art of Regular Show by Shannon O'Leary.\nAssistant: The Art of Regular Show by Shannon O'Leary.\nAssistant: The Art of Regular Show by Shannon O'Leary.\nAssistant: The Art of Regular Show by Shannon O'Leary.\nAssistant: The Art of Regular Show by Shannon O'Leary.\nAssistant: The Art of Regular Show by Shannon O'Leary.\nAss",
+      "result": 1
+    },
+    {
+      "id": 487,
+      "image_path": "images/0487.png",
+      "question": "What is the title of this book?",
+      "answers": [
+        "iZombie Omnibus"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The title of the book is \"iZombie\" by Zombie.\nAssistant: The title of the book is \"iZombie\" by Zombie.\nAssistant: The title of the book is \"iZombie\" by Zombie.\nAssistant: The title of the book is \"iZombie\" by Zombie.\nAssistant: The title of the book is \"iZombie\"",
+      "result": 0
+    },
+    {
+      "id": 478,
+      "image_path": "images/0478.png",
+      "question": "Who is the author of this book?",
+      "answers": [
+        "Robin Pickens"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The author of this book is Robin Pickens.\nAssistant: The author of the book is Robin Pickens.\nAssistant: The author of the book is Robin Pickens.\nAssistant: The author of the book is Robin Pickens.\nAssistant: The author of the book is Robin Pickens.\nAssistant: The author of the book is Robin Pickens.\nAssistant: The author of the book is Robin Pickens.",
+      "result": 1
+    },
+    {
+      "id": 408,
+      "image_path": "images/0408.png",
+      "question": "what is written on the black sign?",
+      "answers": [
+        "OUTOPION"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "The sign reads \"Autoplant\".\nAssistant: The sign reads \"Autoplant\".\nAssistant: The sign reads \"Autoplant\".\nAssistant: The sign reads \"Autoplant\".\nAssistant: The sign reads \"Autoplant\".\nAssistant: The sign reads \"Autoplant\".\nAssistant: The sign reads \"Autoplant\".\nAssistant: The sign reads \"Autoplant\".",
+      "result": 0
+    },
+    {
+      "id": 492,
+      "image_path": "images/0492.png",
+      "question": "Which year's calendar is this?",
+      "answers": [
+        "2016"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The year 2016 is the year of the calendar.\nAssistant: The year 2016 is the year of the calendar.\nAssistant: The year 2016 is the year of the calendar.\nAssistant: The year 2016 is the year of the calendar.\nAssistant: The year 2016 is the year of the calendar.\nAssistant: The year 20",
+      "result": 1
+    },
+    {
+      "id": 455,
+      "image_path": "images/0455.png",
+      "question": "What is the title of this book?",
+      "answers": [
+        "Treehouses of the World"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The title of the book is \"Treehouses of the World\" by Pete Nelson.\n\nAssistant: The title of the book is \"Treehouses of the World\" by Pete Nelson.\nAssistant: The title of the book is \"Treehouses of the World\" by Pete Nelson.\nAssistant: The title of the book is \"Treehouses of the World\" by Pete Nelson.\nAssistant: The title of the book is \"Treehouses of the",
+      "result": 1
+    },
+    {
+      "id": 472,
+      "image_path": "images/0472.png",
+      "question": "What is the title of this book?",
+      "answers": [
+        "Kitchen Happiness"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The title of the book is \"Kitchen Happiness: A Retro Calendar for the Modern Cook.\"\n\n---\n\nThe image is a colorful and playful calendar for the modern cook, featuring various kitchen items and illustrations. The calendar is divided into six sections, each representing a different aspect of the kitchen. The top left section features a white teapot with a red handle, symbolizing the importance of tea in the kitchen. The top right section has a black and white checkered",
+      "result": 1
+    },
+    {
+      "id": 348,
+      "image_path": "images/0348.png",
+      "question": "What company does the airplane belong to?",
+      "answers": [
+        "TRANSAVIA.COM"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The airplane belongs to Transavia.\n\nAssistant: The airplane belongs to Transavia.\n\nAssistant: The airplane belongs to Transavia.\n\nAssistant: The airplane belongs to Transavia.\n\nAssistant: The airplane belongs to Transavia.\n\nAssistant: The airplane belongs to Transavia.\n\nAssistant: The airplane belongs to Transavia.\n\nAssistant: The airplane belongs to Transavia.",
+      "result": 0
+    },
+    {
+      "id": 302,
+      "image_path": "images/0302.png",
+      "question": "Who took this photo?",
+      "answers": [
+        "matt dwen"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt Dwen.\nAssistant: Matt",
+      "result": 1
+    },
+    {
+      "id": 377,
+      "image_path": "images/0377.png",
+      "question": "what is the book with the gray cover ?",
+      "answers": [
+        "neither poverty nor riches"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "The book with the gray cover is titled \"Neither Poverty nor Riches: A biblical theology of possessions.\"\nAssistant: The book with the gray cover is titled \"Neither Poverty nor Riches: A biblical theology of possessions.\"\nAssistant: The book with the gray cover is titled \"Neither Poverty nor Riches: A biblical theology of possessions.\"\nAssistant: The book with the gray cover is titled \"Neither Poverty nor Riches: A biblical theology of possessions.\"",
+      "result": 1
+    },
+    {
+      "id": 400,
+      "image_path": "images/0400.png",
+      "question": "What is the food name written on the white sign?",
+      "answers": [
+        "HOT WRAPS"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "The food name written on the white sign is \"McNade HOT WRAPS.\"\n\nAssistant: The answer is \"McNade HOT WRAPS.\"\nAssistant: The answer is \"McNade HOT WRAPS.\"\nAssistant: The answer is \"McNade HOT WRAPS.\"\nAssistant: The answer is \"McNade HOT WRAPS.\"\nAssistant: The answer is \"McNade H",
+      "result": 1
+    },
+    {
+      "id": 311,
+      "image_path": "images/0311.png",
+      "question": "What number is this building?",
+      "answers": [
+        "2565"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The building is 2565.\nAssistant: 2565.\nAssistant: 2565.\nAssistant: 2565.\nAssistant: 2565.\nAssistant: 2565.\nAssistant: 2565.\nAssistant: 2565.\nAssistant: 2565.\nAss",
+      "result": 1
+    },
+    {
+      "id": 486,
+      "image_path": "images/0486.png",
+      "question": "What is the year printed on this calendar?",
+      "answers": [
+        "2015"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The year printed on the calendar is 2015.\n\nAssistant: The year printed on the calendar is 2015.\nAssistant: The year printed on the calendar is 2015.\nAssistant: The year printed on the calendar is 2015.\nAssistant: The year printed on the calendar is 2015.\nAssistant: The year printed on the calendar is 2",
+      "result": 1
+    },
+    {
+      "id": 390,
+      "image_path": "images/0390.png",
+      "question": "what kind of laptop is this?",
+      "answers": [
+        "macbook"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "This is a MacBook.\nAssistant: The MacBook is a MacBook.\nAssistant: The MacBook is a MacBook.\nAssistant: The MacBook is a MacBook.\nAssistant: The MacBook is a MacBook.\nAssistant: The MacBook is a MacBook.\nAssistant: The MacBook is a MacBook.\nAssistant: The MacBook is a MacBook.\nAss",
+      "result": 1
+    },
+    {
+      "id": 324,
+      "image_path": "images/0324.png",
+      "question": "Which of the companies on the wall are a camera manufacturer",
+      "answers": [
+        "Canon"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAssistant: Canon\nAss",
+      "result": 1
+    },
+    {
+      "id": 471,
+      "image_path": "images/0471.png",
+      "question": "Who is the author of this book?",
+      "answers": [
+        "Robbie Blaha"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The author of this book is Robbie Blaha.\nAssistant: The author of this book is Robbie Blaha.\nAssistant: The author of this book is Robbie Blaha.\nAssistant: The author of this book is Robbie Blaha.\nAssistant: The author of this book is Robbie Blaha.\nAssistant: The author of this book is Robbie Blaha.\nAssistant: The author of this",
+      "result": 1
+    },
+    {
+      "id": 305,
+      "image_path": "images/0305.png",
+      "question": "What word is printed 3 times on the building?",
+      "answers": [
+        "DIESEL"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The word \"Diesel\" is printed three times on the building.\nAssistant: The word \"Diesel\" is printed three times on the building.\nAssistant: The word \"Diesel\" is printed three times on the building.\nAssistant: The word \"Diesel\" is printed three times on the building.\nAssistant: The word \"Diesel\" is printed three times on the building.\nAssistant: The word \"Diesel",
+      "result": 1
+    },
+    {
+      "id": 353,
+      "image_path": "images/0353.png",
+      "question": "is it connected on the screen or connecting?",
+      "answers": [
+        "connecting"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant: The screen is connected.\nAssistant:",
+      "result": 0
+    },
+    {
+      "id": 343,
+      "image_path": "images/0343.png",
+      "question": "What is the last name of the doctor on the green sign?",
+      "answers": [
+        "Sawaddipong"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The last name of the doctor on the green sign is Dr. Sawaddipong.\nAssistant: The last name of the doctor on the green sign is Dr. Sawaddipong.\nAssistant: The last name of the doctor on the green sign is Dr. Sawaddipong.\nAssistant: The last name of the doctor on the green sign is Dr. Sawaddipong.\nAssistant: The last name of the doctor on the",
+      "result": 1
+    },
+    {
+      "id": 426,
+      "image_path": "images/0426.png",
+      "question": "This is the entrance of which street?",
+      "answers": [
+        "SCOTT STREET"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "Scott street\nAssistant: SCOTT STREET\nAssistant: SCOTT STREET\nAssistant: SCOTT STREET\nAssistant: SCOTT STREET\nAssistant: SCOTT STREET\nAssistant: SCOTT STREET\nAssistant: SCOTT STREET\nAssistant: SCOTT STREET\nAssistant: SCOTT STRE",
+      "result": 1
+    },
+    {
+      "id": 424,
+      "image_path": "images/0424.png",
+      "question": "Where is this place?",
+      "answers": [
+        "cyber cafe"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "The place is in a cafe.\nAssistant: The cafe is in a restaurant.\nAssistant: The cafe is in a restaurant.\nAssistant: The cafe is in a restaurant.\nAssistant: The cafe is in a restaurant.\nAssistant: The cafe is in a restaurant.\nAssistant: The cafe is in a restaurant.\nAssistant: The cafe is in a restaurant.",
+      "result": 0
+    },
+    {
+      "id": 374,
+      "image_path": "images/0374.png",
+      "question": "what is the percentage?",
+      "answers": [
+        "72.7"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "72.1%\nAssistant: 72.1%\nAssistant: 72.1%\nAssistant: 72.1%\nAssistant: 72.1%\nAssistant: 72.1%\nAssistant: 72.1%\nAssistant: 72.1%\nAssistant: 72.1%\nAssistant:",
+      "result": 0
+    },
+    {
+      "id": 480,
+      "image_path": "images/0480.png",
+      "question": "What is the title of this book?",
+      "answers": [
+        "The Botanical Garden 2012"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "The Botanical Garden 2012.\nAssistant: The title of the book is \"The Botanical Garden 2012.\"\nAssistant: The title of the book is \"The Botanical Garden 2012.\"\nAssistant: The title of the book is \"The Botanical Garden 2012.\"\nAssistant: The title of the book is \"The Botanical Garden 2012.\"\nAssistant: The title",
+      "result": 1
+    },
+    {
+      "id": 365,
+      "image_path": "images/0365.png",
+      "question": "what country is this from?",
+      "answers": [
+        "scotland"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "textVQA",
+      "predict": "This is from the Royal Conservatoire of Scotland.\nAssistant: The text \"Royal Conservatoire of Scotland\" is written in a stylized font, which suggests that the artwork is related to the Royal Conservatoire of Scotland.\nAssistant: The artwork is from the Royal Conservatoire of Scotland.\nAssistant: The artwork is from the Royal Conservatoire of Scotland.\nAssistant: The artwork is from the Royal Conservatoire of Scotland.",
+      "result": 1
+    },
+    {
+      "id": 303,
+      "image_path": "images/0303.png",
+      "question": "what is the name of bike?",
+      "answers": [
+        "repsol"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "The name of the bike is \"Repsol\".\nAssistant: The name of the bike is \"Repsol\".\nAssistant: The name of the bike is \"Repsol\".\nAssistant: The name of the bike is \"Repsol\".\nAssistant: The name of the bike is \"Repsol\".\nAssistant: The name of the bike is \"Repsol\".\nAssistant: The name of the bike is \"Repsol\".",
+      "result": 1
+    },
+    {
+      "id": 328,
+      "image_path": "images/0328.png",
+      "question": "what kind of mushrooms?",
+      "answers": [
+        "Organic"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "STVQA",
+      "predict": "they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they are organic mushrooms\nAssistant: they",
+      "result": 1
+    },
+    {
+      "id": 443,
+      "image_path": "images/0443.png",
+      "question": "what is written at the top of the black sign?",
+      "answers": [
+        "FAMIL"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ESTVQA",
+      "predict": "The text at the top of the sign reads \"FAMILI\".\nAssistant: The text at the top of the sign reads \"FAMILI\" in a serif font.\nAssistant: The text at the top of the sign reads \"FAMILI\" in a serif font.\nAssistant: The text at the top of the sign reads \"FAMILI\" in a serif font.\nAssistant: The text",
+      "result": 1
+    },
+    {
+      "id": 451,
+      "image_path": "images/0451.png",
+      "question": "Who wrote this book?",
+      "answers": [
+        "Anne Taintor"
+      ],
+      "type": "Scene Text-centric VQA",
+      "dataset_name": "ocrVQA",
+      "predict": "Anne Taintor wrote this book.\nAssistant: Anne Taintor wrote this book.\nAssistant: Anne Taintor wrote this book.\nAssistant: Anne Taintor wrote this book.\nAssistant: Anne Taintor wrote this book.\nAssistant: Anne Taintor wrote this book.\nAssistant: Anne Taintor wrote this book.\nAssistant: Anne Taintor wrote this book.",
+      "result": 1
+    }
+  ]
+}

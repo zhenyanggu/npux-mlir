@@ -52,12 +52,11 @@ model_test/
 
 ```
 
-### 1.1 Docker 约定
+### 1.1 当前推荐环境
 
-- 当前推荐编译环境在 docker 容器 `my-npux-dev` 中。
-- 仓库根目录在容器内挂载为 `/workspace`。
-- 所有文档中的命令优先写成下面这种形式，便于直接复制执行：
-  - `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && ...'`
+- 当前推荐编译环境是 **WSL 原生环境 + `source scripts/activate_env.sh`**。
+- Python 依赖运行在专用 `conda` 环境中，`LLVM/MLIR`、`protobuf`、`absl`、AArch64 工具链运行在用户目录前缀下。
+- Docker 中的 `my-npux-dev` 现在只保留为历史参考环境，不再作为主流程前提。
 
 ## 2. 编译与转换链路
 
@@ -71,12 +70,13 @@ model_test/
 6. **LLVM IR 编译**：通过 `onnx_to_llvm.sh` 将 MLIR 进一步 Lowering 为 LLVM IR。
 7. **交叉编译**：通过 `compile_to_zcu102.sh` 生成 `Codegen/model.ll`、目标文件和 ZCU102 可执行文件。
 
-### 2.1 docker 中的标准命令
+### 2.1 原生环境中的标准命令
 
-1. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace/model_test && make -B llvm MODEL=bert_base'`
-2. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace/model_test && make -B zcu102 MODEL=bert_base'`
-3. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && grep -c "library_call = \"npu_gelu\"" model_test/build/NPU_bert_base/NpuPartition/ConvertONNXToLinalgNpu.mlir'`
-4. `docker exec my-npux-dev /bin/bash -lc 'cd /workspace && grep -c "@npu_sfu_run(i8 1," model_test/build/NPU_bert_base/Codegen/model.ll'`
+1. `source scripts/activate_env.sh`
+2. `make -C model_test -B llvm MODEL=bert_base`
+3. `make -C model_test -B zcu102 MODEL=bert_base`
+4. `grep -c "library_call = \"npu_gelu\"" model_test/build/NPU_bert_base/NpuPartition/ConvertONNXToLinalgNpu.mlir`
+5. `grep -c "@npu_sfu_run(i8 1," model_test/build/NPU_bert_base/Codegen/model.ll`
 
 ### 2.2 执行边界与验证规范
 

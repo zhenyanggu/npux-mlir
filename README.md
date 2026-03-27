@@ -4,6 +4,17 @@
 
 ## 使用步骤
 
+### WSL 原生环境快速开始
+
+如果你在 WSL 中开发，优先使用原生环境脚本而不是固定 Docker 容器名：
+
+```bash
+./scripts/bootstrap_env.sh
+source scripts/activate_env.sh
+```
+
+详细说明见 [docs/EnvironmentSetupWSL.md](docs/EnvironmentSetupWSL.md)。
+
 1. **生成配置文件**
    首先对模型运行 python 目录下脚本：
    ```bash

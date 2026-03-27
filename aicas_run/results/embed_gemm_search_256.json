@@ -1,0 +1,12 @@
+{
+    "hw_config": {
+        "spm_bytes": 131072,
+        "acc_bytes": 131072
+    },
+    "total_latency_ms": 0.0,
+    "layers": [],
+    "meta": {
+        "model_path": "/workspace/aicas_run/embed_tokens_fp16.onnx",
+        "message": "\u672a\u68c0\u6d4b\u5230\u6709\u6548\u7684 GEMM/MatMul \u64cd\u4f5c\uff0c\u8f93\u51fa\u7a7a\u5206\u5757\u914d\u7f6e\u3002"
+    }
+}

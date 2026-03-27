@@ -1,7 +1,7 @@
 .idea/
 test/*
 cmake-*/
-docs/
+docs/*
 install/
 CMakePresets.json
 python/static_onnx_models/
@@ -15,6 +15,8 @@ cache/
 model_test/output
 model_test/profile
 *.onnx
+aicas_run/data
+node_modules
 # Prerequisites
 *.d
 
@@ -167,7 +169,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
-env/
+env/*
 venv/
 ENV/
 env.bak/
@@ -205,3 +207,5 @@ dmypy.json
 test/call_func
 
 compile_commands.json
+!docs/EnvironmentSetupWSL.md
+!env/toolchain.lock

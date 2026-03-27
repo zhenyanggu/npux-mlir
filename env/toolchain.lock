@@ -1,0 +1,20 @@
+# shellcheck shell=sh
+
+NPUX_VALIDATED_HOST_UBUNTU="24.04"
+NPUX_LLVM_COMMIT="fc44a4fcd3c54be927c15ddd9211aca1501633e7"
+NPUX_LLVM_GIT_URL="https://github.com/llvm/llvm-project.git"
+
+NPUX_ABSL_VERSION="20240722.1"
+NPUX_ABSL_GIT_URL="https://github.com/abseil/abseil-cpp.git"
+
+NPUX_PROTOBUF_VERSION="6.31.1"
+NPUX_PROTOBUF_GIT_URL="https://github.com/protocolbuffers/protobuf.git"
+
+NPUX_ARM_GNU_TOOLCHAIN_VERSION="13.3.rel1"
+NPUX_ARM_GNU_TOOLCHAIN_URL="https://developer.arm.com/-/media/Files/downloads/gnu/13.3.rel1/binrel/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-linux-gnu.tar.xz"
+
+NPUX_PYTHON_VERSION="3.10"
+NPUX_CONDA_ENV_DEFAULT="npux-mlir"
+NPUX_PREFIX_DEFAULT="${HOME}/.local/npux-env"
+NPUX_HOST_BUILD_DIR_DEFAULT="build"
+NPUX_CROSS_BUILD_DIR_DEFAULT="build-zcu102"

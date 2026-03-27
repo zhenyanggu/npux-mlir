@@ -18,7 +18,7 @@ CROSS_CXX="${CROSS_CXX:-aarch64-linux-gnu-g++}"
 
 # [LLVM 源码路径 - 关键]
 # 指向 llvm-project 根目录，可通过环境变量覆盖
-LLVM_SRC_ROOT="${LLVM_SRC_ROOT:-/opt/llvm-project}"
+LLVM_SRC_ROOT="${LLVM_SRC_ROOT:-${NPUX_ENV_PREFIX:-${HOME}/.local/npux-env}/src/llvm-project}"
 
 # [关键路径配置]
 # 1. 库文件路径 (ONNX-MLIR 的运行时库)
@@ -57,6 +57,23 @@ CURRENT_DIR=""
 error_exit() {
     echo -e "${RED}>>> [ERROR] $1 Failed!${NC}"
     exit 1
+}
+
+resolve_path_or_tool() {
+    local candidate=""
+    for candidate in "$@"; do
+        [[ -z "$candidate" ]] && continue
+        if [[ "$candidate" == */* ]]; then
+            if [[ -x "$candidate" ]]; then
+                realpath "$candidate"
+                return 0
+            fi
+        elif command -v "$candidate" >/dev/null 2>&1; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
 }
 
 enter_stage() {
@@ -113,9 +130,29 @@ fi
 
 CURRENT_INPUT=$(realpath "$INPUT_FILE")
 
+TRANSLATE_TOOL=$(resolve_path_or_tool \
+    "${TRANSLATE_TOOL}" \
+    "${NPUX_ENV_PREFIX:-${HOME}/.local/npux-env}/build/llvm-project/bin/mlir-translate" \
+    "mlir-translate") || error_exit "mlir-translate not found"
+
+LLC_TOOL=$(resolve_path_or_tool \
+    "${LLC_TOOL}" \
+    "${NPUX_ENV_PREFIX:-${HOME}/.local/npux-env}/build/llvm-project/bin/llc" \
+    "llc") || error_exit "llc not found"
+
+CROSS_CXX=$(resolve_path_or_tool \
+    "${CROSS_CXX}" \
+    "${NPUX_ENV_PREFIX:-${HOME}/.local/npux-env}/toolchains/aarch64/bin/aarch64-none-linux-gnu-g++" \
+    "${NPUX_ENV_PREFIX:-${HOME}/.local/npux-env}/toolchains/aarch64/bin/aarch64-linux-gnu-g++" \
+    "aarch64-none-linux-gnu-g++" \
+    "aarch64-linux-gnu-g++") || error_exit "cross compiler not found"
+
 echo ">>> Starting Cross-Compilation Pipeline for ZCU102"
 echo ">>> Initial Input: $CURRENT_INPUT"
 echo ">>> Output Binary Name: $OUTPUT_BIN_NAME"
+echo ">>> LLVM Translate: $TRANSLATE_TOOL"
+echo ">>> LLC: $LLC_TOOL"
+echo ">>> Cross CXX: $CROSS_CXX"
 
 if [ ! -d "$RUNTIME_LIB_DIR" ]; then
     echo -e "${RED}Error: runtime lib dir not found: ${RUNTIME_LIB_DIR}${NC}"

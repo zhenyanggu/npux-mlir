@@ -13,6 +13,9 @@ SHELL := /bin/bash
 PYTHON ?= python3
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 PROJECT_ROOT := $(abspath $(ROOT_DIR)/..)
+MODEL_TEST_PYTHONPATH := $(ROOT_DIR):$(PROJECT_ROOT)
+MODEL_TEST_ORT_PROVIDERS ?= CUDAExecutionProvider,CPUExecutionProvider
+MODEL_TEST_ORT_FORCE_CPU ?= 0
 ONNX_MLIR ?= $(or $(shell command -v onnx-mlir 2>/dev/null),$(firstword $(wildcard $(PROJECT_ROOT)/build/Release/bin/onnx-mlir) $(wildcard $(PROJECT_ROOT)/build/Debug/bin/onnx-mlir) $(wildcard $(PROJECT_ROOT)/install/bin/onnx-mlir)),onnx-mlir)
 MODELS_DIR := $(ROOT_DIR)/models
 SCRIPTS_DIR := $(ROOT_DIR)/scripts
@@ -171,7 +174,7 @@ $(BUILD_DIR)/NPU_%/.prepare.stamp: | init
 	if [[ -f "$$src_dir/model.py" ]]; then \
 		cp -f "$$src_dir/model.py" "$$work_dir/model.py"; \
 		echo "[gen] python $$work_dir/model.py $(MODEL_PY_ARGS)"; \
-		(cd "$$work_dir" && MODEL_TEST_CACHE_DIR="$(CACHE_DIR)" $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
+		(cd "$$work_dir" && MODEL_TEST_CACHE_DIR="$(CACHE_DIR)" PYTHONPATH="$(MODEL_TEST_PYTHONPATH)$${PYTHONPATH:+:$${PYTHONPATH}}" MODEL_TEST_ORT_PROVIDERS="$(MODEL_TEST_ORT_PROVIDERS)" MODEL_TEST_ORT_FORCE_CPU="$(MODEL_TEST_ORT_FORCE_CPU)" $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
 	elif [[ -f "$$src_dir/model.onnx" ]]; then \
 		cp -f "$$src_dir/model.onnx" "$$work_dir/model.onnx"; \
 		echo "[copy] $$src_dir/model.onnx -> $$work_dir/model.onnx"; \
@@ -216,7 +219,7 @@ $(BUILD_DIR)/CPU_%/.prepare.stamp: | init
 	if [[ -f "$$src_dir/model.py" ]]; then \
 		cp -f "$$src_dir/model.py" "$$work_dir/model.py"; \
 		echo "[gen] python $$work_dir/model.py $(MODEL_PY_ARGS)"; \
-		(cd "$$work_dir" && MODEL_TEST_CACHE_DIR="$(CACHE_DIR)" $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
+		(cd "$$work_dir" && MODEL_TEST_CACHE_DIR="$(CACHE_DIR)" PYTHONPATH="$(MODEL_TEST_PYTHONPATH)$${PYTHONPATH:+:$${PYTHONPATH}}" MODEL_TEST_ORT_PROVIDERS="$(MODEL_TEST_ORT_PROVIDERS)" MODEL_TEST_ORT_FORCE_CPU="$(MODEL_TEST_ORT_FORCE_CPU)" $(PYTHON) model.py $(MODEL_PY_ARGS)) || { echo "[error] $$model 生成模型失败"; exit 2; }; \
 	elif [[ -f "$$src_dir/model.onnx" ]]; then \
 		cp -f "$$src_dir/model.onnx" "$$work_dir/model.onnx"; \
 		echo "[copy] $$src_dir/model.onnx -> $$work_dir/model.onnx"; \
