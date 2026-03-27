@@ -19,74 +19,6 @@ using namespace mlir;
 using namespace npux;
 
 namespace {
-
-// Helper: Check if the operation is inside a function marked with
-// npu.target="npu"
-bool isInNpuKernel(Operation *op) {
-  auto funcOp = op->getParentOfType<func::FuncOp>();
-  if (!funcOp)
-    return false;
-  if (auto attr = funcOp->getAttrOfType<StringAttr>("npu.target")) {
-    return attr.getValue() == "npu";
-  }
-  return false;
-}
-
-struct Flatten2DInfo {
-  int64_t row;
-  int64_t col;
-  int64_t splitIdx;
-};
-
-Flatten2DInfo getFlattened2DInfo(
-    ArrayRef<int64_t> shape, Operation *op = nullptr) {
-  int64_t rank = shape.size();
-
-  // 处理低维度情况
-  if (rank == 0)
-    return {1, 1, 0};
-  if (rank == 1)
-    return {1, shape[0], 0};
-  if (rank == 2)
-    return {shape[0], shape[1], 1};
-
-  int64_t row = 1;
-  int64_t col = 1;
-
-  // 定义分割点索引：从该索引开始（含）往后的所有维度都乘入 col
-  int64_t splitIdx = rank - 1;
-
-  // 分情况讨论逻辑
-  if (rank == 3 || rank == 4) {
-    // 3、4维：Col 为最里面一维
-    splitIdx = rank - 1;
-  } else if (rank == 5) {
-    // 5维：Col 为最里面两位相乘
-    splitIdx = rank - 2;
-  } else if (rank >= 6) {
-    // 6维及以上：Col 为最里面五位相乘, 这是处理卷积的权重
-    splitIdx = rank - 5;
-  }
-
-  // 安全边界检查：防止 splitIdx 计算越界
-  if (splitIdx < 0)
-    splitIdx = 0;
-
-  auto recomputeRowCol = [&](int64_t idx) {
-    int64_t newRow = 1;
-    int64_t newCol = 1;
-    for (int i = idx; i < rank; ++i)
-      newCol *= shape[i];
-    for (int i = 0; i < idx; ++i)
-      newRow *= shape[i];
-    return std::pair<int64_t, int64_t>{newRow, newCol};
-  };
-
-  std::tie(row, col) = recomputeRowCol(splitIdx);
-
-  return {row, col, splitIdx};
-}
-
 // =========================================================
 // Pattern 1: Convert ACC -> SPM Quantization Generic to NPU Move
 // Matches: linalg.generic { npu.pp_stage = "quant_acc2spm" }
@@ -168,23 +100,46 @@ public:
     MemRefType sramType = isMvin ? dstType : srcType;
     Location loc = op.getLoc();
 
-    // 1. 获取物理形状 (通常从逻辑形状一致的 dramType 获取)
     auto shape = dramType.getShape();
+    int64_t rank = shape.size();
     if (llvm::any_of(shape, [](int64_t d) { return d < 0; })) {
       op->emitError()
           << "Dynamic memref shape is unsupported for DMA parameter lowering: "
           << dramType;
       return failure();
     }
-    auto flattenInfo = getFlattened2DInfo(shape, op);
-    int64_t rows = flattenInfo.row;
-    int64_t cols = flattenInfo.col;
-    int64_t splitIdx = flattenInfo.splitIdx;
+
+    // ========================================================================
+    // 1. 直接从上游 Pass 读取 col_dim_idx 属性，告别启发式猜测
+    // ========================================================================
+    int64_t splitIdx = 0; // 默认 0 表示完全连续的 1D DMA
+    if (auto colDimAttr = op->getAttrOfType<IntegerAttr>("npu.dma_col_dim")) {
+      splitIdx = colDimAttr.getInt();
+    }
+    
+    // 防御性保护，防止属性异常
+    if (splitIdx < 0 || splitIdx > rank) {
+      splitIdx = 0;
+    }
+
+    int64_t rows = 1;
+    int64_t cols = 1;
+
+    // splitIdx 左边的维度累乘为 Row
+    for (int i = 0; i < splitIdx; ++i) {
+      rows *= shape[i];
+    }
+    // splitIdx 及右边的维度累乘为 Col
+    for (int i = splitIdx; i < rank; ++i) {
+      cols *= shape[i];
+    }
 
     Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
     Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
 
-    // 2. 获取 DRAM Strides
+    // ========================================================================
+    // 2. 获取 DRAM Strides (复用你原本借助 MLIR 布局的稳健推导)
+    // ========================================================================
     int64_t offset;
     SmallVector<int64_t, 4> strides;
     if (failed(dramType.getStridesAndOffset(strides, offset))) {
@@ -192,8 +147,7 @@ public:
     }
 
     int64_t dramStrideVal = cols;
-    // 对于有 row 维度的情况，优先使用真实 memref stride，兼容非连续 layout。
-    // 对于 splitIdx == 0（row=1）则退回 cols。
+    // 使用 splitIdx - 1 精准获取跨越 Row 的步长
     if (splitIdx > 0 && (splitIdx - 1) < (int64_t)strides.size()) {
       dramStrideVal = strides[splitIdx - 1];
     }
@@ -201,38 +155,27 @@ public:
     Value vDramStride =
         rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 32);
 
+    // ========================================================================
     // 3. 获取 SRAM Stride
-    // 语义约束：
-    // - col_num 是 32-bit，可大于 16-bit
-    // - sram_stride 是 16-bit，仅在 row>1 时有意义
-    int64_t sramStrideVal = 0;
-    if (rows > 1) {
-      int64_t sramOffset;
-      SmallVector<int64_t, 4> sramStrides;
-      if (failed(sramType.getStridesAndOffset(sramStrides, sramOffset))) {
-        return failure();
-      }
-      sramStrideVal = cols;
-      if (splitIdx > 0 && (splitIdx - 1) < (int64_t)sramStrides.size()) {
-        sramStrideVal = sramStrides[splitIdx - 1];
-      }
-      if (sramStrideVal < 0 ||
-          sramStrideVal > static_cast<int64_t>(std::numeric_limits<uint16_t>::max())) {
-        op->emitError() << "DMA sram_stride overflow for multi-row transfer: "
-                        << sramStrideVal << " (splitIdx=" << splitIdx
-                        << ", rows=" << rows << ", cols=" << cols << ")";
-        return failure();
-      }
+    // ========================================================================
+    int64_t sramOffset;
+    SmallVector<int64_t, 4> sramStrides;
+    if (failed(sramType.getStridesAndOffset(sramStrides, sramOffset))) {
+      return failure();
     }
+    
+    int64_t sramStrideVal = sramStrides[splitIdx - 1];
+    
+    
     Value vSramStride =
         rewriter.create<arith::ConstantIntOp>(loc, sramStrideVal, 16);
 
-    // 4. Precision Logic: 当前硬件路径统一按 int8 配置。
+    // ========================================================================
+    // 4. Precision & Hardware Logic (完全保持原样)
+    // ========================================================================
     Value vPrecision = rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
-    Value vInputType =
-        rewriter.create<arith::ConstantIntOp>(loc, 0, 8); // Default
+    Value vInputType = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
 
-    // Common Constants
     auto getIntAttrOr = [&](StringRef name, int64_t defaultVal) -> int64_t {
       if (auto attr = op->getAttrOfType<IntegerAttr>(name))
         return attr.getInt();
@@ -261,25 +204,17 @@ public:
         rewriter.create<arith::ConstantIntOp>(loc, mvinQuantShift, 16);
 
     if (isMvin) {
-      // === DMA MVIN ===
-      // Dest: 0 for SPM (Space 2), 1 for ACC (Space 3)
       int64_t destFlag = (dstSpace == 3) ? 1 : 0;
       Value vDest = rewriter.create<arith::ConstantIntOp>(loc, destFlag, 8);
-
-      // Is Bias: Always 0 (Hardcoded as requested)
       Value vIsBias = vFalse;
 
       rewriter.create<DmaMvinOp>(loc, src, dst, vCol, vRow, vSramStride,
           vDramStride, vPrecision, vInputType, vDest, vIsBias, vMvinIsQuant,
           vMvinQuantZero, vMvinQuantScale, vMvinQuantShift);
     } else {
-      // === DMA MVOUT ===
-      // Dest: usually 0 for DRAM
       rewriter.create<DmaMvoutOp>(loc, dst, src, vCol, vRow, vSramStride,
           vDramStride, vPrecision, vInputType,
-          vZero8, // dest (ignored)
-          vFalse, // is_bias (ignored)
-          vZero32, vZero16, vZero16);
+          vZero8, vFalse, vZero32, vZero16, vZero16);
     }
 
     rewriter.eraseOp(op);

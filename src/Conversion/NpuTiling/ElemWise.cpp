@@ -216,13 +216,6 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
           scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialIteration);
 
       if (succeeded(status)) {
-        // 1. 标记 Tail (可选)
-        partialIteration->setAttr("npu.peeled_tail", rewriter.getUnitAttr());
-
-        // 2. 【关键修复】更新替换值
-        // 如果当前处理的是最外层循环 (index 0)，或者该循环的结果直接对应 Op
-        // 的结果 我们必须把 finalResults 更新为 Tail Loop 的结果 因为 Tail Loop
-        // 串在 Main Loop 后面，它才持有最终完整的数据
         if (i == 0) {
           finalResults = partialIteration->getResults();
         }
