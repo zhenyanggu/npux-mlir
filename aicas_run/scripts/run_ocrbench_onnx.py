@@ -24,18 +24,44 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_existing_path(model_dir: str, candidates: List[str], label: str) -> str:
+    tried: List[str] = []
+    for candidate in candidates:
+        path = os.path.abspath(os.path.join(model_dir, candidate))
+        tried.append(path)
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(f"{label} model not found in candidates: {tried}")
+
+
 def resolve_model_paths(model_dir: str, model_mode: str, quant_dir: str) -> Dict[str, str]:
     if model_mode == "fp16":
         return {
-            "vision": os.path.join(model_dir, "vision_encoder_fp16.onnx"),
-            "embed": os.path.join(model_dir, "embed_tokens_fp16.onnx"),
-            "decoder": os.path.join(model_dir, "decoder_model_merged_fp16.onnx"),
+            "vision": resolve_existing_path(
+                model_dir=model_dir,
+                candidates=["models/vision_encoder_fp16.onnx", "vision_encoder_fp16.onnx"],
+                label="vision",
+            ),
+            "embed": resolve_existing_path(
+                model_dir=model_dir,
+                candidates=["models/embed_tokens_fp16.onnx", "embed_tokens_fp16.onnx"],
+                label="embed",
+            ),
+            "decoder": resolve_existing_path(
+                model_dir=model_dir,
+                candidates=["models/decoder_model_merged_fp16.onnx", "decoder_model_merged_fp16.onnx"],
+                label="decoder",
+            ),
         }
     if not quant_dir:
         raise ValueError("--quant-dir is required for int8 mode.")
     return {
         "vision": os.path.join(quant_dir, "vision_encoder_int8_sym.onnx"),
-        "embed": os.path.join(model_dir, "embed_tokens_fp16.onnx"),
+        "embed": resolve_existing_path(
+            model_dir=model_dir,
+            candidates=["models/embed_tokens_fp16.onnx", "embed_tokens_fp16.onnx"],
+            label="embed",
+        ),
         "decoder": os.path.join(quant_dir, "decoder_model_merged_int8_sym.onnx"),
     }
 

@@ -38,6 +38,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def resolve_existing_path(model_dir: str, candidates: List[str], label: str) -> str:
+    tried: List[str] = []
+    for candidate in candidates:
+        path = os.path.abspath(os.path.join(model_dir, candidate))
+        tried.append(path)
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(f"{label} model not found in candidates: {tried}")
+
+
 def build_vision_reader(runner: SmolVLM2OnnxRunner, calib_records: List[dict], image_root: str) -> ListDataReader:
     items: List[Dict[str, np.ndarray]] = []
     for item in calib_records:
@@ -95,20 +105,30 @@ def main() -> None:
     image_root = os.path.dirname(args.calib_json)
 
     runner = SmolVLM2OnnxRunner(model_dir=args.model_dir)
+    vision_input = resolve_existing_path(
+        model_dir=args.model_dir,
+        candidates=["models/vision_encoder_fp16.onnx", "vision_encoder_fp16.onnx"],
+        label="vision",
+    )
+    decoder_input = resolve_existing_path(
+        model_dir=args.model_dir,
+        candidates=["models/decoder_model_merged_fp16.onnx", "decoder_model_merged_fp16.onnx"],
+        label="decoder",
+    )
 
     vision_out = os.path.join(args.out_dir, "vision_encoder_int8_sym.onnx")
     decoder_out = os.path.join(args.out_dir, "decoder_model_merged_int8_sym.onnx")
 
     print("quantizing vision encoder...")
     quantize_model(
-        model_input_path=os.path.join(args.model_dir, "vision_encoder_fp16.onnx"),
+        model_input_path=vision_input,
         model_output_path=vision_out,
         reader=build_vision_reader(runner=runner, calib_records=calib_records, image_root=image_root),
     )
 
     print("quantizing decoder...")
     quantize_model(
-        model_input_path=os.path.join(args.model_dir, "decoder_model_merged_fp16.onnx"),
+        model_input_path=decoder_input,
         model_output_path=decoder_out,
         reader=build_decoder_reader(runner=runner, calib_records=calib_records, image_root=image_root),
     )

@@ -181,67 +181,52 @@ struct ONNXGatherNDOpLowering : public OpConversionPattern<ONNXGatherNDOp> {
             reshapedDataAccessFct.emplace_back(index);
           }
 
-          if (indicesLastDim == dataRank - b) {
-            // When indices.shape[-1] is equal to (rank(data) - b) the
-            // `reshapedDataAccessFct` computed so far has the same number of
-            // indices as the rank of 'reshapedData'.
-            assert(static_cast<int64_t>(reshapedDataAccessFct.size()) ==
-                       reshapedDataRank &&
+          int64_t currentAccessRank =
+              static_cast<int64_t>(reshapedDataAccessFct.size());
+          int64_t sliceRank = reshapedDataRank - currentAccessRank;
+          assert(sliceRank >= 0 &&
+                 "Access function rank should not exceed reshapedData rank");
+
+          auto storeGatheredValue = [&](const KrnlBuilder &createKrnl,
+                                      const DimsExpr &accessFct) {
+            assert(static_cast<int64_t>(accessFct.size()) == reshapedDataRank &&
                    "Access function should have the same rank as reshapedData");
 
             if (emitPrintStmts)
-              printIndices("data indices", reshapedDataAccessFct, createKrnl);
+              printIndices("data indices", accessFct, createKrnl);
 
             // Gather value from the 'data' tensor and store it into
             // 'outputDataBuffer'.
-            Value val = createKrnl.loadIE(reshapedData, reshapedDataAccessFct);
+            Value val = createKrnl.loadIE(reshapedData, accessFct);
+
+            if (emitPrintStmts) {
+              createKrnl.printf("val = ", val);
+              createKrnl.printf("\n");
+            }
+
             Value storeIndexVal = createKrnl.load(storeIndex);
             createKrnl.store(val, outputDataBuffer, storeIndexVal);
 
             // Bump up the storeIndex.
             createKrnl.store(create.math.add(storeIndexVal, iOne), storeIndex);
+          };
+
+          if (sliceRank == 0) {
+            storeGatheredValue(createKrnl, reshapedDataAccessFct);
           } else {
-            assert((indicesLastDim < dataRank - b) &&
-                   "Expecting indices.shape[-1] to be smaller than "
-                   "rank(indices) - b");
-
-            // When indices.shape[-1] is less than (rank(data) - b) the
-            // `reshapedDataAccessFct` computed so far yields a slice which
-            // needs to be inserted into the output buffer.
-            Value zero = create.math.constantIndex(0);
-            IndexExpr reshapedDataLastDimExpr = dataDims[dataRank - 1];
-            Value last = reshapedDataLastDimExpr.getValue();
-            ValueRange innerLoopDef = create.krnl.defineLoops(1);
-            create.krnl.iterate(innerLoopDef, innerLoopDef, {zero}, {last},
+            // When indices.shape[-1] is less than (rank(data) - b), the
+            // current access function selects a slice. Iterate over every
+            // remaining slice dimension instead of assuming there is only one.
+            ValueRange innerLoopDef = create.krnl.defineLoops(sliceRank);
+            DimsExpr innerLbs(sliceRank, LitIE(0)), innerUbs;
+            for (int64_t i = currentAccessRank; i < reshapedDataRank; ++i)
+              innerUbs.emplace_back(newDataDims[i]);
+            createKrnl.iterateIE(innerLoopDef, innerLoopDef, innerLbs, innerUbs,
                 [&](const KrnlBuilder &createKrnl, ValueRange innerLoopInd) {
-                  IndexExpr ind = SymIE(innerLoopInd[0]);
-                  reshapedDataAccessFct.emplace_back(ind);
-                  assert(static_cast<int64_t>(reshapedDataAccessFct.size()) ==
-                             reshapedDataRank &&
-                         "Access function should have the same rank as "
-                         "reshapedData");
-
-                  if (emitPrintStmts)
-                    printIndices(
-                        "data indices", reshapedDataAccessFct, createKrnl);
-
-                  // Gather value from the 'data' tensor and store it into
-                  // 'outputDataBuffer'.
-                  Value val =
-                      createKrnl.loadIE(reshapedData, reshapedDataAccessFct);
-                  reshapedDataAccessFct.pop_back();
-
-                  if (emitPrintStmts) {
-                    createKrnl.printf("val = ", val);
-                    createKrnl.printf("\n");
-                  }
-
-                  Value storeIndexVal = createKrnl.load(storeIndex);
-                  createKrnl.store(val, outputDataBuffer, storeIndexVal);
-
-                  // Bump up the storeIndex.
-                  createKrnl.store(
-                      create.math.add(storeIndexVal, iOne), storeIndex);
+                  DimsExpr fullAccessFct = reshapedDataAccessFct;
+                  for (Value iv : innerLoopInd)
+                    fullAccessFct.emplace_back(DimIndexExpr(iv));
+                  storeGatheredValue(createKrnl, fullAccessFct);
                 });
           }
         });

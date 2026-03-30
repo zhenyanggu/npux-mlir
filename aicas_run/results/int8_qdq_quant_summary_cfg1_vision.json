@@ -1,0 +1,93 @@
+{
+  "generated_at": "2026-03-30 14:14:35",
+  "calib_json": "/share/home/guzhenyang/aicas_run/aicas_run/results/calib_520.json",
+  "image_root": "/share/home/guzhenyang/aicas_run/aicas_run/data",
+  "providers": {
+    "requested": [
+      "CPUExecutionProvider"
+    ],
+    "available": [
+      "CPUExecutionProvider"
+    ],
+    "selected": [
+      "CPUExecutionProvider"
+    ]
+  },
+  "asset_dir": "/share/home/guzhenyang/aicas_run/aicas_run",
+  "fp16_model_paths": {
+    "vision": "/share/home/guzhenyang/aicas_run/aicas_run/models/vision_encoder_fixed.onnx",
+    "embed": "/share/home/guzhenyang/aicas_run/aicas_run/models/embed_tokens_fp16.onnx",
+    "decoder": "/share/home/guzhenyang/aicas_run/aicas_run/models/decoder_model_merged_fp16_rewritten.onnx"
+  },
+  "source_coverage": {
+    "vision": {
+      "model_path": "/share/home/guzhenyang/aicas_run/aicas_run/models/vision_encoder_fixed.onnx",
+      "matmul_total": 97,
+      "matmul_const_b": 73,
+      "matmul_dynamic": 24,
+      "matmul_qdq_wrapped": 0,
+      "gemm_total": 0,
+      "gemm_qdq_wrapped": 0
+    },
+    "decoder": {
+      "model_path": "/share/home/guzhenyang/aicas_run/aicas_run/models/decoder_model_merged_fp16_rewritten.onnx",
+      "matmul_total": 289,
+      "matmul_const_b": 225,
+      "matmul_dynamic": 64,
+      "matmul_qdq_wrapped": 0,
+      "gemm_total": 0,
+      "gemm_qdq_wrapped": 0
+    },
+    "combined": {
+      "matmul_total": 386,
+      "matmul_const_b": 298,
+      "matmul_dynamic": 88
+    }
+  },
+  "quant_configs": [
+    {
+      "config": {
+        "config_id": "cfg1",
+        "name": "MinMax + exclude MatMul/Gemm output quant",
+        "calibration_method": "MinMax",
+        "percentile": null,
+        "exclude_output_quant_ops": [
+          "MatMul",
+          "Gemm"
+        ]
+      },
+      "output_dir": "/share/home/guzhenyang/aicas_run/aicas_run/results/int8_qdq_models/cfg1",
+      "model_paths": {
+        "vision": "/share/home/guzhenyang/aicas_run/aicas_run/results/int8_qdq_models/cfg1/vision_encoder_int8_qdq.onnx",
+        "decoder": "/share/home/guzhenyang/aicas_run/aicas_run/results/int8_qdq_models/cfg1/decoder_model_merged_int8_qdq.onnx",
+        "embed": "/share/home/guzhenyang/aicas_run/aicas_run/models/embed_tokens_fp16.onnx"
+      },
+      "coverage": {
+        "vision": {
+          "model_path": "/share/home/guzhenyang/aicas_run/aicas_run/results/int8_qdq_models/cfg1/vision_encoder_int8_qdq.onnx",
+          "matmul_total": 97,
+          "matmul_const_b": 0,
+          "matmul_dynamic": 97,
+          "matmul_qdq_wrapped": 97,
+          "gemm_total": 0,
+          "gemm_qdq_wrapped": 0
+        },
+        "decoder": {
+          "model_path": "/share/home/guzhenyang/aicas_run/aicas_run/results/int8_qdq_models/cfg1/decoder_model_merged_int8_qdq.onnx",
+          "matmul_total": 289,
+          "matmul_const_b": 225,
+          "matmul_dynamic": 64,
+          "matmul_qdq_wrapped": 0,
+          "gemm_total": 0,
+          "gemm_qdq_wrapped": 0,
+          "skipped": true
+        },
+        "combined": {
+          "matmul_target_total": 97,
+          "matmul_qdq_wrapped": 97,
+          "all_target_in_qdq_set": true
+        }
+      }
+    }
+  ]
+}

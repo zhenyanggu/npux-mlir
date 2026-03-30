@@ -200,9 +200,21 @@ class SmolVLM2OnnxRunner:
         self.session_options.enable_mem_pattern = False
         self.session_options.enable_mem_reuse = False
 
-        vision_model_path = vision_model_path or os.path.join(model_dir, "vision_encoder_fp16.onnx")
-        embed_model_path = embed_model_path or os.path.join(model_dir, "embed_tokens_fp16.onnx")
-        decoder_model_path = decoder_model_path or os.path.join(model_dir, "decoder_model_merged_fp16.onnx")
+        vision_model_path = self._resolve_default_model_path(
+            model_dir=model_dir,
+            explicit_path=vision_model_path,
+            filename="vision_encoder_fp16.onnx",
+        )
+        embed_model_path = self._resolve_default_model_path(
+            model_dir=model_dir,
+            explicit_path=embed_model_path,
+            filename="embed_tokens_fp16.onnx",
+        )
+        decoder_model_path = self._resolve_default_model_path(
+            model_dir=model_dir,
+            explicit_path=decoder_model_path,
+            filename="decoder_model_merged_fp16.onnx",
+        )
         self.sessions = SessionBundle(
             vision=ort.InferenceSession(
                 vision_model_path,
@@ -246,6 +258,26 @@ class SmolVLM2OnnxRunner:
         else:
             self.eos_token_ids = {int(eos_token_id)}
 
+    @staticmethod
+    def _resolve_default_model_path(
+        model_dir: str,
+        explicit_path: Optional[str],
+        filename: str,
+    ) -> str:
+        if explicit_path:
+            if os.path.isabs(explicit_path):
+                return explicit_path
+            return os.path.join(model_dir, explicit_path)
+
+        candidates = [
+            os.path.join(model_dir, "models", filename),
+            os.path.join(model_dir, filename),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return candidates[0]
+
     def prepare_inputs(self, image_path: str, question: str) -> Dict[str, np.ndarray]:
         image = Image.open(image_path).convert("RGB")
         messages = build_messages(image_path=image_path, question=question)
@@ -254,19 +286,33 @@ class SmolVLM2OnnxRunner:
                 messages,
                 add_generation_prompt=True,
                 tokenize=True,
-                return_dict=True,
-                return_tensors="np",
+                processor_kwargs={
+                    "return_dict": True,
+                    "return_tensors": "np",
+                },
             )
             outputs = processor_outputs_to_numpy(batch)
         except Exception:
-            batch = self.processor.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                tokenize=True,
-                return_dict=True,
-                return_tensors="pt",
-            )
-            outputs = processor_outputs_to_numpy(batch)
+            try:
+                batch = self.processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    processor_kwargs={
+                        "return_dict": True,
+                        "return_tensors": "pt",
+                    },
+                )
+                outputs = processor_outputs_to_numpy(batch)
+            except Exception:
+                batch = self.processor.apply_chat_template(
+                    messages,
+                    add_generation_prompt=True,
+                    tokenize=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                )
+                outputs = processor_outputs_to_numpy(batch)
         finally:
             image.close()
 
