@@ -11,6 +11,14 @@ add_onnx_mlir_library(NpuTiling
     RestoreAllocSpace.cpp
     RemoveRedundantDma.cpp
 
+    CostModel/NpuCostModel.cpp
+    CostModel/Conv.cpp
+    CostModel/Gemm.cpp
+    CostModel/Gelu.cpp
+    CostModel/MatAdd.cpp
+    CostModel/Layout.cpp
+    CostModel/MaxPool.cpp
+
 
     LINK_LIBS PUBLIC
     # === 基础 MLIR 库 ===

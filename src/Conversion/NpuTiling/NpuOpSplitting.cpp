@@ -3,11 +3,8 @@
 // Implements tiling for Conv-related DMAs and Conv computation.
 //=============================================================================
 
-#include "mlir/Dialect/Affine/IR/AffineOps.h"
-#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
-#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
@@ -15,10 +12,10 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 #include "src/Pass/Passes.hpp"
 #include "llvm/ADT/StringRef.h"
 #include <algorithm>
-#include <limits>
 
 using namespace mlir;
 
@@ -43,44 +40,6 @@ static void tagInnerComputeOp(
     }
   });
 }
-static LogicalResult peelForLoopLastIteration(
-    RewriterBase &b, scf::ForOp forOp, scf::ForOp &lastIteration) {
-  RewriterBase::InsertionGuard guard(b);
-  auto lbInt = getConstantIntValue(forOp.getLowerBound());
-  auto ubInt = getConstantIntValue(forOp.getUpperBound());
-  auto stepInt = getConstantIntValue(forOp.getStep());
-
-  if (lbInt && ubInt && stepInt &&
-      std::ceil((double)(*ubInt - *lbInt) / *stepInt) <= 1) {
-    return failure();
-  }
-
-  AffineExpr ubSymbol, stepSymbol;
-  bindSymbols(b.getContext(), ubSymbol, stepSymbol);
-  auto splitMap = AffineMap::get(0, 2, {ubSymbol - stepSymbol});
-  b.setInsertionPoint(forOp);
-  auto loc = forOp.getLoc();
-  Value splitBound = b.createOrFold<affine::AffineApplyOp>(
-      loc, splitMap, ValueRange{forOp.getUpperBound(), forOp.getStep()});
-
-  IRMapping map;
-  map.map(forOp.getLowerBound(), splitBound);
-  b.setInsertionPointAfter(forOp);
-  lastIteration = cast<scf::ForOp>(b.clone(*forOp.getOperation(), map));
-
-  b.modifyOpInPlace(
-      forOp, [&]() { forOp.getUpperBoundMutable().assign(splitBound); });
-
-  if (forOp.getNumResults() > 0) {
-    b.modifyOpInPlace(lastIteration, [&]() {
-      lastIteration.getInitArgsMutable().assign(forOp.getResults());
-    });
-  }
-  b.replaceOpUsesWithIf(forOp, lastIteration->getResults(),
-      [&](OpOperand &use) { return use.getOwner() != lastIteration; });
-
-  return success();
-}
 
 //=============================================================================
 // Pattern 1: NpuDmaTilingPattern
@@ -90,157 +49,146 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
   using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
 
   // ============================================================================
-// 核心分析函数：analyzeAndTileDmaOp
-// 1. 推导 Slice 链条，记录历史切分维度
-// 2. 检测 SRAM Stride 溢出 (16-bit 限制)
-// 3. 拦截从未被切分但总大小超限的巨型 Tensor
-// 4. 返回精确的 Tile Sizes 和 连续块起始维度 (colDimIdx)
-// ============================================================================
-static SmallVector<int64_t> analyzeAndTileDmaOp(
-    linalg::GenericOp op, StringRef libName, int &colDimIdx) {
-  
-  // 1. 尝试提取 SliceOp (不再强制要求必须有)
-  tensor::ExtractSliceOp finalSliceOp = nullptr;
-  if (libName == "npu_dma_mvin") {
-    auto input = op.getInputs()[0];
-    finalSliceOp = input.getDefiningOp<tensor::ExtractSliceOp>();
-  } else if (libName == "npu_dma_mvout") {
-    auto output = op.getOutputs()[0];
-    finalSliceOp = output.getDefiningOp<tensor::ExtractSliceOp>();
-  }
+  // 核心分析函数：analyzeAndTileDmaOp
+  // 1. 推导 Slice 链条，记录历史切分维度
+  // 2. 检测 SRAM Stride 溢出 (16-bit 限制)
+  // 3. 拦截从未被切分但总大小超限的巨型 Tensor
+  // 4. 返回精确的 Tile Sizes 和 连续块起始维度 (colDimIdx)
+  // ============================================================================
+  static SmallVector<int64_t> analyzeAndTileDmaOp(
+      linalg::GenericOp op, StringRef libName, int &colDimIdx) {
 
-  auto inputType = cast<RankedTensorType>(op.getInputs()[0].getType());
-  ArrayRef<int64_t> currentShape = inputType.getShape();
-  int rank = currentShape.size();
+    // 1. 尝试提取 SliceOp (不再强制要求必须有)
+    tensor::ExtractSliceOp finalSliceOp = nullptr;
+    if (libName == "npu_dma_mvin") {
+      auto input = op.getInputs()[0];
+      finalSliceOp = input.getDefiningOp<tensor::ExtractSliceOp>();
+    } else if (libName == "npu_dma_mvout") {
+      auto output = op.getOutputs()[0];
+      finalSliceOp = output.getDefiningOp<tensor::ExtractSliceOp>();
+    }
 
-  // 2. 追溯 ExtractSlice 链条 (如果没有 SliceOp，isSplit 默认全 false)
-  SmallVector<bool> isSplit(rank, false);
-  if (finalSliceOp) {
-    tensor::ExtractSliceOp currentSlice = finalSliceOp;
-    while (currentSlice) {
-      auto sourceType = cast<RankedTensorType>(currentSlice.getSourceType());
-      int currentRank = sourceType.getRank();
+    auto inputType = cast<RankedTensorType>(op.getInputs()[0].getType());
+    ArrayRef<int64_t> currentShape = inputType.getShape();
+    int rank = currentShape.size();
 
-      for (int i = 0; i < currentRank && i < rank; ++i) {
-        if (isSplit[i]) continue;
+    // 2. 追溯 ExtractSlice 链条 (如果没有 SliceOp，isSplit 默认全 false)
+    SmallVector<bool> isSplit(rank, false);
+    if (finalSliceOp) {
+      tensor::ExtractSliceOp currentSlice = finalSliceOp;
+      while (currentSlice) {
+        auto sourceType = cast<RankedTensorType>(currentSlice.getSourceType());
+        int currentRank = sourceType.getRank();
 
-        bool split = false;
-        if (currentSlice.isDynamicSize(i)) {
-          split = true;
-        } else {
-          int64_t sliceSize = currentSlice.getStaticSize(i);
-          int64_t sSize = sourceType.getShape()[i];
-          if (sSize != ShapedType::kDynamic && sliceSize != sSize) {
+        for (int i = 0; i < currentRank && i < rank; ++i) {
+          if (isSplit[i])
+            continue;
+
+          bool split = false;
+          if (currentSlice.isDynamicSize(i)) {
             split = true;
-          }
-        }
-
-        if (!split) {
-          if (currentSlice.isDynamicOffset(i)) split = true;
-          else if (currentSlice.getStaticOffset(i) != 0) split = true;
-        }
-
-        if (split) isSplit[i] = true;
-      }
-      currentSlice = currentSlice.getSource().getDefiningOp<tensor::ExtractSliceOp>();
-    }
-  }
-
-  // 3. 寻找 idx1, idx2, idx3
-  int splitCount = 0;
-  int idx1 = -1, idx2 = -1, idx3 = -1;
-  for (int i = rank - 1; i >= 0; --i) {
-    if (isSplit[i]) {
-      splitCount++;
-      if (splitCount == 1) idx1 = i;
-      if (splitCount == 2) idx2 = i;
-      if (splitCount == 3) idx3 = i;
-    }
-  }
-
-  SmallVector<int64_t> tileSizes(rank, 0);
-
-  // 规则 1：寻三打平
-  if (idx3 != -1) {
-    for (int i = idx3; i >= 0; --i) tileSizes[i] = 1;
-  }
-
-  bool strideOverflow = false;
-
-  // -----------------------------------------------------------
-  // 规则 2 & 3：硬件溢出处理 (分有无上游切分两种情况)
-  // -----------------------------------------------------------
-  const int64_t LIMIT = 65535;
-
-  if (idx1 != -1) {
-    // 【情况 A】有上游切分：走 SRAM Stride 检测逻辑
-    int64_t trailingElements = 1;
-    bool isStatic = true;
-    for (int i = idx1 + 1; i < rank; ++i) {
-      if (currentShape[i] == ShapedType::kDynamic) {
-        isStatic = false; break;
-      }
-      trailingElements *= currentShape[i];
-    }
-
-    if (isStatic && currentShape[idx1] != ShapedType::kDynamic) {
-      int64_t sramStride = currentShape[idx1] * trailingElements;
-
-      if (sramStride > LIMIT) {
-        if (idx2 != -1) {
-          strideOverflow = true;
-          idx1++; // 降维移位
-          for (int i = idx2; i >= 0; --i) tileSizes[i] = 1;
-        } else {
-          // 只有 idx1 被切分，且超出了 Col 限制
-          strideOverflow = true;
-          tileSizes[idx1] = std::max<int64_t>(1, LIMIT / trailingElements);
-        }
-      }
-    }
-  } else {
-    // 【情况 B】没有任何切分 (完整 Tensor)：检查总容量是否超限
-    int64_t totalSize = 1;
-    bool isStatic = true;
-    for (int i = 0; i < rank; ++i) {
-      if (currentShape[i] == ShapedType::kDynamic) {
-        isStatic = false; break;
-      }
-      totalSize *= currentShape[i];
-    }
-
-    if (isStatic && totalSize > LIMIT) {
-      strideOverflow = true;
-      // 从右向左找，找到第一个导致累乘超过 65535 的维度
-      int64_t acc = 1;
-      for (int i = rank - 1; i >= 0; --i) {
-        if (acc * currentShape[i] > LIMIT) {
-          idx1 = i;
-          if(idx1 == rank - 1) {
-            tileSizes[i] = LIMIT;
           } else {
-            idx1++;
+            int64_t sliceSize = currentSlice.getStaticSize(i);
+            int64_t sSize = sourceType.getShape()[i];
+            if (sSize != ShapedType::kDynamic && sliceSize != sSize) {
+              split = true;
+            }
           }
+
+          if (!split) {
+            if (currentSlice.isDynamicOffset(i))
+              split = true;
+            else if (currentSlice.getStaticOffset(i) != 0)
+              split = true;
+          }
+
+          if (split)
+            isSplit[i] = true;
+        }
+        currentSlice =
+            currentSlice.getSource().getDefiningOp<tensor::ExtractSliceOp>();
+      }
+    }
+
+    int splitCount = 0;
+    int idx1 = -1, idx2 = -1;
+    for (int i = rank - 1; i >= 0; --i) {
+      if (isSplit[i]) {
+        splitCount++;
+        if (splitCount == 1)
+          idx1 = i;
+        if (splitCount == 2) {
+          idx2 = i;
           break;
         }
-        acc *= currentShape[i];
       }
     }
-  }
 
-  // 4. 打印信息与传出正确坐标
-  llvm::errs() << "[Tiling] DMA " << libName << " Split Size: [";
-  for (size_t i = 0; i < tileSizes.size(); ++i) {
-    llvm::errs() << tileSizes[i] << (i == tileSizes.size() - 1 ? "" : ", ");
-  }
-  llvm::errs() << "]\n";
+    SmallVector<int64_t> tileSizes(rank, 0);
 
-  if (strideOverflow) {
-    llvm::errs() << "  -> Warning: SRAM Stride Overflow (> 65535)! Shifting Col dim inward.\n";
+    const int64_t LIMIT = 65535;
+
+    if (idx1 != -1) {
+      // 【情况 A】有上游切分：走 SRAM Stride 检测逻辑
+      int64_t trailingElements = 1;
+      bool isStatic = true;
+      for (int i = idx1 + 1; i < rank; ++i) {
+        if (currentShape[i] == ShapedType::kDynamic) {
+          isStatic = false;
+          break;
+        }
+        trailingElements *= currentShape[i];
+      }
+
+      if (isStatic && currentShape[idx1] != ShapedType::kDynamic) {
+        int64_t sramStride = currentShape[idx1] * trailingElements;
+
+        if (sramStride > LIMIT) {
+          idx2 = idx1;
+          idx1++;
+        }
+      }
+    } else {
+      // 【情况 B】没有任何切分 (完整 Tensor)：检查总容量是否超限
+      int64_t totalSize = 1;
+      bool isStatic = true;
+      for (int i = 0; i < rank; ++i) {
+        if (currentShape[i] == ShapedType::kDynamic) {
+          isStatic = false;
+          break;
+        }
+        totalSize *= currentShape[i];
+      }
+
+      if (isStatic && totalSize > LIMIT) {
+        int64_t acc = 1;
+        for (int i = rank - 1; i >= 0; --i) {
+          if (acc * currentShape[i] > LIMIT) {
+            idx1 = i;
+            if (idx1 == rank - 1) {
+              tileSizes[i] = LIMIT;
+            } else {
+              idx1++;
+            }
+            break;
+          }
+          acc *= currentShape[i];
+        }
+      }
+    }
+
+    for(int i = idx2-1; i>=0; --i) {
+      tileSizes[i] = 1;
+    }
+    // 4. 打印信息与传出正确坐标
+    llvm::errs() << "[Tiling] DMA " << libName << " Split Size: [";
+    for (size_t i = 0; i < tileSizes.size(); ++i) {
+      llvm::errs() << tileSizes[i] << (i == tileSizes.size() - 1 ? "" : ", ");
+    }
+    llvm::errs() << "]"<< "\n";
+    colDimIdx = idx1;
+    return tileSizes;
   }
-  colDimIdx = idx1;
-  return tileSizes;
-}
 
   LogicalResult matchAndRewrite(
       linalg::GenericOp op, PatternRewriter &rewriter) const override {
@@ -259,7 +207,8 @@ static SmallVector<int64_t> analyzeAndTileDmaOp(
 
     // 2. 将核心分析过程全部交给辅助函数
     int colDimIdx = -1;
-    SmallVector<int64_t> splitSize = analyzeAndTileDmaOp(op, libName, colDimIdx);
+    SmallVector<int64_t> splitSize =
+        analyzeAndTileDmaOp(op, libName, colDimIdx);
 
     op->setAttr("npu.dma_col_dim", rewriter.getI32IntegerAttr(colDimIdx));
 

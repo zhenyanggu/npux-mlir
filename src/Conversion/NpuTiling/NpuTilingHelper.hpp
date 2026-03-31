@@ -4,9 +4,12 @@
 //=======================================================
 
 
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "src/Compiler/NpuConfig.hpp"
+
+mlir::LogicalResult peelForLoopLastIteration(
+    mlir::RewriterBase &b, mlir::scf::ForOp forOp, mlir::scf::ForOp &lastIteration);
 
 namespace npux{
 void populateNpuTilingPatterns(

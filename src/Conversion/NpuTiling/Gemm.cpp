@@ -15,6 +15,7 @@
 #include "mlir/Pass/Pass.h"
 
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
+#include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
 #include <cmath> // for ceil
 
 using namespace mlir;
@@ -57,123 +58,7 @@ static void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) {
     target->setAttr("npu.loop_dim", attr);
 }
 
-// -----------------------------------------------------------------------------
-// Helper: Peel Last Iteration
-// -----------------------------------------------------------------------------
-static LogicalResult peelForLoopLastIteration(
-    RewriterBase &b, scf::ForOp forOp, scf::ForOp &lastIteration) {
-  RewriterBase::InsertionGuard guard(b);
-
-  auto lbInt = getConstantIntValue(forOp.getLowerBound());
-  auto ubInt = getConstantIntValue(forOp.getUpperBound());
-  auto stepInt = getConstantIntValue(forOp.getStep());
-
-  if (lbInt && ubInt && stepInt &&
-      std::ceil((double)(*ubInt - *lbInt) / *stepInt) <= 1) {
-    return failure();
-  }
-
-  AffineExpr ubSymbol, stepSymbol;
-  bindSymbols(b.getContext(), ubSymbol, stepSymbol);
-
-  auto splitMap = AffineMap::get(0, 2, {ubSymbol - stepSymbol});
-  b.setInsertionPoint(forOp);
-  auto loc = forOp.getLoc();
-  Value splitBound = b.createOrFold<affine::AffineApplyOp>(
-      loc, splitMap, ValueRange{forOp.getUpperBound(), forOp.getStep()});
-
-  IRMapping map;
-  map.map(forOp.getLowerBound(), splitBound);
-
-  b.setInsertionPointAfter(forOp);
-  lastIteration = cast<scf::ForOp>(b.clone(*forOp.getOperation(), map));
-
-  b.modifyOpInPlace(
-      forOp, [&]() { forOp.getUpperBoundMutable().assign(splitBound); });
-
-  if (forOp.getNumResults() > 0) {
-    b.modifyOpInPlace(lastIteration, [&]() {
-      lastIteration.getInitArgsMutable().assign(forOp.getResults());
-    });
-  }
-
-  b.replaceOpUsesWithIf(forOp, lastIteration->getResults(),
-      [&](OpOperand &use) { return use.getOwner() != lastIteration; });
-
-  return success();
-}
-
-static SmallVector<int64_t, 3> calculateAutoGemmTile(
-    int64_t M, int64_t N, int64_t K, int64_t spmSize, int64_t accSize) {
-
-  const int64_t arraySizeH = 32;
-  const int64_t arraySizeW = 32;
-  const int64_t inputDtypeBytes = 1; 
-  const int64_t outputDtypeBytes = 1;
-  const int64_t accDtypeBytes = 4;   
-
-  // 核心修改 1：支持小于 32 的对齐函数
-  auto get_valid_tile_size = [&](int64_t val) -> int64_t {
-    if (val < 32) return val;
-    return (val / 32) * 32;
-  };
-
-  int64_t m_aligned = get_valid_tile_size(M);
-  int64_t n_aligned = get_valid_tile_size(N);
-
-  // ==========================================
-  // Step 1: 最大化 Tk
-  // ==========================================
-  // 核心修改 2：计算 Tk 物理上限时，使用真实的最小需求边界
-  int64_t min_tm = std::min<int64_t>(M, arraySizeH);
-  int64_t min_tn = std::min<int64_t>(N, arraySizeW);
-  int64_t base_out_spm = min_tm * min_tn * outputDtypeBytes;
-  
-  int64_t max_tk_spm = 1;
-  if (spmSize > base_out_spm) {
-    max_tk_spm = (spmSize - base_out_spm) / ((min_tm + min_tn) * inputDtypeBytes);
-  }
-  int64_t t_k = std::max<int64_t>(1, std::min(K, max_tk_spm));
-
-  // ==========================================
-  // Step 2: 在固定 Tk 的前提下，最大化 Tm
-  // ==========================================
-  int64_t max_tm_acc = accSize / (min_tn * accDtypeBytes);
-  
-  // 核心修改 3：SPM 约束计算时也要用更新后的 min_tn
-  int64_t max_tm_spm = m_aligned; // 默认最大能取到自身 aligned 后的值
-  int64_t spm_rem_for_m = spmSize - min_tn * t_k * inputDtypeBytes; 
-  if (spm_rem_for_m > 0) {
-    max_tm_spm = spm_rem_for_m / (min_tn * outputDtypeBytes + t_k * inputDtypeBytes);
-  }
-  
-  int64_t t_m = std::min({m_aligned, max_tm_acc, max_tm_spm});
-  t_m = get_valid_tile_size(t_m);
-
-  // ==========================================
-  // Step 3: 在固定 Tk 和 Tm 的前提下，计算剩余的 Tn
-  // ==========================================
-  int64_t max_tn_acc = accSize / (t_m * accDtypeBytes);
-  
-  int64_t max_tn_spm = n_aligned;
-  int64_t spm_rem_for_n = spmSize - t_k * t_m * inputDtypeBytes;
-  if (spm_rem_for_n > 0) {
-    max_tn_spm = spm_rem_for_n / (t_m * outputDtypeBytes + t_k * inputDtypeBytes);
-  }
-
-  int64_t t_n = std::min({n_aligned, max_tn_acc, max_tn_spm});
-  t_n = get_valid_tile_size(t_n);
-
-  return {t_m, t_n, t_k};
-}
-
 SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
-  auto &config = npux::NPUConfig::getInstance();
-
-  // 1. 获取手动配置 (这里假设用户的配置还是按 Tm, Tn, Tk 填写的)
-  std::vector<int64_t> manualSizes = config.getMatMulTileSize();
-
-  // 2. 获取 Loop Ranges
   SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
   int64_t rank = loopRanges.size(); // 2D Gemm 为 3，3D Batched Gemm 为 4
 
@@ -181,50 +66,37 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
     return {};
   }
 
-  // 根据新的迭代器顺序 [Batch, N, M, K] 或 [N, M, K] 提取维度
-  int64_t K = loopRanges[rank - 1];
-  int64_t M = loopRanges[rank - 2];
-  int64_t N = loopRanges[rank - 3];
-  int64_t B = (rank == 4) ? loopRanges[0] : 1; // 如果是 3D 的，提取 Batch
-
-  SmallVector<int64_t, 3> computedSizes;
-  bool isManual = false;
-
+  auto &config = npux::NPUConfig::getInstance();
+  
+  // 1. 优先级最高：CLI/JSON 传入的强制手工配置
+  std::vector<int64_t> manualSizes = config.getMatMulTileSize();
   if (!manualSizes.empty() && manualSizes.size() >= 3) {
-    // 第一阶段仅按容量分块，硬件 2048 限制在第二阶段 (npu-op-splitting) 处理。
-    computedSizes = {manualSizes[0], manualSizes[1], manualSizes[2]};
-    isManual = true;
-  } else {
-    int64_t spmSize = config.getSpmSize();
-    int64_t accSize = config.getAccSize();
-    // 自动分块逻辑依然基于 M, N, K 计算 Tm, Tn, Tk，无需改变
-    computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize);
+    SmallVector<int64_t> finalTileSizes(rank, 0);
+    int64_t tm = manualSizes[0];
+    int64_t tn = manualSizes[1];
+    int64_t tk = manualSizes[2];
+
+    if (rank == 4) {
+      finalTileSizes[0] = 1;  // Batch 永远按 1 分块
+      finalTileSizes[1] = tn; // N
+      finalTileSizes[2] = tm; // M
+      finalTileSizes[3] = tk; // K
+    } else {
+      finalTileSizes[0] = tn; // N
+      finalTileSizes[1] = tm; // M
+      finalTileSizes[2] = tk; // K
+    }
+
+    llvm::errs() << "[Tiling] Gemm (Manual): Tile=[Tm:" << tm << ", Tn:" << tn 
+                 << ", Tk:" << tk << "]\n";
+    return finalTileSizes;
   }
 
-  std::string msg;
-  llvm::raw_string_ostream os(msg);
-  os << "Tiling [Gemm] (" << (isManual ? "Manual" : "Auto") << "): "
-     << "Problem=[B:" << B << ", N:" << N << ", M:" << M << ", K:" << K << "] "
-     << "-> Tile=[Tm:" << computedSizes[0] << ", Tn:" << computedSizes[1]
-     << ", Tk:" << computedSizes[2] << "]\n";
-  llvm::errs() << os.str();
-
-  // 3. 构建最终的 Tile Sizes 数组
-  SmallVector<int64_t> finalTileSizes(rank, 0);
-
-  // 按照 Linalg Generic Iterator 的顺序填充分块大小
-  if (rank == 4) {
-    finalTileSizes[0] = 1;                // Batch 永远按 1 分块
-    finalTileSizes[1] = computedSizes[1]; // N -> tn
-    finalTileSizes[2] = computedSizes[0]; // M -> tm
-    finalTileSizes[3] = computedSizes[2]; // K -> tk
-  } else {
-    finalTileSizes[0] = computedSizes[1]; // N -> tn
-    finalTileSizes[1] = computedSizes[0]; // M -> tm
-    finalTileSizes[2] = computedSizes[2]; // K -> tk
-  }
-
-  return finalTileSizes;
+  // 2. 使用内置 Cost-Model 动态计算
+  npux::HardwareConfig hwConfig;
+  npux::NPUCostModel costModel(hwConfig);
+  SmallVector<int64_t> optimalSizes = costModel.getOptimalTileSizes(op);
+  return optimalSizes;
 }
 
 // -----------------------------------------------------------------------------

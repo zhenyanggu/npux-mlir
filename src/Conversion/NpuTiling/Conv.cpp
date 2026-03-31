@@ -12,6 +12,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 #include "src/Pass/Passes.hpp"
+#include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
 #include <cmath> // for ceil
 
 using namespace mlir;
@@ -54,58 +55,6 @@ static void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) {
     target->setAttr("npu.loop_dim", attr);
 }
 
-static LogicalResult peelForLoopLastIteration(
-    RewriterBase &b, scf::ForOp forOp, scf::ForOp &lastIteration) {
-  RewriterBase::InsertionGuard guard(b);
-  auto lbInt = getConstantIntValue(forOp.getLowerBound());
-  auto ubInt = getConstantIntValue(forOp.getUpperBound());
-  auto stepInt = getConstantIntValue(forOp.getStep());
-
-  if (lbInt && ubInt && stepInt &&
-      std::ceil((double)(*ubInt - *lbInt) / *stepInt) <= 1) {
-    return failure();
-  }
-
-  AffineExpr ubSymbol, stepSymbol;
-  bindSymbols(b.getContext(), ubSymbol, stepSymbol);
-  auto splitMap = AffineMap::get(0, 2, {ubSymbol - stepSymbol});
-  b.setInsertionPoint(forOp);
-  auto loc = forOp.getLoc();
-  Value splitBound = b.createOrFold<affine::AffineApplyOp>(
-      loc, splitMap, ValueRange{forOp.getUpperBound(), forOp.getStep()});
-
-  IRMapping map;
-  map.map(forOp.getLowerBound(), splitBound);
-  b.setInsertionPointAfter(forOp);
-  lastIteration = cast<scf::ForOp>(b.clone(*forOp.getOperation(), map));
-
-  b.modifyOpInPlace(
-      forOp, [&]() { forOp.getUpperBoundMutable().assign(splitBound); });
-
-  if (forOp.getNumResults() > 0) {
-    b.modifyOpInPlace(lastIteration, [&]() {
-      lastIteration.getInitArgsMutable().assign(forOp.getResults());
-    });
-  }
-  b.replaceOpUsesWithIf(forOp, lastIteration->getResults(),
-      [&](OpOperand &use) { return use.getOwner() != lastIteration; });
-
-  return success();
-}
-
-
-static std::vector<int64_t> getDseAttrValues(linalg::GenericOp op) {
-  auto dseAttr = op->getAttrOfType<ArrayAttr>("npu.dse_tiling");
-  if (!dseAttr || dseAttr.size() != 4) {
-    return {};
-  }
-  std::vector<int64_t> values;
-  for (auto val : dseAttr) {
-    values.push_back(cast<IntegerAttr>(val).getInt());
-  }
-  return values;
-}
-
 SmallVector<int64_t> getConvTileSizes(linalg::GenericOp op) {
   unsigned rank = 0;
   if (!op.getOutputs().empty()) {
@@ -116,35 +65,35 @@ SmallVector<int64_t> getConvTileSizes(linalg::GenericOp op) {
   // Conv 在 NCHWc32 下通常是 5 维
   if (rank < 5) return {};
 
-  SmallVector<int64_t> sizes(rank, 0);
   auto &config = npux::NPUConfig::getInstance();
   
-  // 1. 优先级：CLI/JSON 配置 > IR 属性 (DSE)
-  std::vector<int64_t> configSizes = config.getConvTileSize();
-  if (configSizes.empty()) {
-    configSizes = getDseAttrValues(op);
-  }
-
-  // 2. 维度映射逻辑
-  if (configSizes.size() >= 4) {
-    int64_t t_oh = configSizes[0];
-    int64_t t_ow = configSizes[1];
-    int64_t t_ic = configSizes[2];
-    int64_t t_oc = configSizes[3];
+  // 1. 优先级最高：CLI/JSON 传入的强制手工配置
+  std::vector<int64_t> manualSizes = config.getConvTileSize();
+  if (!manualSizes.empty() && manualSizes.size() >= 4) {
+    SmallVector<int64_t> sizes(rank, 0);
+    int64_t t_oh = manualSizes[0];
+    int64_t t_ow = manualSizes[1];
+    int64_t t_ic = manualSizes[2];
+    int64_t t_oc = manualSizes[3];
 
     // 映射到 NCHWc32: [N, OC_outer, OH, OW, IC_outer]
-    sizes[0] = 1;                                 // N 维度不分块
-    sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1;     // OC (对齐 32)
-    sizes[2] = t_oh;                              // OH
-    sizes[3] = t_ow;                              // OW
-    sizes[4] = (t_ic > 32) ? (t_ic / 32) : 1;     // IC (对齐 32)
+    sizes[0] = 1;                                 
+    sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1;     
+    sizes[2] = t_oh;                              
+    sizes[3] = t_ow;                              
+    sizes[4] = (t_ic > 32) ? (t_ic / 32) : 1;     
 
-    // 日志记录
-    llvm::errs() << "[Tiling] Conv: Tile=[OH:" << t_oh << ", OW:" << t_ow 
+    llvm::errs() << "[Tiling] Conv (Manual): Tile=[OH:" << t_oh << ", OW:" << t_ow 
                  << ", IC_blk:" << t_ic << ", OC_blk:" << t_oc << "]\n";
+    return sizes;
   }
 
-  return sizes;
+  // 2. 使用内置 Cost-Model 动态计算
+  npux::HardwareConfig hwConfig;
+
+  npux::NPUCostModel costModel(hwConfig);
+  SmallVector<int64_t> optimalSizes = costModel.getOptimalTileSizes(op);
+  return optimalSizes;
 }
 
 struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
