@@ -164,8 +164,10 @@ public:
       return failure();
     }
     
-    int64_t sramStrideVal = sramStrides[splitIdx - 1];
-    
+    int64_t sramStrideVal = cols; // 默认值
+    if (splitIdx > 0 && (splitIdx - 1) < (int64_t)sramStrides.size()) {
+      sramStrideVal = sramStrides[splitIdx - 1];
+    }
     
     Value vSramStride =
         rewriter.create<arith::ConstantIntOp>(loc, sramStrideVal, 16);
