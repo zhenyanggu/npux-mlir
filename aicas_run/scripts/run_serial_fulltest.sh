@@ -3,13 +3,18 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 AICAS_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-PYTHON_BIN="${PYTHON_BIN:-python}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 PROVIDERS="${PROVIDERS:-CPUExecutionProvider}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-100}"
 SEED="${SEED:-20260329}"
 CALIB_PROGRESS_EVERY="${CALIB_PROGRESS_EVERY:-10}"
 RESUME_FLAG="${RESUME_FLAG:---resume}"
-CONFIGS_TEXT="${CONFIGS_TEXT:-cfg1,cfg2,cfg3,cfg4}"
+CONFIGS_TEXT="${CONFIGS_TEXT:-cfg1}"
+MODEL_DIR="${MODEL_DIR:-models}"
+ASSET_DIR="${ASSET_DIR:-.}"
+QUANT_SOURCE_VISION_MODEL="${QUANT_SOURCE_VISION_MODEL:-vision_encoder.onnx}"
+QUANT_SOURCE_EMBED_MODEL="${QUANT_SOURCE_EMBED_MODEL:-embed_tokens.onnx}"
+QUANT_SOURCE_DECODER_MODEL="${QUANT_SOURCE_DECODER_MODEL:-decoder_model_merged.onnx}"
 
 run_py() {
   echo
@@ -17,8 +22,29 @@ run_py() {
   "${PYTHON_BIN}" "$@"
 }
 
+check_python() {
+  if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+    echo "[error] python executable not found: ${PYTHON_BIN}" >&2
+    exit 1
+  fi
+
+  if ! "${PYTHON_BIN}" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 8) else 1)
+PY
+  then
+    echo "[error] ${PYTHON_BIN} must be Python >= 3.8" >&2
+    "${PYTHON_BIN}" --version >&2 || true
+    echo "[hint] try: PYTHON_BIN=python3 bash aicas_run/scripts/run_serial_fulltest.sh" >&2
+    exit 1
+  fi
+
+  echo "[python] $(${PYTHON_BIN} --version 2>&1)"
+}
+
 cd "${AICAS_ROOT}"
 mkdir -p results/int8_qdq_models results/int8_qdq_eval
+check_python
 
 IFS=',' read -r -a CONFIGS <<< "${CONFIGS_TEXT}"
 
@@ -37,8 +63,11 @@ for cfg in "${CONFIGS[@]}"; do
   run_py scripts/ort_int8_qdq_pipeline.py quantize \
     --calib-json results/calib_520.json \
     --image-root data \
-    --model-dir models \
-    --asset-dir . \
+    --model-dir "${MODEL_DIR}" \
+    --asset-dir "${ASSET_DIR}" \
+    --quant-source-vision-model "${QUANT_SOURCE_VISION_MODEL}" \
+    --quant-source-embed-model "${QUANT_SOURCE_EMBED_MODEL}" \
+    --quant-source-decoder-model "${QUANT_SOURCE_DECODER_MODEL}" \
     --quant-out-dir results/int8_qdq_models \
     --quant-summary-json "results/int8_qdq_quant_summary_${cfg}_vision.json" \
     --providers "${PROVIDERS}" \
@@ -50,8 +79,11 @@ for cfg in "${CONFIGS[@]}"; do
   run_py scripts/ort_int8_qdq_pipeline.py quantize \
     --calib-json results/calib_520.json \
     --image-root data \
-    --model-dir models \
-    --asset-dir . \
+    --model-dir "${MODEL_DIR}" \
+    --asset-dir "${ASSET_DIR}" \
+    --quant-source-vision-model "${QUANT_SOURCE_VISION_MODEL}" \
+    --quant-source-embed-model "${QUANT_SOURCE_EMBED_MODEL}" \
+    --quant-source-decoder-model "${QUANT_SOURCE_DECODER_MODEL}" \
     --quant-out-dir results/int8_qdq_models \
     --quant-summary-json "results/int8_qdq_quant_summary_${cfg}_decoder.json" \
     --providers "${PROVIDERS}" \
@@ -65,11 +97,11 @@ for cfg in "${CONFIGS[@]}"; do
 done
 
 run_py scripts/ort_int8_qdq_pipeline.py eval \
-  --model-mode fp16 \
+  --model-mode fp32 \
   --input-json results/dev_260.json \
   --image-root data \
-  --model-dir models \
-  --asset-dir . \
+  --model-dir "${MODEL_DIR}" \
+  --asset-dir "${ASSET_DIR}" \
   --eval-out-dir results/int8_qdq_eval \
   --dataset-tag dev_260 \
   --providers "${PROVIDERS}" \
@@ -82,8 +114,11 @@ for cfg in "${CONFIGS[@]}"; do
     --config-id "${cfg}" \
     --input-json results/dev_260.json \
     --image-root data \
-    --model-dir models \
-    --asset-dir . \
+    --model-dir "${MODEL_DIR}" \
+    --asset-dir "${ASSET_DIR}" \
+    --quant-source-vision-model "${QUANT_SOURCE_VISION_MODEL}" \
+    --quant-source-embed-model "${QUANT_SOURCE_EMBED_MODEL}" \
+    --quant-source-decoder-model "${QUANT_SOURCE_DECODER_MODEL}" \
     --quant-out-dir results/int8_qdq_models \
     --eval-out-dir results/int8_qdq_eval \
     --dataset-tag dev_260 \
@@ -123,11 +158,11 @@ echo
 echo "[result] best config on dev_260: ${BEST_CONFIG}"
 
 run_py scripts/ort_int8_qdq_pipeline.py eval \
-  --model-mode fp16 \
+  --model-mode fp32 \
   --input-json FullTest.json \
   --image-root data \
-  --model-dir models \
-  --asset-dir . \
+  --model-dir "${MODEL_DIR}" \
+  --asset-dir "${ASSET_DIR}" \
   --eval-out-dir results/int8_qdq_eval \
   --dataset-tag fulltest \
   --providers "${PROVIDERS}" \
@@ -139,11 +174,14 @@ run_py scripts/ort_int8_qdq_pipeline.py eval \
   --config-id "${BEST_CONFIG}" \
   --input-json FullTest.json \
   --image-root data \
-  --model-dir models \
-  --asset-dir . \
+  --model-dir "${MODEL_DIR}" \
+  --asset-dir "${ASSET_DIR}" \
+  --quant-source-vision-model "${QUANT_SOURCE_VISION_MODEL}" \
+  --quant-source-embed-model "${QUANT_SOURCE_EMBED_MODEL}" \
+  --quant-source-decoder-model "${QUANT_SOURCE_DECODER_MODEL}" \
   --quant-out-dir results/int8_qdq_models \
   --eval-out-dir results/int8_qdq_eval \
-  --dataset-tag "fulltest_${BEST_CONFIG}" \
+  --dataset-tag "fulltest" \
   --providers "${PROVIDERS}" \
   --max-new-tokens "${MAX_NEW_TOKENS}" \
   ${RESUME_FLAG}
@@ -197,10 +235,10 @@ run_py scripts/ort_int8_qdq_pipeline.py report \
   --eval-out-dir results/int8_qdq_eval \
   --quant-summary-json results/int8_qdq_quant_summary_all.json \
   --report-path results/int8_qdq_fulltest_report.md \
-  --dev-fp16-json results/int8_qdq_eval/dev_260_fp16.json \
+  --dev-fp32-json results/int8_qdq_eval/dev_260_fp32.json \
   --dev-int8-jsons "${DEV_INT8_JOINED}" \
-  --full-fp16-json results/int8_qdq_eval/fulltest_fp16.json \
-  --full-int8-json "results/int8_qdq_eval/fulltest_${BEST_CONFIG}_int8_${BEST_CONFIG}.json" \
+  --full-fp32-json results/int8_qdq_eval/fulltest_fp32.json \
+  --full-int8-json "results/int8_qdq_eval/fulltest_int8_${BEST_CONFIG}.json" \
   --selected-config-id "${BEST_CONFIG}"
 
 echo

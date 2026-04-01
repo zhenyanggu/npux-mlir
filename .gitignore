@@ -17,6 +17,9 @@ model_test/profile
 *.onnx
 aicas_run/data
 aicas_run/tmp
+aicas_run/results
+*Identifier
+
 node_modules
 # Prerequisites
 *.d

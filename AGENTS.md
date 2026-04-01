@@ -53,6 +53,31 @@ make -C model_test -B llvm MODEL=gelu
 - For NPU pipeline changes, run `test/npu_test.sh` or the relevant `test/*/npu_test.sh` flow.
 - Prefer narrow repro runs during development, then run full affected suites before PR.
 
+## CUDA / ONNX Runtime Notes
+- Always use the `npux-mlir` environment when checking CUDA for ORT/Torch:
+```bash
+conda activate npux-mlir
+source scripts/activate_env.sh
+```
+- In this repo, `aicas_run/scripts/run_serial_fulltest.sh` defaults to CPU:
+```bash
+PROVIDERS="${PROVIDERS:-CPUExecutionProvider}"
+```
+  If you want CUDA, pass it explicitly, for example:
+```bash
+PROVIDERS=CUDAExecutionProvider,CPUExecutionProvider bash aicas_run/scripts/run_serial_fulltest.sh
+```
+- When using `aicas_run/scripts/ort_int8_qdq_pipeline.py eval`, check the runtime log:
+  - `providers requested=[...]`
+  - `providers selected=[...]`
+  Only treat it as real CUDA execution when `selected` contains `CUDAExecutionProvider`.
+- In this workspace, sandboxed Python checks may falsely fall back to CPU or report CUDA init failures because the sandbox may not expose the real GPU device. If CUDA behavior matters, verify outside the sandbox in the activated `npux-mlir` environment.
+- Verified in this environment:
+  - `torch.cuda.is_available()` is `True`
+  - ORT can bind `CUDAExecutionProvider` for `aicas_run/models/vision_encoder_int8_cuda.onnx`
+  - ORT can bind `CUDAExecutionProvider` for `aicas_run/models/decoder_model_merged_int8.onnx`
+- `aicas_run/models/vision_encoder_int8.onnx` is not a good CUDA/CPU smoke target because ORT may fail on its `ConvInteger` path. Prefer `aicas_run/models/vision_encoder_int8_cuda.onnx` for runtime checks.
+
 ## Agent-Specific Instructions
 - Default response language: Simplified Chinese (`简体中文`), unless the user explicitly asks for another language.
 

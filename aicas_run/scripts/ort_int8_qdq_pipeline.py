@@ -63,6 +63,12 @@ DEFAULT_FLUSH_EVERY = 20
 DEFAULT_CALIB_PROGRESS_EVERY = 10
 
 EXCLUDED_FROM_OFFICIAL_TYPES = {"Chinese", "Occluded", "Semantic Text Recognition"}
+NON_FP32_FLOAT_INPUT_TYPES = {"FLOAT16", "DOUBLE", "BFLOAT16"}
+DECODER_REQUIRED_CUSTOM_OPS = {
+    "com.microsoft::MultiHeadAttention",
+    "com.microsoft::RotaryEmbedding",
+    "com.microsoft::SkipSimplifiedLayerNormalization",
+}
 
 
 QUANT_CONFIGS: List[Dict[str, Any]] = [
@@ -161,11 +167,7 @@ def resolve_quant_source_model_paths(args: argparse.Namespace) -> ModelPaths:
             explicit_path=args.quant_source_vision_model,
             candidates=[
                 "models/vision_encoder.onnx",
-                "models/vision_encoder_fixed.onnx",
-                "models/vision_encoder_fp16.onnx",
                 "vision_encoder.onnx",
-                "vision_encoder_fixed.onnx",
-                "vision_encoder_fp16.onnx",
             ],
             label="quant-source vision",
         ),
@@ -174,9 +176,7 @@ def resolve_quant_source_model_paths(args: argparse.Namespace) -> ModelPaths:
             explicit_path=args.quant_source_embed_model,
             candidates=[
                 "models/embed_tokens.onnx",
-                "models/embed_tokens_fp16.onnx",
                 "embed_tokens.onnx",
-                "embed_tokens_fp16.onnx",
             ],
             label="quant-source embed",
         ),
@@ -185,28 +185,22 @@ def resolve_quant_source_model_paths(args: argparse.Namespace) -> ModelPaths:
             explicit_path=args.quant_source_decoder_model,
             candidates=[
                 "models/decoder_model_merged.onnx",
-                "models/decoder_model_merged_fp16_rewritten.onnx",
-                "models/decoder_model_merged_fp16.onnx",
                 "decoder_model_merged.onnx",
-                "decoder_model_merged_fp16_rewritten.onnx",
-                "decoder_model_merged_fp16.onnx",
             ],
             label="quant-source decoder",
         ),
     )
 
 
-def resolve_fp16_model_paths(args: argparse.Namespace) -> ModelPaths:
+def resolve_fp32_model_paths(args: argparse.Namespace) -> ModelPaths:
     model_dir = os.path.abspath(args.model_dir)
     return ModelPaths(
         vision=resolve_existing_path(
             model_dir=model_dir,
             explicit_path=args.vision_model,
             candidates=[
-                "models/vision_encoder_fixed.onnx",
-                "models/vision_encoder_fp16.onnx",
-                "vision_encoder_fixed.onnx",
-                "vision_encoder_fp16.onnx",
+                "models/vision_encoder.onnx",
+                "vision_encoder.onnx",
             ],
             label="vision",
         ),
@@ -214,8 +208,8 @@ def resolve_fp16_model_paths(args: argparse.Namespace) -> ModelPaths:
             model_dir=model_dir,
             explicit_path=args.embed_model,
             candidates=[
-                "models/embed_tokens_fp16.onnx",
-                "embed_tokens_fp16.onnx",
+                "models/embed_tokens.onnx",
+                "embed_tokens.onnx",
             ],
             label="embed",
         ),
@@ -223,10 +217,8 @@ def resolve_fp16_model_paths(args: argparse.Namespace) -> ModelPaths:
             model_dir=model_dir,
             explicit_path=args.decoder_model,
             candidates=[
-                "models/decoder_model_merged_fp16_rewritten.onnx",
-                "models/decoder_model_merged_fp16.onnx",
-                "decoder_model_merged_fp16_rewritten.onnx",
-                "decoder_model_merged_fp16.onnx",
+                "models/decoder_model_merged.onnx",
+                "decoder_model_merged.onnx",
             ],
             label="decoder",
         ),
@@ -450,9 +442,15 @@ class StreamingDataReader(CalibrationDataReader):
         if self.mode == "decoder":
             state = self.runner.prefill(image_path=image_path, question=record["question"])
             return {
-                "inputs_embeds": state["merged_embeds"].astype(np.float32, copy=False),
-                "attention_mask": state["attention_mask"].astype(np.int64, copy=False),
-                "position_ids": state["position_ids"].astype(np.int64, copy=False),
+                "inputs_embeds": state["merged_embeds"].astype(
+                    self.runner.decoder_inputs_embeds_dtype, copy=False
+                ),
+                "attention_mask": state["attention_mask"].astype(
+                    self.runner.decoder_attention_mask_dtype, copy=False
+                ),
+                "position_ids": state["position_ids"].astype(
+                    self.runner.decoder_position_ids_dtype, copy=False
+                ),
                 **self.runner.zero_past_key_values(batch_size=1),
             }
         raise ValueError(f"Unsupported calibration reader mode: {self.mode}")
@@ -552,6 +550,23 @@ def collect_constant_outputs(graph: Any) -> set:
     return names
 
 
+def graph_input_dtypes(graph: Any) -> Dict[str, str]:
+    ensure_onnx_importable()
+    result: Dict[str, str] = {}
+    for item in graph.input:
+        tensor_type = item.type.tensor_type
+        result[item.name] = str(onnx.TensorProto.DataType.Name(tensor_type.elem_type))  # type: ignore[attr-defined]
+    return result
+
+
+def is_static_linear_op(node: Any, const_outputs: set) -> bool:
+    if node.op_type not in {"MatMul", "Gemm"}:
+        return False
+    if len(node.input) < 2:
+        return False
+    return bool(node.input[1]) and node.input[1] in const_outputs
+
+
 def is_qdq_wrapped(node: Any, producer: Dict[str, Any]) -> bool:
     def from_dequantize(tensor_name: str) -> bool:
         op = producer.get(tensor_name)
@@ -564,7 +579,10 @@ def is_qdq_wrapped(node: Any, producer: Dict[str, Any]) -> bool:
     return False
 
 
-def summarize_linear_ops(model_path: str) -> Dict[str, Any]:
+def inspect_linear_ops(
+    model_path: str,
+    target_node_names: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
     ensure_onnx_importable()
     model = onnx.load(model_path)  # type: ignore[attr-defined]
     graph = model.graph
@@ -580,30 +598,86 @@ def summarize_linear_ops(model_path: str) -> Dict[str, Any]:
     matmul_dynamic = 0
     matmul_qdq_wrapped = 0
     gemm_total = 0
+    gemm_const_b = 0
+    gemm_dynamic = 0
     gemm_qdq_wrapped = 0
+    static_linear_node_names: List[str] = []
+    unnamed_static_linear = 0
+    custom_ops: Counter[str] = Counter()
+    linear_node_names: set = set()
 
     for node in graph.node:
+        domain = node.domain or "ai.onnx"
+        if node.domain or node.op_type in {
+            "MultiHeadAttention",
+            "RotaryEmbedding",
+            "SimplifiedLayerNormalization",
+            "SkipSimplifiedLayerNormalization",
+        }:
+            custom_ops[f"{domain}::{node.op_type}"] += 1
+
         if node.op_type == "MatMul":
             matmul_total += 1
-            if len(node.input) >= 2 and node.input[1] in const_outputs:
+            if is_static_linear_op(node, const_outputs):
                 matmul_const_b += 1
+                if node.name:
+                    static_linear_node_names.append(node.name)
+                    linear_node_names.add(node.name)
+                else:
+                    unnamed_static_linear += 1
             else:
                 matmul_dynamic += 1
+                if node.name:
+                    linear_node_names.add(node.name)
             if is_qdq_wrapped(node, producer):
                 matmul_qdq_wrapped += 1
         elif node.op_type == "Gemm":
             gemm_total += 1
+            if is_static_linear_op(node, const_outputs):
+                gemm_const_b += 1
+                if node.name:
+                    static_linear_node_names.append(node.name)
+                    linear_node_names.add(node.name)
+                else:
+                    unnamed_static_linear += 1
+            else:
+                gemm_dynamic += 1
+                if node.name:
+                    linear_node_names.add(node.name)
             if is_qdq_wrapped(node, producer):
                 gemm_qdq_wrapped += 1
 
+    effective_target_names = (
+        set(item for item in target_node_names if item)
+        if target_node_names is not None
+        else set(static_linear_node_names)
+    )
+    target_linear_qdq_wrapped = 0
+    for node in graph.node:
+        if node.op_type not in {"MatMul", "Gemm"} or not node.name:
+            continue
+        if node.name in effective_target_names and is_qdq_wrapped(node, producer):
+            target_linear_qdq_wrapped += 1
+
     return {
         "model_path": os.path.abspath(model_path),
+        "graph_input_dtypes": graph_input_dtypes(graph),
+        "custom_ops": dict(custom_ops),
         "matmul_total": matmul_total,
         "matmul_const_b": matmul_const_b,
         "matmul_dynamic": matmul_dynamic,
         "matmul_qdq_wrapped": matmul_qdq_wrapped,
         "gemm_total": gemm_total,
+        "gemm_const_b": gemm_const_b,
+        "gemm_dynamic": gemm_dynamic,
         "gemm_qdq_wrapped": gemm_qdq_wrapped,
+        "static_linear_total": len(static_linear_node_names),
+        "target_linear_total": len(effective_target_names),
+        "target_linear_qdq_wrapped": target_linear_qdq_wrapped,
+        "target_linear_all_in_qdq_set": target_linear_qdq_wrapped == len(effective_target_names),
+        "target_linear_missing_in_model": sorted(effective_target_names - linear_node_names),
+        "unnamed_static_linear": unnamed_static_linear,
+        "_static_linear_node_names": static_linear_node_names,
     }
 
 
@@ -612,13 +686,14 @@ def quantize_one_model(
     model_output_path: str,
     reader: CalibrationDataReader,
     config: Dict[str, Any],
+    nodes_to_quantize: Sequence[str],
 ) -> None:
     method_name = str(config["calibration_method"])
     calibrate_method = getattr(CalibrationMethod, method_name)
     extra_options: Dict[str, Any] = {
         "WeightSymmetric": True,
         "ActivationSymmetric": True,
-        "MatMulConstBOnly": False,
+        "MatMulConstBOnly": True,
     }
     exclude_ops = list(config.get("exclude_output_quant_ops", []))
     if exclude_ops:
@@ -637,8 +712,41 @@ def quantize_one_model(
         weight_type=QuantType.QInt8,
         per_channel=True,
         op_types_to_quantize=["MatMul", "Gemm"],
+        nodes_to_quantize=list(nodes_to_quantize),
         extra_options=extra_options,
     )
+
+
+def validate_fp32_quant_source_inputs(label: str, stats: Dict[str, Any]) -> None:
+    bad_inputs = {
+        name: dtype
+        for name, dtype in stats.get("graph_input_dtypes", {}).items()
+        if dtype in NON_FP32_FLOAT_INPUT_TYPES
+    }
+    if bad_inputs:
+        raise ValueError(
+            f"{label} quant-source model must keep fp32 floating inputs, "
+            f"but found non-fp32 inputs: {bad_inputs}"
+        )
+
+
+def validate_quant_source_models(source_paths: ModelPaths, source_stats: Dict[str, Dict[str, Any]]) -> None:
+    validate_fp32_quant_source_inputs("vision", source_stats["vision"])
+    validate_fp32_quant_source_inputs("decoder", source_stats["decoder"])
+    decoder_custom_ops = source_stats["decoder"].get("custom_ops", {})
+    missing_ops = [name for name in sorted(DECODER_REQUIRED_CUSTOM_OPS) if decoder_custom_ops.get(name, 0) <= 0]
+    if missing_ops:
+        raise ValueError(
+            "Decoder quant-source model looks rewritten or custom ops were stripped. "
+            f"Expected to keep {missing_ops}, got path={source_paths.decoder}"
+        )
+    for label in ("vision", "decoder"):
+        unnamed = int(source_stats[label].get("unnamed_static_linear", 0))
+        if unnamed > 0:
+            raise ValueError(
+                f"{label} quant-source model has {unnamed} unnamed static MatMul/Gemm nodes; "
+                "cannot safely restrict quantization to static linear ops."
+            )
 
 
 def cmd_quantize(args: argparse.Namespace) -> int:
@@ -679,14 +787,25 @@ def cmd_quantize(args: argparse.Namespace) -> int:
 
     ensure_dir(quant_out_dir)
     source_stats = {
-        "vision": summarize_linear_ops(source_paths.vision),
-        "decoder": summarize_linear_ops(source_paths.decoder),
+        "vision": inspect_linear_ops(source_paths.vision),
+        "decoder": inspect_linear_ops(source_paths.decoder),
     }
+    validate_quant_source_models(source_paths, source_stats)
+    vision_target_nodes = list(source_stats["vision"].pop("_static_linear_node_names", []))
+    decoder_target_nodes = list(source_stats["decoder"].pop("_static_linear_node_names", []))
     source_stats["combined"] = {
         "matmul_total": source_stats["vision"]["matmul_total"] + source_stats["decoder"]["matmul_total"],
         "matmul_const_b": source_stats["vision"]["matmul_const_b"] + source_stats["decoder"]["matmul_const_b"],
         "matmul_dynamic": source_stats["vision"]["matmul_dynamic"] + source_stats["decoder"]["matmul_dynamic"],
+        "gemm_total": source_stats["vision"]["gemm_total"] + source_stats["decoder"]["gemm_total"],
+        "static_linear_total": (
+            source_stats["vision"]["static_linear_total"] + source_stats["decoder"]["static_linear_total"]
+        ),
     }
+    print("[quantize] target policy=only static MatMul/Gemm with constant weight input")
+    print(f"[quantize] source vision path={source_paths.vision}")
+    print(f"[quantize] source decoder path={source_paths.decoder}")
+    print(f"[quantize] source decoder custom ops={source_stats['decoder']['custom_ops']}")
 
     config_summaries: List[Dict[str, Any]] = []
     for config_id in config_ids:
@@ -711,6 +830,7 @@ def cmd_quantize(args: argparse.Namespace) -> int:
                         progress_every=args.calib_progress_every,
                     ),
                     config=config,
+                    nodes_to_quantize=vision_target_nodes,
                 )
 
             if "decoder" in components:
@@ -727,41 +847,46 @@ def cmd_quantize(args: argparse.Namespace) -> int:
                         progress_every=args.calib_progress_every,
                     ),
                     config=config,
+                    nodes_to_quantize=decoder_target_nodes,
                 )
         if "vision" in components:
             if not os.path.exists(vision_out):
                 raise FileNotFoundError(f"vision output missing after quantization: {vision_out}")
-            vision_stats = summarize_linear_ops(vision_out)
+            vision_stats = inspect_linear_ops(vision_out, target_node_names=vision_target_nodes)
         else:
             vision_stats = {
                 **source_stats["vision"],
                 "model_path": os.path.abspath(vision_out),
                 "matmul_qdq_wrapped": 0,
                 "gemm_qdq_wrapped": 0,
+                "target_linear_qdq_wrapped": 0,
+                "target_linear_all_in_qdq_set": False,
                 "skipped": True,
             }
 
         if "decoder" in components:
             if not os.path.exists(decoder_out):
                 raise FileNotFoundError(f"decoder output missing after quantization: {decoder_out}")
-            decoder_stats = summarize_linear_ops(decoder_out)
+            decoder_stats = inspect_linear_ops(decoder_out, target_node_names=decoder_target_nodes)
         else:
             decoder_stats = {
                 **source_stats["decoder"],
                 "model_path": os.path.abspath(decoder_out),
                 "matmul_qdq_wrapped": 0,
                 "gemm_qdq_wrapped": 0,
+                "target_linear_qdq_wrapped": 0,
+                "target_linear_all_in_qdq_set": False,
                 "skipped": True,
             }
 
         combined_target = 0
         combined_wrapped = 0
         if "vision" in components:
-            combined_target += source_stats["vision"]["matmul_total"]
-            combined_wrapped += vision_stats["matmul_qdq_wrapped"]
+            combined_target += source_stats["vision"]["target_linear_total"]
+            combined_wrapped += vision_stats["target_linear_qdq_wrapped"]
         if "decoder" in components:
-            combined_target += source_stats["decoder"]["matmul_total"]
-            combined_wrapped += decoder_stats["matmul_qdq_wrapped"]
+            combined_target += source_stats["decoder"]["target_linear_total"]
+            combined_wrapped += decoder_stats["target_linear_qdq_wrapped"]
         config_summaries.append(
             {
                 "config": config,
@@ -775,8 +900,8 @@ def cmd_quantize(args: argparse.Namespace) -> int:
                     "vision": vision_stats,
                     "decoder": decoder_stats,
                     "combined": {
-                        "matmul_target_total": combined_target,
-                        "matmul_qdq_wrapped": combined_wrapped,
+                        "target_linear_total": combined_target,
+                        "target_linear_qdq_wrapped": combined_wrapped,
                         "all_target_in_qdq_set": combined_wrapped == combined_target,
                     },
                 },
@@ -790,17 +915,19 @@ def cmd_quantize(args: argparse.Namespace) -> int:
         "providers": provider_info,
         "asset_dir": asset_dir,
         "quant_source_model_paths": source_paths.__dict__,
+        "target_policy": "Only quantize static MatMul/Gemm whose second input is constant; decoder source must preserve custom attention ops.",
         "source_coverage": source_stats,
         "quant_configs": config_summaries,
     }
     save_json(payload, quant_summary)
     print(f"[quantize] summary saved: {quant_summary}")
     print(
-        "[quantize] source MatMul totals:",
+        "[quantize] source linear totals:",
         f"vision={source_stats['vision']['matmul_total']},",
         f"decoder={source_stats['decoder']['matmul_total']},",
         f"combined={source_stats['combined']['matmul_total']},",
-        f"dynamic={source_stats['combined']['matmul_dynamic']}",
+        f"dynamic_matmul={source_stats['combined']['matmul_dynamic']},",
+        f"static_targets={source_stats['combined']['static_linear_total']}",
     )
     return 0
 
@@ -1011,8 +1138,8 @@ def run_eval_once(
 
 
 def make_eval_output_name(dataset_tag: str, model_mode: str, config_id: str) -> str:
-    if model_mode == "fp16":
-        return f"{dataset_tag}_fp16.json"
+    if model_mode == "fp32":
+        return f"{dataset_tag}_fp32.json"
     return f"{dataset_tag}_int8_{config_id}.json"
 
 
@@ -1022,11 +1149,11 @@ def cmd_eval(args: argparse.Namespace) -> int:
     eval_out_dir = os.path.abspath(args.eval_out_dir)
     ensure_dir(eval_out_dir)
 
-    fp16_paths = resolve_fp16_model_paths(args)
+    fp32_paths = resolve_fp32_model_paths(args)
     source_paths = resolve_quant_source_model_paths(args)
     asset_dir = resolve_asset_dir(args.asset_dir, args.model_dir)
-    if args.model_mode == "fp16":
-        model_paths = fp16_paths
+    if args.model_mode == "fp32":
+        model_paths = fp32_paths
     else:
         if not args.config_id:
             raise ValueError("--config-id is required for int8 mode.")
@@ -1120,18 +1247,18 @@ def find_dataset_metric(by_dataset: Iterable[Dict[str, Any]], dataset: str) -> D
 
 
 def build_report_markdown(
-    dev_fp16_payload: Dict[str, Any],
+    dev_fp32_payload: Dict[str, Any],
     dev_int8_payloads: List[Dict[str, Any]],
-    full_fp16_payload: Dict[str, Any],
+    full_fp32_payload: Dict[str, Any],
     full_int8_payload: Dict[str, Any],
     selected_config_id: str,
     pass_threshold: float,
     quant_summary: Dict[str, Any],
     paths: Dict[str, str],
 ) -> str:
-    full_fp16_official = float(full_fp16_payload["summary"]["official"]["accuracy"])
+    full_fp32_official = float(full_fp32_payload["summary"]["official"]["accuracy"])
     full_int8_official = float(full_int8_payload["summary"]["official"]["accuracy"])
-    official_drop = full_fp16_official - full_int8_official
+    official_drop = full_fp32_official - full_int8_official
     pass_ok = official_drop < pass_threshold
 
     lines: List[str] = []
@@ -1142,26 +1269,32 @@ def build_report_markdown(
     lines.append(f"- 图片根目录: `{paths['image_root']}`")
     lines.append(f"- 量化模型目录: `{paths['quant_out_dir']}`")
     lines.append(f"- 评测结果目录: `{paths['eval_out_dir']}`")
+    lines.append(f"- 量化策略: `{quant_summary.get('target_policy', 'Only static MatMul/Gemm')}`")
     lines.append("")
     lines.append("## 量化覆盖统计")
     lines.append("")
     source_coverage = quant_summary.get("source_coverage", {})
     lines.append(
-        "- 原始 MatMul 统计: "
+        "- 原始线性层统计: "
         f"vision={source_coverage.get('vision', {}).get('matmul_total', 0)}, "
         f"decoder={source_coverage.get('decoder', {}).get('matmul_total', 0)}, "
         f"combined={source_coverage.get('combined', {}).get('matmul_total', 0)}, "
-        f"dynamic={source_coverage.get('combined', {}).get('matmul_dynamic', 0)}"
+        f"dynamic_matmul={source_coverage.get('combined', {}).get('matmul_dynamic', 0)}, "
+        f"static_target={source_coverage.get('combined', {}).get('static_linear_total', 0)}"
+    )
+    lines.append(
+        "- Decoder custom op 保留统计: "
+        f"{source_coverage.get('decoder', {}).get('custom_ops', {})}"
     )
     lines.append("")
-    lines.append("| 配置 | 方法 | MatMul目标总数 | MatMul QDQ包裹数 | 全覆盖 |")
+    lines.append("| 配置 | 方法 | 静态线性目标数 | QDQ包裹数 | 全覆盖 |")
     lines.append("| --- | --- | ---: | ---: | --- |")
     for item in quant_summary.get("quant_configs", []):
         cfg = item["config"]
         cov = item["coverage"]["combined"]
         lines.append(
             f"| {cfg['config_id']} | {cfg['name']} | "
-            f"{cov['matmul_target_total']} | {cov['matmul_qdq_wrapped']} | "
+            f"{cov.get('target_linear_total', 0)} | {cov.get('target_linear_qdq_wrapped', 0)} | "
             f"{'是' if cov['all_target_in_qdq_set'] else '否'} |"
         )
     lines.append("")
@@ -1176,10 +1309,10 @@ def build_report_markdown(
             f"| {cfg} | {summary['official']['final_score']} | {summary['official']['final_total']} | "
             f"{summary['official']['accuracy']:.6f} | {summary['overall']['accuracy']:.6f} |"
         )
-    dev_fp16_summary = dev_fp16_payload["summary"]
+    dev_fp32_summary = dev_fp32_payload["summary"]
     lines.append(
-        f"| fp16 | {dev_fp16_summary['official']['final_score']} | {dev_fp16_summary['official']['final_total']} | "
-        f"{dev_fp16_summary['official']['accuracy']:.6f} | {dev_fp16_summary['overall']['accuracy']:.6f} |"
+        f"| fp32 | {dev_fp32_summary['official']['final_score']} | {dev_fp32_summary['official']['final_total']} | "
+        f"{dev_fp32_summary['official']['accuracy']:.6f} | {dev_fp32_summary['overall']['accuracy']:.6f} |"
     )
     lines.append("")
     lines.append(f"- Dev 最优配置: `{selected_config_id}`")
@@ -1188,7 +1321,7 @@ def build_report_markdown(
     lines.append("")
     lines.append("| 模式 | 官方分数 | 官方总数 | 官方准确率 | 全记录准确率 |")
     lines.append("| --- | ---: | ---: | ---: | ---: |")
-    for name, payload in [("fp16", full_fp16_payload), (f"int8({selected_config_id})", full_int8_payload)]:
+    for name, payload in [("fp32", full_fp32_payload), (f"int8({selected_config_id})", full_int8_payload)]:
         summary = payload["summary"]
         lines.append(
             f"| {name} | {summary['official']['final_score']} | {summary['official']['final_total']} | "
@@ -1201,7 +1334,7 @@ def build_report_markdown(
     lines.append("")
 
     excluded = sorted(
-        set(full_fp16_payload["summary"]["excluded_from_official_types"])
+        set(full_fp32_payload["summary"]["excluded_from_official_types"])
         | set(full_int8_payload["summary"]["excluded_from_official_types"])
     )
     lines.append(
@@ -1216,13 +1349,13 @@ def build_report_markdown(
 
     lines.append("## FullTest 分类型结果")
     lines.append("")
-    fp16_types = full_fp16_payload["summary"]["by_type"]
+    fp32_types = full_fp32_payload["summary"]["by_type"]
     int8_types = full_int8_payload["summary"]["by_type"]
-    all_types = sorted({item["type"] for item in fp16_types} | {item["type"] for item in int8_types})
-    lines.append("| Type | FP16(正确/总数) | FP16准确率 | INT8(正确/总数) | INT8准确率 | 官方计分 |")
+    all_types = sorted({item["type"] for item in fp32_types} | {item["type"] for item in int8_types})
+    lines.append("| Type | FP32(正确/总数) | FP32准确率 | INT8(正确/总数) | INT8准确率 | 官方计分 |")
     lines.append("| --- | ---: | ---: | ---: | ---: | --- |")
     for item_type in all_types:
-        a = find_type_metric(fp16_types, item_type)
+        a = find_type_metric(fp32_types, item_type)
         b = find_type_metric(int8_types, item_type)
         lines.append(
             f"| {item_type} | {a['correct']}/{a['total']} | {a['accuracy']:.6f} | "
@@ -1233,13 +1366,13 @@ def build_report_markdown(
 
     lines.append("## FullTest 分数据集结果")
     lines.append("")
-    fp16_ds = full_fp16_payload["summary"]["by_dataset"]
+    fp32_ds = full_fp32_payload["summary"]["by_dataset"]
     int8_ds = full_int8_payload["summary"]["by_dataset"]
-    all_ds = sorted({item["dataset"] for item in fp16_ds} | {item["dataset"] for item in int8_ds})
-    lines.append("| Dataset | FP16(正确/总数) | FP16准确率 | INT8(正确/总数) | INT8准确率 |")
+    all_ds = sorted({item["dataset"] for item in fp32_ds} | {item["dataset"] for item in int8_ds})
+    lines.append("| Dataset | FP32(正确/总数) | FP32准确率 | INT8(正确/总数) | INT8准确率 |")
     lines.append("| --- | ---: | ---: | ---: | ---: |")
     for name in all_ds:
-        a = find_dataset_metric(fp16_ds, name)
+        a = find_dataset_metric(fp32_ds, name)
         b = find_dataset_metric(int8_ds, name)
         lines.append(
             f"| {name} | {a['correct']}/{a['total']} | {a['accuracy']:.6f} | "
@@ -1250,9 +1383,9 @@ def build_report_markdown(
     if not pass_ok:
         lines.append("## 未通过时的候选回退方向")
         lines.append("")
-        lines.append("- 继续保持全 attention MatMul 量化，先微调校准集与校准方法参数。")
-        lines.append("- 选择性排除敏感 attention MatMul（仅在你明确指示后执行）。")
-        lines.append("- 最后再评估是否进入 reshape+gemm+reshape 局部改写路线。")
+        lines.append("- 保持“仅静态 MatMul/Gemm”策略，先微调校准集与校准方法参数。")
+        lines.append("- 如仍不达标，再缩小静态线性层量化范围，而不是重新量化 attention。")
+        lines.append("- 最后再评估是否需要进入局部 rewrite 路线。")
         lines.append("")
 
     return "\n".join(lines) + "\n"
@@ -1261,8 +1394,8 @@ def build_report_markdown(
 def cmd_report(args: argparse.Namespace) -> int:
     report_path = os.path.abspath(args.report_path)
     quant_summary_path = os.path.abspath(args.quant_summary_json)
-    dev_fp16_path = os.path.abspath(args.dev_fp16_json)
-    full_fp16_path = os.path.abspath(args.full_fp16_json)
+    dev_fp32_path = os.path.abspath(args.dev_fp32_json)
+    full_fp32_path = os.path.abspath(args.full_fp32_json)
     full_int8_path = os.path.abspath(args.full_int8_json)
     selected_config_id = args.selected_config_id
 
@@ -1282,14 +1415,14 @@ def cmd_report(args: argparse.Namespace) -> int:
         dev_int8_payloads.append(payload)
 
     quant_summary = load_json(quant_summary_path)
-    dev_fp16_payload = load_eval_payload(dev_fp16_path)
-    full_fp16_payload = load_eval_payload(full_fp16_path)
+    dev_fp32_payload = load_eval_payload(dev_fp32_path)
+    full_fp32_payload = load_eval_payload(full_fp32_path)
     full_int8_payload = load_eval_payload(full_int8_path)
 
     md = build_report_markdown(
-        dev_fp16_payload=dev_fp16_payload,
+        dev_fp32_payload=dev_fp32_payload,
         dev_int8_payloads=dev_int8_payloads,
-        full_fp16_payload=full_fp16_payload,
+        full_fp32_payload=full_fp32_payload,
         full_int8_payload=full_int8_payload,
         selected_config_id=selected_config_id,
         pass_threshold=args.pass_threshold,
@@ -1362,11 +1495,11 @@ def cmd_run_all(args: argparse.Namespace) -> int:
     quant_args.quant_summary_json = args.quant_summary_json
     cmd_quantize(quant_args)
 
-    dev_fp16_path, dev_fp16_payload = run_eval_for_mode(
+    dev_fp32_path, dev_fp32_payload = run_eval_for_mode(
         args=args,
         input_json=os.path.abspath(args.dev_json_out),
         dataset_tag="dev_260",
-        model_mode="fp16",
+        model_mode="fp32",
         config_id="",
     )
 
@@ -1388,42 +1521,42 @@ def cmd_run_all(args: argparse.Namespace) -> int:
     best_config_id = choose_best_config(dev_int8_payloads)
     print(f"[run-all] best config on dev_260: {best_config_id}")
 
-    full_fp16_path, full_fp16_payload = run_eval_for_mode(
+    full_fp32_path, full_fp32_payload = run_eval_for_mode(
         args=args,
         input_json=os.path.abspath(args.input_json),
         dataset_tag="fulltest",
-        model_mode="fp16",
+        model_mode="fp32",
         config_id="",
     )
     full_int8_path, full_int8_payload = run_eval_for_mode(
         args=args,
         input_json=os.path.abspath(args.input_json),
-        dataset_tag=f"fulltest_{best_config_id}",
+        dataset_tag="fulltest",
         model_mode="int8",
         config_id=best_config_id,
     )
 
     report_args = argparse.Namespace(**vars(args))
-    report_args.dev_fp16_json = dev_fp16_path
+    report_args.dev_fp32_json = dev_fp32_path
     report_args.dev_int8_jsons = ",".join(dev_int8_paths)
-    report_args.full_fp16_json = full_fp16_path
+    report_args.full_fp32_json = full_fp32_path
     report_args.full_int8_json = full_int8_path
     report_args.selected_config_id = best_config_id
     cmd_report(report_args)
 
-    fp16_official = float(full_fp16_payload["summary"]["official"]["accuracy"])
+    fp32_official = float(full_fp32_payload["summary"]["official"]["accuracy"])
     int8_official = float(full_int8_payload["summary"]["official"]["accuracy"])
-    drop = fp16_official - int8_official
+    drop = fp32_official - int8_official
     print(
         "[run-all] FullTest official:",
-        f"fp16={fp16_official:.6f}",
+        f"fp32={fp32_official:.6f}",
         f"int8={int8_official:.6f}",
         f"drop={drop:.6f}",
     )
     if drop >= args.pass_threshold:
         print(
             "[run-all] FAIL: drop not less than threshold. "
-            "Stopped after report generation; no attention exclusion fallback executed."
+            "Stopped after report generation; no extra static-target fallback executed."
         )
         return 2
     print("[run-all] PASS")
@@ -1483,7 +1616,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--output-json", default="")
     p_eval.add_argument("--progress-jsonl", default="")
     p_eval.add_argument("--dataset-tag", default="")
-    p_eval.add_argument("--model-mode", choices=["fp16", "int8"], required=True)
+    p_eval.add_argument("--model-mode", choices=["fp32", "int8"], required=True)
     p_eval.add_argument("--config-id", default="")
     p_eval.add_argument("--providers", default=DEFAULT_PROVIDER_TEXT)
     p_eval.add_argument("--max-new-tokens", type=int, default=100)
@@ -1497,9 +1630,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--eval-out-dir", default=DEFAULT_EVAL_OUT_DIR)
     p_report.add_argument("--quant-summary-json", default=DEFAULT_QUANT_SUMMARY_JSON)
     p_report.add_argument("--report-path", default=DEFAULT_REPORT_PATH)
-    p_report.add_argument("--dev-fp16-json", required=True)
+    p_report.add_argument("--dev-fp32-json", required=True)
     p_report.add_argument("--dev-int8-jsons", required=True)
-    p_report.add_argument("--full-fp16-json", required=True)
+    p_report.add_argument("--full-fp32-json", required=True)
     p_report.add_argument("--full-int8-json", required=True)
     p_report.add_argument("--selected-config-id", required=True)
     p_report.add_argument("--pass-threshold", type=float, default=DEFAULT_PASS_THRESHOLD)

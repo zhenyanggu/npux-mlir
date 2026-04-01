@@ -104,6 +104,26 @@ python scripts/ort_int8_qdq_pipeline.py quantize \
 
 If that succeeds, scale up gradually.
 
+For FP32 source models (vision/embed/rewritten decoder), explicitly pin paths:
+
+```bash
+python scripts/ort_int8_qdq_pipeline.py quantize \
+  --calib-json results/calib_520.json \
+  --image-root data \
+  --model-dir models \
+  --asset-dir . \
+  --quant-source-vision-model vision_encoder.onnx \
+  --quant-source-embed-model embed_tokens.onnx \
+  --quant-source-decoder-model decoder_model_merged_fp32_rewritten.onnx \
+  --quant-out-dir results/int8_qdq_models_fp32src \
+  --quant-summary-json results/int8_qdq_quant_summary_fp32src_cfg1.json \
+  --providers CUDAExecutionProvider,CPUExecutionProvider \
+  --configs cfg1 \
+  --components vision,decoder \
+  --calib-progress-every 5 \
+  --resume
+```
+
 ## 6. Prepare Splits on Server
 
 ```bash

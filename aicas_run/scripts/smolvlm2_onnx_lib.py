@@ -139,6 +139,23 @@ def build_messages(image_path: str, question: str) -> List[Dict[str, Any]]:
     ]
 
 
+def ort_type_to_numpy(ort_type: str) -> np.dtype:
+    mapping = {
+        "tensor(float16)": np.float16,
+        "tensor(float)": np.float32,
+        "tensor(double)": np.float64,
+        "tensor(int64)": np.int64,
+        "tensor(int32)": np.int32,
+        "tensor(int16)": np.int16,
+        "tensor(int8)": np.int8,
+        "tensor(uint8)": np.uint8,
+        "tensor(bool)": np.bool_,
+    }
+    if ort_type not in mapping:
+        raise ValueError(f"unsupported ORT tensor type: {ort_type}")
+    return np.dtype(mapping[ort_type])
+
+
 def compute_position_ids(attention_mask: np.ndarray) -> np.ndarray:
     position_ids = np.cumsum(attention_mask.astype(np.int64, copy=False), axis=1) - 1
     return np.maximum(position_ids, 0).astype(np.int64, copy=False)
@@ -245,6 +262,13 @@ class SmolVLM2OnnxRunner:
         self.num_layers = len(self.decoder_past_names) // 2
         if self.num_layers == 0:
             raise ValueError("Decoder has no past key/value inputs.")
+        self.decoder_input_meta = {
+            item.name: item for item in self.sessions.decoder.get_inputs()
+        }
+        self.decoder_inputs_embeds_dtype = self._decoder_input_dtype("inputs_embeds", np.float32)
+        self.decoder_attention_mask_dtype = self._decoder_input_dtype("attention_mask", np.int64)
+        self.decoder_position_ids_dtype = self._decoder_input_dtype("position_ids", np.int64)
+        self.decoder_past_dtype = self._decoder_input_dtype(self.decoder_past_names[0], np.float32)
 
         first_past = self.sessions.decoder.get_inputs()[3]
         self.num_heads = int(first_past.shape[1])
@@ -278,6 +302,15 @@ class SmolVLM2OnnxRunner:
                 return path
         return candidates[0]
 
+    def _decoder_input_dtype(self, name: str, fallback: Any) -> np.dtype:
+        meta = self.decoder_input_meta.get(name)
+        if meta is None:
+            return np.dtype(fallback)
+        try:
+            return ort_type_to_numpy(meta.type)
+        except Exception:
+            return np.dtype(fallback)
+
     def prepare_inputs(self, image_path: str, question: str) -> Dict[str, np.ndarray]:
         image = Image.open(image_path).convert("RGB")
         messages = build_messages(image_path=image_path, question=question)
@@ -286,10 +319,8 @@ class SmolVLM2OnnxRunner:
                 messages,
                 add_generation_prompt=True,
                 tokenize=True,
-                processor_kwargs={
-                    "return_dict": True,
-                    "return_tensors": "np",
-                },
+                return_dict=True,
+                return_tensors="np",
             )
             outputs = processor_outputs_to_numpy(batch)
         except Exception:
@@ -298,21 +329,33 @@ class SmolVLM2OnnxRunner:
                     messages,
                     add_generation_prompt=True,
                     tokenize=True,
-                    processor_kwargs={
-                        "return_dict": True,
-                        "return_tensors": "pt",
-                    },
-                )
-                outputs = processor_outputs_to_numpy(batch)
-            except Exception:
-                batch = self.processor.apply_chat_template(
-                    messages,
-                    add_generation_prompt=True,
-                    tokenize=True,
                     return_dict=True,
                     return_tensors="pt",
                 )
                 outputs = processor_outputs_to_numpy(batch)
+            except Exception:
+                try:
+                    batch = self.processor.apply_chat_template(
+                        messages,
+                        add_generation_prompt=True,
+                        tokenize=True,
+                        processor_kwargs={
+                            "return_dict": True,
+                            "return_tensors": "np",
+                        },
+                    )
+                    outputs = processor_outputs_to_numpy(batch)
+                except Exception:
+                    batch = self.processor.apply_chat_template(
+                        messages,
+                        add_generation_prompt=True,
+                        tokenize=True,
+                        processor_kwargs={
+                            "return_dict": True,
+                            "return_tensors": "pt",
+                        },
+                    )
+                    outputs = processor_outputs_to_numpy(batch)
         finally:
             image.close()
 
@@ -365,7 +408,10 @@ class SmolVLM2OnnxRunner:
 
     def zero_past_key_values(self, batch_size: int) -> Dict[str, np.ndarray]:
         return {
-            name: np.zeros((batch_size, self.num_heads, 0, self.head_dim), dtype=np.float16)
+            name: np.zeros(
+                (batch_size, self.num_heads, 0, self.head_dim),
+                dtype=self.decoder_past_dtype,
+            )
             for name in self.decoder_past_names
         }
 
@@ -377,13 +423,13 @@ class SmolVLM2OnnxRunner:
         past_key_values: Optional[Dict[str, np.ndarray]] = None,
     ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
         feed: Dict[str, np.ndarray] = {
-            "inputs_embeds": inputs_embeds.astype(np.float32, copy=False),
-            "attention_mask": attention_mask.astype(np.int64, copy=False),
-            "position_ids": position_ids.astype(np.int64, copy=False),
+            "inputs_embeds": inputs_embeds.astype(self.decoder_inputs_embeds_dtype, copy=False),
+            "attention_mask": attention_mask.astype(self.decoder_attention_mask_dtype, copy=False),
+            "position_ids": position_ids.astype(self.decoder_position_ids_dtype, copy=False),
         }
         past_key_values = past_key_values or self.zero_past_key_values(batch_size=inputs_embeds.shape[0])
         for name in self.decoder_past_names:
-            feed[name] = past_key_values[name]
+            feed[name] = past_key_values[name].astype(self.decoder_past_dtype, copy=False)
         outputs = self.sessions.decoder.run(None, feed)
         name_to_value = {
             name: value for name, value in zip(self.decoder_output_names, outputs)
