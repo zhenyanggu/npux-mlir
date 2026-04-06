@@ -1,0 +1,596 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+
+DRIVER_VERSION = "npux-mlir-driver 0.2"
+SOURCE_ROOT = Path("@ONNX_MLIR_SRC_ROOT@").resolve()
+BUILD_ROOT = Path("@CMAKE_BINARY_DIR@").resolve()
+NPUX_EP_ROOT = SOURCE_ROOT.parents[1]
+NPUX_API_HEADER = NPUX_EP_ROOT / "runtime" / "npux_compiled_module_api.h"
+
+
+def resolve_onnx_mlir_binary() -> Path:
+    candidates = [
+        Path(sys.argv[0]).resolve().parent / "onnx-mlir",
+        BUILD_ROOT / "bin" / "onnx-mlir",
+        BUILD_ROOT / "Release" / "bin" / "onnx-mlir",
+        BUILD_ROOT / "Debug" / "bin" / "onnx-mlir",
+        BUILD_ROOT / "RelWithDebInfo" / "bin" / "onnx-mlir",
+        BUILD_ROOT / "MinSizeRel" / "bin" / "onnx-mlir",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError("unable to locate sibling onnx-mlir binary")
+
+
+def resolve_libomp_runtime() -> Path | None:
+    candidates = [
+        BUILD_ROOT / "Release" / "lib" / "libompruntime.so",
+        BUILD_ROOT / "lib" / "libompruntime.so",
+        BUILD_ROOT / "src" / "Runtime" / "omp" / "openmp-build" / "runtime" / "src" / "libomp.so",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_cxx() -> str:
+    env_cxx = os.environ.get("CXX")
+    if env_cxx:
+        return env_cxx
+    for candidate in ("c++", "g++", "clang++"):
+        resolved = shutil.which(candidate)
+        if resolved:
+            return resolved
+    raise FileNotFoundError("unable to locate a host C++ compiler")
+
+
+def write_log_header(log_file: Path, title: str, content: str) -> None:
+    with log_file.open("a", encoding="utf-8") as f:
+        f.write(f"== {title} ==\n")
+        f.write(content)
+        if not content.endswith("\n"):
+            f.write("\n")
+
+
+def run_command(args, log_file: Path) -> subprocess.CompletedProcess:
+    proc = subprocess.run(args, capture_output=True, text=True)
+    write_log_header(log_file, "COMMAND", " ".join(str(arg) for arg in args))
+    if proc.stdout:
+        write_log_header(log_file, "STDOUT", proc.stdout)
+    if proc.stderr:
+        write_log_header(log_file, "STDERR", proc.stderr)
+    return proc
+
+
+def module_wrapper_source(companion_name: str) -> str:
+    template = r'''
+#include "__API_HEADER__"
+
+#include <dlfcn.h>
+
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <string>
+
+namespace {
+
+constexpr const char* kCompanionLibraryName = "__COMPANION_NAME__";
+constexpr const char* kModuleBasename = "__MODULE_BASENAME__";
+
+struct OMTensor {
+  void* allocated_ptr;
+  void* aligned_ptr;
+  int64_t offset;
+  int64_t* shape;
+  int64_t* strides;
+  int64_t rank;
+  uint32_t data_type;
+  int64_t owning;
+};
+
+struct OMTensorList {
+  OMTensor** omts;
+  int64_t size;
+  bool shallow;
+};
+
+using EntryPointFn = OMTensorList* (*)(OMTensorList*);
+using QueryEntryPointsFn = const char* const* (*)(int64_t*);
+
+struct ModuleState {
+  NpuxRuntimeApi api{};
+  void* omp_handle{nullptr};
+  void* companion_handle{nullptr};
+  EntryPointFn entry_point{nullptr};
+};
+
+using SteadyClock = std::chrono::steady_clock;
+
+uint64_t ToNanoseconds(SteadyClock::duration duration) {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count());
+}
+
+size_t ElementSize(uint32_t element_type) {
+  switch (element_type) {
+    case 1:
+      return 4;
+    case 2:
+    case 3:
+    case 9:
+      return 1;
+    case 4:
+    case 5:
+    case 10:
+      return 2;
+    case 6:
+    case 12:
+    case 13:
+      return 4;
+    case 7:
+    case 11:
+      return 8;
+    case 8:
+      return 0;
+    case 14:
+      return 8;
+    case 15:
+      return 16;
+    case 16:
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+size_t ComputeTensorBytes(const OMTensor* tensor) {
+  if (tensor == nullptr) {
+    return 0;
+  }
+  const size_t elem_size = ElementSize(tensor->data_type);
+  if (elem_size == 0) {
+    return 0;
+  }
+  size_t num_elements = 1;
+  for (int64_t i = 0; i < tensor->rank; ++i) {
+    num_elements *= static_cast<size_t>(tensor->shape[i]);
+  }
+  return num_elements * elem_size;
+}
+
+OMTensor* CreateTensorView(const NpuxTensorView& tensor_view) {
+  auto* tensor = static_cast<OMTensor*>(std::malloc(sizeof(OMTensor)));
+  if (tensor == nullptr) {
+    return nullptr;
+  }
+  tensor->allocated_ptr = tensor_view.data;
+  tensor->aligned_ptr = tensor_view.data;
+  tensor->offset = 0;
+  tensor->rank = static_cast<int64_t>(tensor_view.rank);
+  tensor->data_type = tensor_view.element_type;
+  tensor->owning = 0;
+  tensor->shape = nullptr;
+  tensor->strides = nullptr;
+
+  if (tensor->rank > 0) {
+    tensor->shape = static_cast<int64_t*>(std::malloc(sizeof(int64_t) * static_cast<size_t>(tensor->rank)));
+    tensor->strides = static_cast<int64_t*>(std::malloc(sizeof(int64_t) * static_cast<size_t>(tensor->rank)));
+    if (tensor->shape == nullptr || tensor->strides == nullptr) {
+      std::free(tensor->shape);
+      std::free(tensor->strides);
+      std::free(tensor);
+      return nullptr;
+    }
+
+    for (int64_t i = tensor->rank - 1; i >= 0; --i) {
+      tensor->shape[i] = tensor_view.shape == nullptr ? 0 : tensor_view.shape[i];
+      if (i == tensor->rank - 1) {
+        tensor->strides[i] = 1;
+      } else {
+        tensor->strides[i] = tensor->strides[i + 1] * tensor->shape[i + 1];
+      }
+    }
+  }
+
+  return tensor;
+}
+
+void DestroyTensor(OMTensor* tensor) {
+  if (tensor == nullptr) {
+    return;
+  }
+  if (tensor->owning != 0) {
+    std::free(tensor->allocated_ptr);
+  }
+  std::free(tensor->shape);
+  std::free(tensor->strides);
+  std::free(tensor);
+}
+
+OMTensorList* CreateTensorList(OMTensor** tensors, size_t size, bool shallow) {
+  auto* list = static_cast<OMTensorList*>(std::malloc(sizeof(OMTensorList)));
+  if (list == nullptr) {
+    return nullptr;
+  }
+  list->omts = static_cast<OMTensor**>(std::malloc(sizeof(OMTensor*) * size));
+  if (list->omts == nullptr) {
+    std::free(list);
+    return nullptr;
+  }
+  std::memcpy(list->omts, tensors, sizeof(OMTensor*) * size);
+  list->size = static_cast<int64_t>(size);
+  list->shallow = shallow;
+  return list;
+}
+
+void DestroyTensorList(OMTensorList* list) {
+  if (list == nullptr) {
+    return;
+  }
+  if (!list->shallow) {
+    for (int64_t i = 0; i < list->size; ++i) {
+      DestroyTensor(list->omts[i]);
+    }
+  }
+  std::free(list->omts);
+  std::free(list);
+}
+
+std::filesystem::path ResolveCompanionLibraryPath() {
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void*>(&npux_module_get_abi_version), &info) == 0 ||
+      info.dli_fname == nullptr) {
+    return std::filesystem::path{kCompanionLibraryName};
+  }
+
+  return std::filesystem::path{info.dli_fname}.parent_path() / kCompanionLibraryName;
+}
+
+std::filesystem::path ResolveSelfLibraryPath() {
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void*>(&npux_module_get_abi_version), &info) == 0 ||
+      info.dli_fname == nullptr) {
+    return std::filesystem::path{kModuleBasename}.replace_extension(".so");
+  }
+
+  return std::filesystem::path{info.dli_fname};
+}
+
+std::filesystem::path ResolveOptionalOmpLibraryPath() {
+  return ResolveSelfLibraryPath().parent_path() / "libomp.so";
+}
+
+std::filesystem::path ResolveWrapperProfileLogPath() {
+  return ResolveSelfLibraryPath().string() + ".wrapper_profile.jsonl";
+}
+
+void AppendProfileLine(const std::filesystem::path& path, const std::string& line) {
+  std::ofstream output_stream(path, std::ios::app | std::ios::binary);
+  if (!output_stream.is_open()) {
+    return;
+  }
+  output_stream << line << '\n';
+}
+
+}  // namespace
+
+extern "C" {
+
+int npux_module_get_abi_version(void) {
+  return NPUX_COMPILED_MODULE_ABI_VERSION;
+}
+
+int npux_module_create(const NpuxRuntimeApi* api, void** module_state) {
+  if (api == nullptr || module_state == nullptr) {
+    return -1;
+  }
+  if (api->abi_version != NPUX_COMPILED_MODULE_ABI_VERSION || api->struct_size < sizeof(NpuxRuntimeApi)) {
+    return -2;
+  }
+
+  auto* state = new ModuleState{};
+  state->api = *api;
+
+  const std::filesystem::path omp_path = ResolveOptionalOmpLibraryPath();
+  if (std::filesystem::exists(omp_path)) {
+    state->omp_handle = dlopen(omp_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    if (state->omp_handle == nullptr) {
+      delete state;
+      return -30;
+    }
+  }
+
+  const std::filesystem::path companion_path = ResolveCompanionLibraryPath();
+  state->companion_handle = dlopen(companion_path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (state->companion_handle == nullptr) {
+    if (state->omp_handle != nullptr) {
+      dlclose(state->omp_handle);
+    }
+    delete state;
+    return -3;
+  }
+
+  auto query_entry_points = reinterpret_cast<QueryEntryPointsFn>(dlsym(state->companion_handle, "omQueryEntryPoints"));
+  if (query_entry_points != nullptr) {
+    int64_t num_entry_points = 0;
+    const char* const* entry_points = query_entry_points(&num_entry_points);
+    if (entry_points != nullptr && num_entry_points > 0 && entry_points[0] != nullptr) {
+      state->entry_point = reinterpret_cast<EntryPointFn>(dlsym(state->companion_handle, entry_points[0]));
+    }
+  }
+
+  if (state->entry_point == nullptr) {
+    state->entry_point = reinterpret_cast<EntryPointFn>(dlsym(state->companion_handle, "run_main_graph"));
+  }
+  if (state->entry_point == nullptr) {
+    dlclose(state->companion_handle);
+    delete state;
+    return -4;
+  }
+
+  *module_state = state;
+  return 0;
+}
+
+int npux_module_run(void* module_state,
+                    const NpuxTensorView* inputs,
+                    size_t num_inputs,
+                    NpuxTensorView* outputs,
+                    size_t num_outputs) {
+  const auto wrapper_begin = SteadyClock::now();
+  auto* state = static_cast<ModuleState*>(module_state);
+  if (state == nullptr || state->entry_point == nullptr || outputs == nullptr) {
+    return -10;
+  }
+
+  const auto input_prepare_begin = SteadyClock::now();
+  auto** input_tensors = static_cast<OMTensor**>(std::malloc(sizeof(OMTensor*) * num_inputs));
+  if (input_tensors == nullptr) {
+    return -11;
+  }
+
+  for (size_t i = 0; i < num_inputs; ++i) {
+    input_tensors[i] = CreateTensorView(inputs[i]);
+    if (input_tensors[i] == nullptr) {
+      for (size_t j = 0; j < i; ++j) {
+        DestroyTensor(input_tensors[j]);
+      }
+      std::free(input_tensors);
+      return -12;
+    }
+  }
+
+  OMTensorList* input_list = CreateTensorList(input_tensors, num_inputs, false);
+  std::free(input_tensors);
+  if (input_list == nullptr) {
+    return -13;
+  }
+  const auto input_prepare_end = SteadyClock::now();
+
+  const auto entry_begin = SteadyClock::now();
+  OMTensorList* output_list = state->entry_point(input_list);
+  const auto entry_end = SteadyClock::now();
+  DestroyTensorList(input_list);
+  if (output_list == nullptr) {
+    return -14;
+  }
+
+  if (static_cast<size_t>(output_list->size) != num_outputs) {
+    DestroyTensorList(output_list);
+    return -15;
+  }
+
+  const auto output_copy_begin = SteadyClock::now();
+  for (size_t i = 0; i < num_outputs; ++i) {
+    OMTensor* output_tensor = output_list->omts[i];
+    if (output_tensor == nullptr || outputs[i].data == nullptr) {
+      DestroyTensorList(output_list);
+      return -16;
+    }
+    if (outputs[i].element_type != output_tensor->data_type) {
+      DestroyTensorList(output_list);
+      return -17;
+    }
+    if (outputs[i].rank != static_cast<size_t>(output_tensor->rank) || outputs[i].shape == nullptr) {
+      DestroyTensorList(output_list);
+      return -18;
+    }
+    for (size_t dim = 0; dim < outputs[i].rank; ++dim) {
+      if (outputs[i].shape[dim] != output_tensor->shape[static_cast<int64_t>(dim)]) {
+        DestroyTensorList(output_list);
+        return -19;
+      }
+    }
+    const size_t result_bytes = ComputeTensorBytes(output_tensor);
+    if (result_bytes == 0 || outputs[i].byte_size < result_bytes) {
+      DestroyTensorList(output_list);
+      return -20;
+    }
+    std::memcpy(outputs[i].data, output_tensor->aligned_ptr, result_bytes);
+  }
+  const auto output_copy_end = SteadyClock::now();
+
+  DestroyTensorList(output_list);
+  const auto wrapper_end = SteadyClock::now();
+  {
+    const uint64_t wrapper_total_ns = ToNanoseconds(wrapper_end - wrapper_begin);
+    const uint64_t input_prepare_ns = ToNanoseconds(input_prepare_end - input_prepare_begin);
+    const uint64_t entrypoint_ns = ToNanoseconds(entry_end - entry_begin);
+    const uint64_t output_copy_ns = ToNanoseconds(output_copy_end - output_copy_begin);
+    const uint64_t wrapper_overhead_ns =
+        wrapper_total_ns > entrypoint_ns ? wrapper_total_ns - entrypoint_ns : 0;
+    std::ostringstream profile_line;
+    profile_line
+        << '{'
+        << "\"module_basename\":\"" << kModuleBasename << "\","
+        << "\"wrapper_total_ns\":" << wrapper_total_ns << ','
+        << "\"input_prepare_ns\":" << input_prepare_ns << ','
+        << "\"entrypoint_ns\":" << entrypoint_ns << ','
+        << "\"output_copy_ns\":" << output_copy_ns << ','
+        << "\"wrapper_overhead_ns\":" << wrapper_overhead_ns
+        << '}';
+    AppendProfileLine(ResolveWrapperProfileLogPath(), profile_line.str());
+  }
+  return 0;
+}
+
+void npux_module_destroy(void* module_state) {
+  auto* state = static_cast<ModuleState*>(module_state);
+  if (state == nullptr) {
+    return;
+  }
+  if (state->companion_handle != nullptr) {
+    dlclose(state->companion_handle);
+  }
+  if (state->omp_handle != nullptr) {
+    dlclose(state->omp_handle);
+  }
+  delete state;
+}
+
+}  // extern "C"
+'''
+    return (
+        template
+        .replace("__API_HEADER__", str(NPUX_API_HEADER))
+        .replace("__COMPANION_NAME__", companion_name)
+        .replace("__MODULE_BASENAME__", companion_name.removesuffix("__om_model.so"))
+    )
+
+
+def compile_subcommand(args: argparse.Namespace) -> int:
+    if args.target != "host-sim":
+        raise ValueError(f"unsupported target '{args.target}', expected host-sim")
+
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_file = Path(args.log_file).resolve()
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    if log_file.exists():
+        log_file.unlink()
+
+    if not NPUX_API_HEADER.is_file():
+        raise FileNotFoundError(f"missing NPUX runtime api header: {NPUX_API_HEADER}")
+
+    with open(args.export_manifest, "r", encoding="utf-8") as f:
+        export_manifest = json.load(f)
+
+    if export_manifest.get("module_basename") != args.module_basename:
+        raise ValueError("export manifest module_basename does not match requested module name")
+
+    onnx_mlir = resolve_onnx_mlir_binary()
+    companion_base = output_dir / f"{args.module_basename}__om_model"
+    companion_library = Path(str(companion_base) + ".so")
+    compile_jobs = max(os.cpu_count() or 1, 1)
+
+    compile_proc = run_command(
+        [
+            str(onnx_mlir),
+            "--parallel",
+            "-j",
+            str(compile_jobs),
+            "-o",
+            str(companion_base),
+            str(Path(args.input).resolve()),
+        ],
+        log_file,
+    )
+    if compile_proc.returncode != 0:
+        raise RuntimeError(f"onnx-mlir failed with exit code {compile_proc.returncode}")
+
+    wrapper_source = output_dir / f"{args.module_basename}__npux_wrapper.cc"
+    wrapper_source.write_text(module_wrapper_source(companion_library.name), encoding="utf-8")
+
+    final_module = output_dir / f"{args.module_basename}.so"
+    cxx = resolve_cxx()
+    wrapper_proc = run_command(
+        [
+            cxx,
+            "-std=c++17",
+            "-shared",
+            "-fPIC",
+            str(wrapper_source),
+            "-o",
+            str(final_module),
+            "-ldl",
+        ],
+        log_file,
+    )
+    if wrapper_proc.returncode != 0:
+        raise RuntimeError(f"wrapper compilation failed with exit code {wrapper_proc.returncode}")
+
+    libomp_runtime = resolve_libomp_runtime()
+    if libomp_runtime is not None:
+        shutil.copy2(libomp_runtime, output_dir / "libomp.so")
+
+    compile_manifest = {
+        "schema": "npux-compile-manifest-v1",
+        "module_basename": args.module_basename,
+        "module_path": str(final_module),
+        "companion_library_path": str(companion_library),
+        "abi_version": int(args.abi_version),
+        "target": args.target,
+        "compiler_id": DRIVER_VERSION,
+        "graph_hash": export_manifest["graph_hash"],
+        "input_signatures": export_manifest["input_signatures"],
+        "output_signatures": export_manifest["output_signatures"],
+        "input_signatures_canonical": export_manifest["input_signatures_canonical"],
+        "output_signatures_canonical": export_manifest["output_signatures_canonical"],
+        "status": "ok",
+    }
+    compile_manifest_path = output_dir / "compile_manifest.json"
+    with compile_manifest_path.open("w", encoding="utf-8") as f:
+        json.dump(compile_manifest, f, ensure_ascii=True, separators=(",", ":"))
+        f.write("\n")
+
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="npux-mlir-driver")
+    parser.add_argument("--version", action="store_true", help="print driver version and exit")
+
+    subparsers = parser.add_subparsers(dest="command")
+    compile_parser = subparsers.add_parser("compile")
+    compile_parser.add_argument("--input", required=True)
+    compile_parser.add_argument("--output-dir", required=True)
+    compile_parser.add_argument("--module-basename", required=True)
+    compile_parser.add_argument("--target", required=True)
+    compile_parser.add_argument("--abi-version", required=True)
+    compile_parser.add_argument("--export-manifest", required=True)
+    compile_parser.add_argument("--log-file", required=True)
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.version:
+        print(DRIVER_VERSION)
+        return 0
+    if args.command != "compile":
+        parser.print_help(sys.stderr)
+        return 1
+    return compile_subcommand(args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as ex:
+        print(f"{DRIVER_VERSION}: {ex}", file=sys.stderr)
+        sys.exit(1)

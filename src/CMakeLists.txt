@@ -10,12 +10,12 @@ if (ONNX_MLIR_ENABLE_PYRUNTIME_LIGHT)
   return()
 endif()
 
-# Find OpenMP headers built by LLVM
+# Prefer LLVM's OpenMP headers, but fall back to the system GCC OpenMP headers
+# when host-side evaluation only needs a threaded CPU runtime.
 find_path(OPENMP_INCLUDE_DIR
   NAMES omp.h
   HINTS
     ${LLVM_BUILD_BINARY_DIR}/lib/clang/*/include
-  NO_DEFAULT_PATH
 )
 if(OPENMP_INCLUDE_DIR)
   set(OMP_SUPPORTED ON)

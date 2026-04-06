@@ -236,12 +236,12 @@ if (ONNX_MLIR_ENABLE_JNI)
   add_dependencies(OMCompilerUtils jniruntime)
 endif()
 
-# Find OpenMP headers built by LLVM
+# Prefer LLVM's OpenMP headers, but allow the system GCC OpenMP headers/runtime
+# for host-side CPU evaluation builds.
 find_path(OPENMP_INCLUDE_DIR
   NAMES omp.h
   HINTS
     ${LLVM_BUILD_BINARY_DIR}/lib/clang/*/include
-  NO_DEFAULT_PATH
 )
 if(OPENMP_INCLUDE_DIR)
   add_dependencies(OMCompilerUtils ompruntime)
@@ -292,5 +292,4 @@ target_link_libraries(PyCompile
 install(TARGETS PyCompile
   DESTINATION lib
   )
-
 
