@@ -431,6 +431,79 @@ struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
   }
 };
 
+struct NpuMatmulIntegerInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted")) return failure();
+
+    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
+    if (!libCallAttr || libCallAttr.getValue() != "npu_matmul_integer")
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu") return failure();
+
+    Location loc = op.getLoc();
+    StringRef stage = "single";
+    if (auto stageAttr = op->getAttrOfType<StringAttr>("npu.loop_stage")) {
+      stage = stageAttr.getValue();
+    }
+
+    // --- 步骤 1: 为前两个输入分配并插入 mvin (默认 encoding 2) ---
+    SmallVector<Value> newInputs;
+    for (auto it : llvm::enumerate(op.getInputs())) {
+      size_t index = it.index();
+      Value operand = it.value();
+      if (index < 2) {
+        Value processedInput =
+            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "input");
+        newInputs.push_back(processedInput);
+      } else {
+        newInputs.push_back(operand);
+      }
+    }
+
+    // --- 步骤 2: 准备输出张量，强制指定 encoding 为 3 ---
+    SmallVector<Value> mediumTensors;
+    for (Value originalOutput : op.getOutputs()) {
+      Value mediumTensor =
+          createNpuMediumTensor(rewriter, loc, originalOutput, 3);
+      mediumTensors.push_back(mediumTensor);
+    }
+
+    // --- 步骤 3: 克隆算子，连接新输入与 encoding 3 的输出 ---
+    auto newOp = cast<linalg::GenericOp>(rewriter.clone(*op.getOperation()));
+    newOp.getInputsMutable().assign(newInputs);
+    newOp.getOutputsMutable().assign(mediumTensors);
+
+    for (auto [idx, medium] : llvm::enumerate(mediumTensors)) {
+      newOp.getResult(idx).setType(medium.getType());
+    }
+    newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+
+    // --- 步骤 4: 根据 Loop Stage 条件插入 mvout ---
+    if (stage == "tail" || stage == "single") {
+      SmallVector<Value> finalResults;
+      for (auto [idx, mediumTensor] : llvm::enumerate(mediumTensors)) {
+        Value originalOutput = op.getOutputs()[idx];
+        Value computedResult = newOp.getResult(idx); // 此时 type 已经是 encode 3
+        
+        // 插入 mvout，将 encode 3 的结果搬运回 encode 0 (由 originalOutput 确定)
+        Value mvoutResult = createDmaOp(rewriter, loc, computedResult,
+            "npu_dma_mvout", 0, "output", originalOutput);
+        finalResults.push_back(mvoutResult);
+      }
+      rewriter.replaceOp(op, finalResults);
+    } else {
+      // head 或 body 阶段：不写入主存，数据保留在 NPU 内部 (encode 3) 供下一轮迭代累加
+      rewriter.replaceOp(op, newOp.getResults());
+    }
+
+    return success();
+  }
+};
 //=============================================================================
 // Pattern: NpuGeneralInsertDmaPattern
 // For unary ops (1 input, 1 output), insert mvin before and mvout after.
@@ -505,6 +578,7 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
   }
 };
 
+
 //=============================================================================
 // Pass Definition
 //=============================================================================
@@ -524,6 +598,7 @@ struct NpuInsertDmaPass
     patterns.add<NpuConvInsertDmaPattern>(context);
     patterns.add<NpuGemmInsertDmaPattern>(context);
     patterns.add<NpuMataddInsertDmaPattern>(context);
+    patterns.add<NpuMatmulIntegerInsertDmaPattern>(context);
     patterns.add<NpuGeneralInsertDmaPattern>(context);
 
     GreedyRewriteConfig config;

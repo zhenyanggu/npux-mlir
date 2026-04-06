@@ -104,7 +104,8 @@ static LogicalResult peelForLoopLastIteration(
 }
 
 static SmallVector<int64_t, 3> calculateAutoGemmTile(
-    int64_t M, int64_t N, int64_t K, int64_t spmSize, int64_t accSize) {
+    int64_t M, int64_t N, int64_t K, int64_t spmSize, int64_t accSize,
+    bool requiresOutputInSpm = true) { // <- 新增参数，默认为 true 保持兼容
 
   const int64_t arraySizeH = 32;
   const int64_t arraySizeW = 32;
@@ -112,7 +113,6 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
   const int64_t outputDtypeBytes = 1;
   const int64_t accDtypeBytes = 4;   
 
-  // 核心修改 1：支持小于 32 的对齐函数
   auto get_valid_tile_size = [&](int64_t val) -> int64_t {
     if (val < 32) return val;
     return (val / 32) * 32;
@@ -121,13 +121,14 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
   int64_t m_aligned = get_valid_tile_size(M);
   int64_t n_aligned = get_valid_tile_size(N);
 
+  int64_t min_tm = std::min<int64_t>(M, arraySizeH);
+  int64_t min_tn = std::min<int64_t>(N, arraySizeW);
+
   // ==========================================
   // Step 1: 最大化 Tk
   // ==========================================
-  // 核心修改 2：计算 Tk 物理上限时，使用真实的最小需求边界
-  int64_t min_tm = std::min<int64_t>(M, arraySizeH);
-  int64_t min_tn = std::min<int64_t>(N, arraySizeW);
-  int64_t base_out_spm = min_tm * min_tn * outputDtypeBytes;
+  // 修改点：根据 requiresOutputInSpm 决定是否预留 out_spm 空间
+  int64_t base_out_spm = requiresOutputInSpm ? (min_tm * min_tn * outputDtypeBytes) : 0;
   
   int64_t max_tk_spm = 1;
   if (spmSize > base_out_spm) {
@@ -140,11 +141,15 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
   // ==========================================
   int64_t max_tm_acc = accSize / (min_tn * accDtypeBytes);
   
-  // 核心修改 3：SPM 约束计算时也要用更新后的 min_tn
-  int64_t max_tm_spm = m_aligned; // 默认最大能取到自身 aligned 后的值
+  int64_t max_tm_spm = m_aligned; 
   int64_t spm_rem_for_m = spmSize - min_tn * t_k * inputDtypeBytes; 
   if (spm_rem_for_m > 0) {
-    max_tm_spm = spm_rem_for_m / (min_tn * outputDtypeBytes + t_k * inputDtypeBytes);
+    // 修改点：只在需要时将 output 计入分母
+    int64_t denominator = t_k * inputDtypeBytes;
+    if (requiresOutputInSpm) {
+      denominator += min_tn * outputDtypeBytes;
+    }
+    max_tm_spm = spm_rem_for_m / denominator;
   }
   
   int64_t t_m = std::min({m_aligned, max_tm_acc, max_tm_spm});
@@ -158,7 +163,12 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
   int64_t max_tn_spm = n_aligned;
   int64_t spm_rem_for_n = spmSize - t_k * t_m * inputDtypeBytes;
   if (spm_rem_for_n > 0) {
-    max_tn_spm = spm_rem_for_n / (t_m * outputDtypeBytes + t_k * inputDtypeBytes);
+    // 修改点：只在需要时将 output 计入分母
+    int64_t denominator = t_k * inputDtypeBytes;
+    if (requiresOutputInSpm) {
+      denominator += t_m * outputDtypeBytes;
+    }
+    max_tn_spm = spm_rem_for_n / denominator;
   }
 
   int64_t t_n = std::min({n_aligned, max_tn_acc, max_tn_spm});
@@ -167,7 +177,7 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
   return {t_m, t_n, t_k};
 }
 
-SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
+SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op, bool requiresOutputInSpm = true) { 
   auto &config = npux::NPUConfig::getInstance();
 
   // 1. 获取手动配置 (这里假设用户的配置还是按 Tm, Tn, Tk 填写的)
@@ -201,7 +211,7 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
     int64_t spmSize = config.getSpmSize();
     int64_t accSize = config.getAccSize();
     // 自动分块逻辑依然基于 M, N, K 计算 Tm, Tn, Tk，无需改变
-    computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize);
+    computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize, requiresOutputInSpm);
   }
 
   std::string msg;
@@ -520,10 +530,201 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     return success();
   }
 };
+// -----------------------------------------------------------------------------
+// Pattern for Standalone Matmul (e.g., npu_matmul_integer without mv_acc_to_spm)
+// -----------------------------------------------------------------------------
+struct NpuStandaloneMatmulTilingPattern : public OpRewritePattern<linalg::GenericOp> {
+  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+
+    // 1. 匹配目标算子 npu_matmul_integer
+    auto libCall = op->getAttrOfType<StringAttr>("library_call");
+    if (!libCall || libCall.getValue() != "npu_matmul_integer") {
+      return failure();
+    }
+
+    // 防止重复 Tiling
+    if (op->hasAttr("npu.tiled")) {
+      return failure();
+    }
+
+    // 2. 获取切分配置 [Batch..., M, N, K]
+    SmallVector<int64_t> tileSizes = getGemmTileSizes(op, /*requiresOutputInSpm=*/false);
+    if (tileSizes.empty())
+      return failure();
+
+    int64_t rank = tileSizes.size();
+    if (rank < 2)
+      return failure(); // 至少要有 M, K
+
+    // 拆分 Tile Sizes：空间维度 (M, N) 和 规约维度 (K)
+    SmallVector<int64_t> spatialTileSizes = tileSizes;
+    spatialTileSizes.back() = 0; // 最后一个维度 K 设为 0，空间循环不切分 K
+
+    SmallVector<int64_t> kTileSizes(rank, 0);
+    kTileSizes.back() = tileSizes.back(); // 只有 K 维度有值
+
+    // =================================================================
+    // Phase 1: 沿着空间维度对 npu_matmul_integer 进行 Tiling
+    // 注意：这里不再使用 Fuse，而是直接 tileUsingSCF
+    // =================================================================
+    auto tilingInterface = cast<TilingInterface>(op.getOperation());
+    scf::SCFTilingOptions spatialOptions;
+    spatialOptions.setTileSizes(
+        getAsOpFoldResult(rewriter.getI64ArrayAttr(spatialTileSizes)));
+
+    FailureOr<scf::SCFTilingResult> spatialTilingResult =
+        scf::tileUsingSCF(rewriter, tilingInterface, spatialOptions);
+
+    if (failed(spatialTilingResult)) {
+      return failure();
+    }
+
+    // 给空间循环打上 Label
+    auto spatialLoops = spatialTilingResult->loops;
+    int currentLoopIdx = 0;
+    for (size_t dimIdx = 0; dimIdx < rank - 1; ++dimIdx) {
+      if (spatialTileSizes[dimIdx] == 0)
+        continue;
+      if (currentLoopIdx >= spatialLoops.size())
+        break;
+
+      StringRef label;
+      if (rank == 5) {
+        if (dimIdx == 0) label = "Batch1";
+        else if (dimIdx == 1) label = "Batch2";
+        else if (dimIdx == 2) label = "N";
+        else if (dimIdx == 3) label = "M";
+      } else if (rank == 4) {
+        if (dimIdx == 0) label = "Batch";
+        else if (dimIdx == 1) label = "N";
+        else if (dimIdx == 2) label = "M";
+      } else {
+        if (dimIdx == 0) label = "N";
+        else if (dimIdx == 1) label = "M";
+      }
+
+      spatialLoops[currentLoopIdx]->setAttr(
+          "npu.loop_dim", rewriter.getStringAttr(label));
+      spatialLoops[currentLoopIdx]->setAttr(
+          "npu.target", rewriter.getStringAttr("npu"));
+      currentLoopIdx++;
+    }
+
+    // =================================================================
+    // Phase 2: 获取局部 Matmul 并沿着 K (Reduction) 维度进行 Tiling
+    // =================================================================
+    auto tiledMatmulOp = cast<linalg::GenericOp>(spatialTilingResult->tiledOps.front());
+    tiledMatmulOp->setAttr("npu.tiled", rewriter.getUnitAttr());
+
+    scf::SCFTilingOptions kOptions;
+    kOptions.setTileSizes(
+        getAsOpFoldResult(rewriter.getI64ArrayAttr(kTileSizes)));
+
+    FailureOr<scf::SCFTilingResult> kTilingResult = scf::tileUsingSCF(
+        rewriter, cast<TilingInterface>(tiledMatmulOp.getOperation()), kOptions);
+
+    if (failed(kTilingResult))
+      return failure();
+
+    // 给 K 循环打标签
+    if (!kTilingResult->loops.empty()) {
+      kTilingResult->loops.front()->setAttr(
+          "npu.loop_dim", rewriter.getStringAttr("K"));
+      kTilingResult->loops.front()->setAttr(
+          "npu.target", rewriter.getStringAttr("npu"));
+    }
+
+    // =================================================================
+    // Phase 3: K 维度的 Head -> Body -> Tail Peeling (复用现有逻辑)
+    // =================================================================
+    auto kLoops = kTilingResult->loops;
+    SmallVector<Value> finalKResults = kTilingResult->replacements;
+
+    if (!kLoops.empty()) {
+      auto loopOp = cast<scf::ForOp>(kLoops.back().getOperation());
+
+      int64_t tripCount = getStaticTripCount(loopOp);
+      if (tripCount == 1) {
+        tagInnerComputeOp(loopOp, "single", rewriter);
+      } else {
+        scf::ForOp restLoop = loopOp;
+
+        // --- Phase 3.1: Peel Head ---
+        scf::ForOp headLoop;
+        if (succeeded(peelForLoopFirstIteration(rewriter, loopOp, headLoop))) {
+          inheritNpuAttributes(restLoop, headLoop);
+          tagInnerComputeOp(headLoop, "head", rewriter);
+          restLoop = loopOp;
+        }
+
+        int64_t restTripCount = getStaticTripCount(restLoop);
+
+        // --- Phase 3.2: Peel Tail ---
+        if (restTripCount == 1) {
+          tagInnerComputeOp(restLoop, "tail", rewriter);
+          finalKResults = restLoop->getResults();
+        } else {
+          scf::ForOp tailLoop;
+          bool hasTail = false;
+
+          scf::ForOp partialLoop;
+          if (succeeded(scf::peelForLoopAndSimplifyBounds(
+                  rewriter, restLoop, partialLoop))) {
+            tailLoop = partialLoop;
+            hasTail = true;
+          } else {
+            scf::ForOp forceTail;
+            if (succeeded(
+                    peelForLoopLastIteration(rewriter, restLoop, forceTail))) {
+              tailLoop = forceTail;
+              hasTail = true;
+            }
+          }
+
+          if (hasTail) {
+            inheritNpuAttributes(restLoop, tailLoop);
+            tagInnerComputeOp(tailLoop, "tail", rewriter);
+            tagInnerComputeOp(restLoop, "body", rewriter);
+            finalKResults = tailLoop->getResults();
+          } else {
+            tagInnerComputeOp(restLoop, "body", rewriter);
+            finalKResults = restLoop->getResults();
+          }
+        }
+      }
+    }
+
+    // =================================================================
+    // Phase 4: 链接数据流并替换原 Op
+    // =================================================================
+    // 1. 将空间 Tiling 生成的内部原始 Matmul 替换为 K 维度 Tiling 的结果
+    rewriter.replaceOp(tiledMatmulOp, finalKResults);
+
+    // 2. 将外层的原始 npu_matmul_integer 替换为空间 Tiling 的最终结果
+    rewriter.replaceOp(op, spatialTilingResult->replacements);
+
+    // =================================================================
+    // Phase 5: 空间循环维度的常规尾部剥离 (Tail Peeling)
+    // =================================================================
+    for (int i = (int)spatialLoops.size() - 1; i >= 0; --i) {
+      auto loopOp = cast<scf::ForOp>(spatialLoops[i].getOperation());
+      scf::ForOp partialLoop;
+      if (succeeded(scf::peelForLoopAndSimplifyBounds(
+              rewriter, loopOp, partialLoop))) {
+        inheritNpuAttributes(loopOp, partialLoop);
+      }
+    }
+
+    return success();
+  }
+};
 
 } // namespace
 
 void npux::populateGemmTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
-  patterns.add<NpuGemmTilingPattern>(context);
+  patterns.add<NpuGemmTilingPattern,NpuStandaloneMatmulTilingPattern>(context);
 }

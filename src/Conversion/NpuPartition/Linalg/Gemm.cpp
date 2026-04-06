@@ -42,19 +42,39 @@ static float getScalarFloat(Value v, float defaultVal = 1.0f) {
 }
 
 static int64_t getScalarInt(Value v, int64_t defaultVal = 0) {
+  if (!v)
+    return defaultVal;
+
   if (auto constOp = v.getDefiningOp<arith::ConstantOp>()) {
     if (auto intAttr = mlir::dyn_cast<IntegerAttr>(constOp.getValue())) {
       return intAttr.getInt();
     }
   }
+
   if (auto constOp = v.getDefiningOp<ONNXConstantOp>()) {
     if (auto dense =
             mlir::dyn_cast<DenseElementsAttr>(constOp.getValueAttr())) {
-      if (dense.getElementType().isInteger(8))
+      auto elemType = dense.getElementType();
+
+      // 必须先检查无符号类型，因为 isInteger(8) 会包含 isUnsignedInteger(8)
+      if (elemType.isUnsignedInteger(8))
+        return dense.getValues<uint8_t>()[0];
+      if (elemType.isInteger(8))
         return dense.getValues<int8_t>()[0];
-      if (dense.getElementType().isInteger(32))
+
+      if (elemType.isUnsignedInteger(16))
+        return dense.getValues<uint16_t>()[0];
+      if (elemType.isInteger(16))
+        return dense.getValues<int16_t>()[0];
+
+      if (elemType.isUnsignedInteger(32))
+        return dense.getValues<uint32_t>()[0];
+      if (elemType.isInteger(32))
         return dense.getValues<int32_t>()[0];
-      if (dense.getElementType().isInteger(64))
+
+      if (elemType.isUnsignedInteger(64))
+        return dense.getValues<uint64_t>()[0];
+      if (elemType.isInteger(64))
         return dense.getValues<int64_t>()[0];
     }
   }
@@ -81,6 +101,10 @@ static Value processNpuLinalgInput(OpBuilder &b, Location loc, Value v) {
   if (!type)
     return v;
 
+  if (isa<BlockArgument>(v)) {
+    return v;
+  }
+
   auto encType = addEncoding1(type, b);
 
   // 如果是常数，插入 linalg.copy
@@ -106,8 +130,7 @@ static Value processNpuLinalgInput(OpBuilder &b, Location loc, Value v) {
 // 生成 Linalg 转置
 // ==========================================================
 static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input,
-    Operation *sourceOp, StringRef layerName,
-    ArrayRef<StringRef> fusedOps) {
+    Operation *sourceOp, StringRef layerName, ArrayRef<StringRef> fusedOps) {
   auto inputType = mlir::dyn_cast<RankedTensorType>(input.getType());
   if (!inputType || inputType.getRank() < 2)
     return input;
@@ -165,8 +188,7 @@ static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input,
 
   genericOp->setAttr("library_call", b.getStringAttr("npu_transpose"));
   genericOp->setAttr("npu.target", b.getStringAttr("npu"));
-  setNpuProfileAttrs(
-      genericOp, sourceOp, b, layerName, "layout_in", fusedOps);
+  setNpuProfileAttrs(genericOp, sourceOp, b, layerName, "layout_in", fusedOps);
 
   return genericOp.getResult(0);
 }
@@ -180,14 +202,40 @@ static void createI32MatMulBody(OpBuilder &b, Location loc, ValueRange args) {
 
   auto castToI32 = [&](Value v) -> Value {
     Type t = v.getType();
-    if (t.isInteger(32))
-      return v;
-    if (t.isInteger(8) || t.isInteger(1) || t.isInteger(16)) {
-      return b.create<arith::ExtSIOp>(loc, b.getI32Type(), v);
-    }
+
+    // 1. 处理浮点数
     if (mlir::isa<FloatType>(t)) {
       return b.create<arith::FPToSIOp>(loc, b.getI32Type(), v);
     }
+
+    // 2. 处理所有整数类型
+    if (t.isIntOrIndex()) {
+      unsigned bitwidth = t.getIntOrFloatBitWidth();
+      Value signlessVal = v;
+
+      // 步骤 A：如果类型带有符号 (ui8, si8, ui32 等)，强制剥离为 Signless (i8,
+      // i32)
+      if (!t.isSignlessInteger()) {
+        Type signlessType = b.getIntegerType(bitwidth);
+        signlessVal = b.create<UnrealizedConversionCastOp>(loc, signlessType, v)
+                          .getResult(0);
+      }
+
+      // 步骤 B：如果是 32 位，剥离符号后直接返回
+      if (bitwidth == 32) {
+        return signlessVal;
+      }
+
+      // 步骤 C：根据原始类型是有符号还是无符号，选择对应的扩展指令
+      if (t.isUnsignedInteger()) {
+        // 原始类型是 ui8/ui16，对 signlessVal 执行无符号零扩展 (Zero Extension)
+        return b.create<arith::ExtUIOp>(loc, b.getI32Type(), signlessVal);
+      } else {
+        // 原始类型是 si8/i8，对 signlessVal 执行有符号扩展 (Sign Extension)
+        return b.create<arith::ExtSIOp>(loc, b.getI32Type(), signlessVal);
+      }
+    }
+
     return v;
   };
 
@@ -205,17 +253,17 @@ static void createI32MatMulBody(OpBuilder &b, Location loc, ValueRange args) {
   Value resI32 = b.create<arith::AddIOp>(loc, outI32, mul);
   b.create<linalg::YieldOp>(loc, resI32);
 }
-
 // 通用的 MatMul 构建器
 static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
     Location loc,
     SmallVector<Value> inputs, // [A, B] 或 [A, B, C]
-    RankedTensorType outType,  // Final Output Type (e.g., i8)
+    RankedTensorType outType,  // Final Output Type
     float lhsScale, int64_t lhsZp, float rhsScale, int64_t rhsZp,
     float outScale, int64_t outZp, StringRef libCallName, int64_t do_relu = 0,
     int64_t relu_type = 0, bool transA = false, bool transB = false,
     Operation *sourceOp = nullptr, StringRef layerName = {},
-    ArrayRef<StringRef> fusedOps = {}) {
+    ArrayRef<StringRef> fusedOps = {}, bool skipSPM = false,
+    bool isGraphOutput = false) {
   int64_t outRank = outType.getRank();
   assert(outRank >= 2 && "MatMul output rank must be >= 2");
   bool hasBias = (inputs.size() == 3);
@@ -229,7 +277,8 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
 
     // 1. 分配中间带有 encoding=1 的 i32 累加器 Buffer
     auto i32Type = RankedTensorType::get(outType.getShape(), b.getI32Type());
-    auto encI32Type = addEncoding1(i32Type, b);
+    RankedTensorType encI32Type = (skipSPM && isGraphOutput) ? 
+                                   i32Type : addEncoding1(i32Type, b);
     Value i32Alloc =
         b.create<bufferization::AllocTensorOp>(loc, encI32Type, dynSizes);
 
@@ -367,9 +416,14 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
       gemmOp->setAttr("relu_type", b.getI32IntegerAttr(relu_type));
     }
 
+    if (skipSPM) {
+      return gemmOp.getResult(0);
+    }
+
     // 5. SPM 阶段：i32 -> 最终带有 encoding=1 的输出类型
     Type finalElemType = outType.getElementType();
-    auto encOutType = addEncoding1(outType, b);
+    RankedTensorType encOutType =
+        isGraphOutput ? outType : addEncoding1(outType, b);
     Value outAlloc =
         b.create<bufferization::AllocTensorOp>(loc, encOutType, dynSizes);
 
@@ -425,10 +479,6 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
     return quantOp.getResult(0);
   };
 
-  // ==============================================================================
-  // 主干逻辑: 剥离 SCF.Region，加入 Encode 和 Constant 检查
-  // ==============================================================================
-
   // --- 0. 预处理 inputs (设置 Encode=1, 插入 linalg.copy 处理 Constant) ---
   SmallVector<Value> processedInputs;
   for (Value in : inputs) {
@@ -438,13 +488,13 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
   // --- 1. 执行输入端 Transpose ---
   Value actualA = processedInputs[0];
   if (transA) {
-    actualA =
-        buildLinalgTranspose(rewriter, loc, actualA, sourceOp, layerName, fusedOps);
+    actualA = buildLinalgTranspose(
+        rewriter, loc, actualA, sourceOp, layerName, fusedOps);
   }
   Value actualB = processedInputs[1];
   if (transB) {
-    actualB =
-        buildLinalgTranspose(rewriter, loc, actualB, sourceOp, layerName, fusedOps);
+    actualB = buildLinalgTranspose(
+        rewriter, loc, actualB, sourceOp, layerName, fusedOps);
   }
 
   // --- 2. 准备动态尺寸 ---
@@ -688,10 +738,10 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
     if (do_relu == 1)
       fusedOps.push_back("Relu");
 
-    Value result = createGenericMatMulOp(rewriter, op.getLoc(), inputs,
-        outputType, scaleA, zpA, scaleB, zpB, scaleY, zpY, "npu_matmul",
-        do_relu, relu_type, false, false, op, getNpuProfileLayerName(op),
-        fusedOps);
+    Value result =
+        createGenericMatMulOp(rewriter, op.getLoc(), inputs, outputType, scaleA,
+            zpA, scaleB, zpB, scaleY, zpY, "npu_matmul", do_relu, relu_type,
+            false, false, op, getNpuProfileLayerName(op), fusedOps);
 
     // =========================================================================
     // 安全擦除
@@ -719,8 +769,182 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
   }
 };
 
+
+struct MatMulIntegerToLinalg : public OpConversionPattern<ONNXMatMulIntegerOp> {
+  using OpConversionPattern<ONNXMatMulIntegerOp>::OpConversionPattern;
+
+  LogicalResult matchAndRewrite(ONNXMatMulIntegerOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+
+    Value inputA = op.getA();
+    Value inputB = op.getB();
+    Value aZp = op.getAZeroPoint();
+    Value bZp = op.getBZeroPoint();
+    Location loc = op.getLoc();
+
+    int64_t zpA = getScalarInt(aZp, 0);
+    int64_t zpB = getScalarInt(bZp, 0);
+
+    if (zpB != 0) {
+      llvm::errs() << "Warning: MatMulInteger with non-zero weight zero-point "
+                   << "will cause dynamic row offsets. Optimization assumes "
+                      "symmetric weights.\n";
+    }
+
+    auto bType = mlir::dyn_cast<RankedTensorType>(inputB.getType());
+    if (!bType || bType.getRank() != 2) {
+      return failure(); // 仅支持 2D 静态权重解析
+    }
+    int64_t K = bType.getShape()[0];
+    int64_t N = bType.getShape()[1];
+
+    // =========================================================
+    // 1. 图融合探测：寻找紧跟其后的 onnx.Add
+    // =========================================================
+    ONNXAddOp fusedAddOp = nullptr;
+    Value addConstVal = nullptr;
+
+    if (op.getResult().hasOneUse()) {
+      if (auto addOp =
+              mlir::dyn_cast<ONNXAddOp>(*op.getResult().getUsers().begin())) {
+        // 确定哪一边是 MatMulInteger 的输出，哪一边是 Bias 常量
+        Value otherOperand =
+            (addOp.getA() == op.getResult()) ? addOp.getB() : addOp.getA();
+        if (otherOperand.getDefiningOp<ONNXConstantOp>()) {
+          fusedAddOp = addOp;
+          addConstVal = otherOperand;
+        }
+      }
+    }
+
+    SmallVector<StringRef> fusedOps = {"MatMulInteger"};
+    SmallVector<int32_t> combinedBiasVals(N, 0);
+    bool needBiasInput = false;
+
+    // =========================================================
+    // 2. 解析后续的 Add Bias 常量并并入 combinedBiasVals
+    // =========================================================
+    bool addFusedSuccessfully = false;
+
+    if (fusedAddOp && addConstVal) {
+      auto addConstOp = addConstVal.getDefiningOp<ONNXConstantOp>();
+      if (auto addDense =
+              mlir::dyn_cast<DenseElementsAttr>(addConstOp.getValueAttr())) {
+        if (addDense.getElementType().isInteger(32)) {
+          auto shape = cast<ShapedType>(addDense.getType()).getShape();
+          
+          // 支持 Scalar (空 shape) 或 [1] 的 broadcasting
+          if (shape.empty() || (shape.size() == 1 && shape[0] == 1)) {
+            int32_t scalarBias = addDense.getValues<int32_t>()[0];
+            for (int n = 0; n < N; ++n)
+              combinedBiasVals[n] = scalarBias;
+            addFusedSuccessfully = true;
+          } 
+          // 支持 [N] 的 1D Tensor 或 [1, N] 的 2D Tensor
+          else if ((shape.size() == 1 && shape[0] == N) || 
+                   (shape.size() == 2 && shape[0] == 1 && shape[1] == N)) {
+            auto values = addDense.getValues<int32_t>();
+            int n = 0;
+            for (auto val : values) {
+              combinedBiasVals[n++] = val;
+            }
+            addFusedSuccessfully = true;
+          }
+        }
+      }
+    }
+
+    // 根据解析结果决定是否提交融合状态
+    if (fusedAddOp && addFusedSuccessfully) {
+      needBiasInput = true;
+      fusedOps.push_back("Add");
+    } else {
+      // 如果不满足支持的条件，则取消融合探测，保留原始 Add 节点
+      fusedAddOp = nullptr;
+      addConstVal = nullptr;
+    }
+    // =========================================================
+    // 3. 计算由于激活值非对称量化引入的列偏移 Bias
+    // =========================================================
+    if (zpA != 0) {
+      auto bConstOp = inputB.getDefiningOp<ONNXConstantOp>();
+      if (bConstOp) {
+        if (auto denseAttr =
+                mlir::dyn_cast<DenseElementsAttr>(bConstOp.getValueAttr())) {
+          if (denseAttr.getElementType().isInteger(8)) {
+            auto values = denseAttr.getValues<int8_t>();
+            auto it = values.begin();
+            // sum_k (B_k,j) * (-Z_A)
+            for (int k = 0; k < K; ++k) {
+              for (int n = 0; n < N; ++n) {
+                combinedBiasVals[n] += (128 - zpA) * static_cast<int32_t>(*it);
+                ++it;
+              }
+            }
+            needBiasInput = true;
+          }
+        }
+      }
+    }
+
+    // =========================================================
+    // 4. 生成最终的 3输入 / 2输入 参数列表
+    // =========================================================
+    SmallVector<Value> inputs = {inputA, inputB};
+    if (needBiasInput) {
+      auto biasType = RankedTensorType::get({N}, rewriter.getI32Type());
+      auto newDenseAttr = DenseElementsAttr::get(
+          biasType, llvm::ArrayRef<int32_t>(combinedBiasVals));
+      Value precomputedBias =
+          rewriter.create<ONNXConstantOp>(loc, mlir::Attribute(), newDenseAttr);
+
+      inputs.push_back(precomputedBias);
+    }
+
+    // 确定最后被替换的目标算子和类型
+    Operation *replaceTarget =
+        fusedAddOp ? fusedAddOp.getOperation() : op.getOperation();
+    auto outputType =
+        mlir::cast<RankedTensorType>(replaceTarget->getResult(0).getType());
+
+    // =========================================================
+    // 5. 调用核心接口生成纯粹的 INT32 GEMM（跳过 SPM）
+    // =========================================================
+    bool isGraphOutput = false;
+    for (Operation *user : replaceTarget->getUsers()) {
+      if (user->getName().getStringRef() == "func.return") {
+        isGraphOutput = true;
+        break;
+      }
+    }
+
+    // 5. 调用核心接口，传入 isGraphOutput
+    Value result = createGenericMatMulOp(rewriter, loc, inputs, outputType,
+        1.0f, zpA, 1.0f, zpB, 1.0f, 0, "npu_matmul_integer", 0, 0, false, false,
+        op, getNpuProfileLayerName(op), fusedOps,
+        /*skipSPM=*/true,
+        /*isGraphOutput=*/isGraphOutput);
+
+    // =========================================================
+    // 6. 安全擦除与图更新
+    // =========================================================
+    replaceTarget->getResult(0).setType(result.getType());
+    rewriter.replaceOp(replaceTarget, result);
+
+    if (fusedAddOp) {
+      rewriter.eraseOp(op); // 擦除原 MatMulInteger
+      if (addConstVal.hasOneUse()) {
+        rewriter.eraseOp(addConstVal.getDefiningOp());
+      }
+    }
+
+    return success();
+  }
+};
+
 } // namespace
 
 void npux::populateLinalgGemmPattern(RewritePatternSet &patterns) {
-  patterns.add<GemmToLinalg, QLinearMatMulToLinalg>(patterns.getContext());
+  patterns.add<GemmToLinalg, QLinearMatMulToLinalg, MatMulIntegerToLinalg>(
+      patterns.getContext());
 }

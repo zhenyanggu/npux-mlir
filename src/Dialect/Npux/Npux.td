@@ -199,20 +199,20 @@ def Npux_MvinBiasOp : Npux_Op<"mvin_bias"> {
 }
 
 def Npux_DmaMvoutOp : Npux_Op<"dma_mvout"> {
-  let summary = "SRAM -> Host DMA";
+  let summary = "SRAM/ACC -> Host DMA";
 
-  let arguments = (ins AnyMemRef:$host_ptr, NpuSramMemRef:$sram_memref, I32:$col_num,
+  let arguments = (ins AnyMemRef:$host_ptr, NpuSramOrAccMemRef:$src_memref, I32:$col_num,
       I32:$row_num, I16:$sram_stride, I32:$dram_stride, I8:$precision,
       I8:$output_type, I8:$source, I1:$is_quant, I32:$quant_zero,
       I16:$quant_scale, I16:$quant_shift);
   let results = (outs);
   let assemblyFormat = [{
-    $host_ptr `,` $sram_memref 
+    $host_ptr `,` $src_memref 
     `shape` `(` $col_num `x` $row_num `)` 
     `stride` `(` $sram_stride `,` $dram_stride `)`
     `cfg` `(` $precision `,` $output_type `,` $source `)`
     `quant` `(` $is_quant `,` $quant_zero `,` $quant_scale `,` $quant_shift `)`
-    attr-dict `:` type($host_ptr) `,` type($sram_memref)
+    attr-dict `:` type($host_ptr) `,` type($src_memref)
   }];
 }
 

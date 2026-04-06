@@ -508,13 +508,13 @@ public:
     auto dramMemRefType = cast<MemRefType>(op.getHostPtr().getType());
     Value hostPtr = getFlatPtrFromMemRef(
         loc, adaptor.getHostPtr(), dramMemRefType.getElementType(), rewriter);
-    Value sramAddr = getNpuOffsetAddress(loc, op.getSramMemref(), rewriter);
-    if (!sramAddr)
+    Value srcAddr = getNpuOffsetAddress(loc, op.getSrcMemref(), rewriter);
+    if (!srcAddr)
       return failure();
 
     SmallVector<Value> args;
     args.push_back(hostPtr);
-    args.push_back(sramAddr);
+    args.push_back(srcAddr);
     args.push_back(adaptor.getColNum());
     args.push_back(adaptor.getRowNum());
     args.push_back(adaptor.getSramStride());

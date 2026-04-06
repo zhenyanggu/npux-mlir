@@ -204,7 +204,7 @@ struct ONNXToLinalgNpuPass
     }
     
     if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::MatMul)) {
-      target.addIllegalOp<ONNXQLinearMatMulOp>();
+      target.addIllegalOp<ONNXQLinearMatMulOp,ONNXMatMulIntegerOp>();
     }
     if (isEmpty || onnx_mlir::hasNpuOp(onnx_mlir::NpuOp::LayerNorm)) {
       target.addDynamicallyLegalOp<ONNXLayerNormalizationOp>(

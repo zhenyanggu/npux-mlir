@@ -157,8 +157,8 @@ public:
 
     int srcSpace = srcType.getMemorySpaceAsInt();
     int dstSpace = dstType.getMemorySpaceAsInt();
-    bool isMvin = (srcSpace == 1 && (dstSpace == 2 || dstSpace == 3));
-    bool isMvout = (srcSpace == 2 && dstSpace == 1);
+    bool isMvin = ((srcSpace == 1 || srcSpace == 0) && (dstSpace == 2 || dstSpace == 3));
+    bool isMvout = ((srcSpace == 2|| srcSpace == 3) && (dstSpace == 1 || dstSpace == 0));
 
     if (!isMvin && !isMvout)
       return failure();

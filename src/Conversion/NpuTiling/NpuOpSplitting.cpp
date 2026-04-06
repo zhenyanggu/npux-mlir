@@ -586,8 +586,10 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       if (!producerOp)
         return failure();
       auto prodLibCall = producerOp->getAttrOfType<StringAttr>("library_call");
+      // [修改点 1] 添加 npu_matmul_integer 的防御性支持
       if (!prodLibCall || (prodLibCall.getValue() != "npu_gemm" &&
-                           prodLibCall.getValue() != "npu_matmul")) {
+                           prodLibCall.getValue() != "npu_matmul" &&
+                           prodLibCall.getValue() != "npu_matmul_integer")) {
         return failure();
       }
       // -----------------------------------------------------------
@@ -596,7 +598,8 @@ struct NpuGemmTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       return handleTailFusion(op, producerOp, rewriter);
     }
 
-    if (libName == "npu_gemm" || libName == "npu_matmul") {
+    // [修改点 2] 将 npu_matmul_integer 加入场景 B 的匹配列表
+    if (libName == "npu_gemm" || libName == "npu_matmul" || libName == "npu_matmul_integer") {
       // -----------------------------------------------------------
       // 场景 B: Head / Body 阶段 (仅对 Gemm 分块 + Peeling)
       // -----------------------------------------------------------

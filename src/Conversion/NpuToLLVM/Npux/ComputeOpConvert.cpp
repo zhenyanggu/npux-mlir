@@ -131,7 +131,7 @@ static bool isNpuComputeGenericOp(linalg::GenericOp op) {
     return false;
   StringRef libName = libCall.getValue();
   return libName == "npu_conv" || libName == "npu_gemm" ||
-         libName == "npu_matmul";
+         libName == "npu_matmul" || libName == "npu_matmul_integer";
 }
 
 static bool opOrNestedWritesOutput(Operation *candidate, Value outputMemRef) {
@@ -180,7 +180,7 @@ public:
 
     if (libName == "npu_conv") {
       opType = ComputeOpType::conv;
-    } else if (libName == "npu_matmul" || libName == "npu_gemm") {
+    } else if (libName == "npu_matmul" || libName == "npu_gemm"|| libName == "npu_matmul_integer") {
       opType = ComputeOpType::gemm;
     } else {
       return failure();
