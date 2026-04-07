@@ -8,4 +8,12 @@ configure_file(
   @ONLY
 )
 
+file(CHMOD
+  "${NPUX_MLIR_DRIVER_SCRIPT}"
+  PERMISSIONS
+    OWNER_READ OWNER_WRITE OWNER_EXECUTE
+    GROUP_READ GROUP_EXECUTE
+    WORLD_READ WORLD_EXECUTE
+)
+
 add_custom_target(npux-mlir-driver ALL DEPENDS "${NPUX_MLIR_DRIVER_SCRIPT}" onnx-mlir)

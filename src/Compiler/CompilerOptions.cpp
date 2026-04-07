@@ -86,6 +86,7 @@ bool enableFastMathOption;                             // onnx-mlir only
 bool disableRecomposeOption;                           // onnx-mlir only
 bool enableSimdDataLayout;                             // onnx-mlir only
 bool verifyInputTensors;                               // onnx-mlir only
+bool npuxHostSimDirectAbi;                             // onnx-mlir only
 bool allowSorting;                                     // onnx-mlir only
 std::vector<std::string> reportHeapBefore;             // onnx-mlir only
 std::vector<std::string> reportHeapAfter;              // onnx-mlir only
@@ -801,6 +802,15 @@ static llvm::cl::opt<bool, true> enable_bound_check("enable-bound-check",
         "Enable runtime bound check for memrefs (default is false).\n"
         "Set to 'true' if you want to enable the check."),
     llvm::cl::location(enableBoundCheck), llvm::cl::init(false),
+    llvm::cl::cat(OnnxMlirOptions));
+
+static llvm::cl::opt<bool, true> npux_host_sim_direct_abi(
+    "npux-host-sim-direct-abi",
+    llvm::cl::desc(
+        "Emit host-sim entry functions for direct NPUX ABI integration.\n"
+        "This promotes entry-point memref results to caller-provided out params\n"
+        "and skips generating the OMTensorList-based Krnl entry-point wrappers."),
+    llvm::cl::location(npuxHostSimDirectAbi), llvm::cl::init(false),
     llvm::cl::cat(OnnxMlirOptions));
 
 // /*

@@ -147,6 +147,7 @@ std::unique_ptr<mlir::Pass> createNpuSramPromotionPass();
 std::unique_ptr<mlir::Pass> createNpuInlinePass();
 
 std::unique_ptr<mlir::Pass> createNpuDPSConversionPass();
+std::unique_ptr<mlir::Pass> createNpuxDirectOutputReusePass();
 
 std::unique_ptr<mlir::Pass> createNpuMergePass();
 

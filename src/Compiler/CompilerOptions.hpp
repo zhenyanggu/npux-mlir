@@ -152,6 +152,7 @@ extern bool enableFastMathOption;                             // onnx-mlir only
 extern bool disableRecomposeOption;                           // onnx-mlir only
 extern bool enableSimdDataLayout;                             // onnx-mlir only
 extern bool verifyInputTensors;                               // onnx-mlir only
+extern bool npuxHostSimDirectAbi;                             // onnx-mlir only
 extern bool allowSorting;                                     // onnx-mlir only
 extern std::vector<std::string> reportHeapBefore;             // onnx-mlir only
 extern std::vector<std::string> reportHeapAfter;              // onnx-mlir only

@@ -4,6 +4,7 @@
 //======================================================
 
 #include "src/Conversion/NpuBufferization/NpuBufferizationHelper.hpp" // 引入对应的头文件
+#include "src/Compiler/CompilerOptions.hpp"
 
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
@@ -11,6 +12,7 @@
 #include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -106,11 +108,93 @@ struct NpuDPSConversionPass
 
     opts.hoistStaticAllocs = true;
     opts.filterFn = [](func::FuncOp *func) {
-      return (*func)->hasAttr("npu.target");
+      if ((*func)->hasAttr("npu.target")) {
+        return true;
+      }
+      return onnx_mlir::npuxHostSimDirectAbi &&
+             (*func)->hasAttr("llvm.emit_c_interface");
     };
 
     if (failed(bufferization::promoteBufferResultsToOutParams(module, opts))) {
       return signalPassFailure();
+    }
+  }
+};
+
+struct NpuxDirectOutputReusePass
+    : public PassWrapper<NpuxDirectOutputReusePass, OperationPass<ModuleOp>> {
+
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(NpuxDirectOutputReusePass)
+
+  StringRef getArgument() const override { return "npux-direct-output-reuse"; }
+  StringRef getDescription() const override {
+    return "Reuse direct host-sim output buffers instead of copying final allocs";
+  }
+
+  void runOnOperation() override {
+    if (!onnx_mlir::npuxHostSimDirectAbi) {
+      return;
+    }
+
+    ModuleOp module = getOperation();
+    SmallVector<memref::CopyOp, 8> copy_ops;
+    module.walk([&](memref::CopyOp copy_op) { copy_ops.push_back(copy_op); });
+
+    bool changed = false;
+    for (memref::CopyOp copy_op : copy_ops) {
+      auto func_op = copy_op->getParentOfType<func::FuncOp>();
+      if (!func_op || !func_op->hasAttr("llvm.emit_c_interface")) {
+        continue;
+      }
+
+      auto source_alloc = copy_op.getSource().getDefiningOp<memref::AllocOp>();
+      auto target_arg = dyn_cast<BlockArgument>(copy_op.getTarget());
+      if (!source_alloc || !target_arg) {
+        continue;
+      }
+
+      if (target_arg.getOwner() != &func_op.front()) {
+        continue;
+      }
+
+      if (copy_op.getSource().getType() != copy_op.getTarget().getType()) {
+        continue;
+      }
+
+      const bool target_only_used_by_copy = llvm::all_of(
+          copy_op.getTarget().getUsers(), [&](Operation *user) { return user == copy_op.getOperation(); });
+      if (!target_only_used_by_copy) {
+        continue;
+      }
+
+      SmallVector<Operation *, 4> dealloc_ops;
+      for (Operation *user : copy_op.getSource().getUsers()) {
+        if (user == copy_op.getOperation()) {
+          continue;
+        }
+        if (isa<memref::DeallocOp>(user)) {
+          dealloc_ops.push_back(user);
+          continue;
+        }
+      }
+
+      copy_op.getSource().replaceUsesWithIf(copy_op.getTarget(), [&](OpOperand &use) {
+        Operation *owner = use.getOwner();
+        return owner != copy_op.getOperation() && !isa<memref::DeallocOp>(owner);
+      });
+
+      for (Operation *dealloc_op : dealloc_ops) {
+        dealloc_op->erase();
+      }
+      copy_op.erase();
+      if (source_alloc->use_empty()) {
+        source_alloc.erase();
+      }
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
     }
   }
 };
@@ -215,4 +299,8 @@ void populateLowerCustomMHAPattern(RewritePatternSet &patterns) {
 // 注册 Pass
 std::unique_ptr<Pass> npux::createNpuDPSConversionPass() {
   return std::make_unique<NpuDPSConversionPass>();
+}
+
+std::unique_ptr<Pass> npux::createNpuxDirectOutputReusePass() {
+  return std::make_unique<NpuxDirectOutputReusePass>();
 }

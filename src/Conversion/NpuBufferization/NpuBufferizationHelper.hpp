@@ -19,4 +19,5 @@ void populateLowerCustomMHAPattern(mlir::RewritePatternSet &patterns);
 // 声明 Pass 创建函数 (根据你的 namespace npux)
 namespace npux {
     std::unique_ptr<mlir::Pass> createNpuDPSConversionPass();
+    std::unique_ptr<mlir::Pass> createNpuxDirectOutputReusePass();
 }

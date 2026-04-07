@@ -293,6 +293,16 @@ void removeUnhandledParamAttrs(ModuleOp &module) {
   }
 }
 
+void EraseKrnlEntryPointOps(ModuleOp &module) {
+  SmallVector<Operation *, 4> entry_ops;
+  module->walk([&](KrnlEntryPointOp entryOp) -> WalkResult {
+    entry_ops.emplace_back(entryOp.getOperation());
+    return WalkResult::advance();
+  });
+  for (Operation *entry_op : entry_ops)
+    entry_op->erase();
+}
+
 /// Keep original MemRefTypes for inputs and outputs. These information will be
 /// used for constructing OMTensors for inputs and outputs. We have to record
 /// this information at this point before they are disappeared during the
@@ -860,6 +870,10 @@ void ConvertKrnlToLLVMPass::runOnOperation() {
   // Remove unhandled parameter attributes in function arguments, e.g.
   // onnx.dim_params, onnx.name, etc.
   removeUnhandledParamAttrs(module);
+
+  if (npuxHostSimDirectAbi) {
+    EraseKrnlEntryPointOps(module);
+  }
 
   KRNL_ENTRY_POINT_ID = 0;
 

@@ -357,11 +357,15 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
           pm, OptimizationLevel, /*enableCSE*/ true, ONNXOpStats);
     if (inputIRLevel <= MLIRLevel)
       addKrnlToAffinePasses(pm);
-    if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+    if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU) ||
+        onnx_mlir::npuxHostSimDirectAbi) {
       pm.addPass(npux::createNpuDPSConversionPass());
+      if (onnx_mlir::npuxHostSimDirectAbi) {
+        pm.addPass(npux::createNpuxDirectOutputReusePass());
+      }
       pm.addPass(mlir::createCSEPass());
       pm.addPass(mlir::createCanonicalizerPass());
-  }
+    }
   }
 
   

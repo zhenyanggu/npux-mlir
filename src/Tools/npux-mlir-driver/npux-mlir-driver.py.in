@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
-DRIVER_VERSION = "npux-mlir-driver 0.2"
+DRIVER_VERSION = "npux-mlir-driver 0.3"
 SOURCE_ROOT = Path("@ONNX_MLIR_SRC_ROOT@").resolve()
 BUILD_ROOT = Path("@CMAKE_BINARY_DIR@").resolve()
 NPUX_EP_ROOT = SOURCE_ROOT.parents[1]
 NPUX_API_HEADER = NPUX_EP_ROOT / "runtime" / "npux_compiled_module_api.h"
+COMPILE_MANIFEST_SCHEMA = "npux-compile-manifest-v2"
 
 
 def resolve_onnx_mlir_binary() -> Path:
@@ -36,6 +40,17 @@ def resolve_libomp_runtime() -> Path | None:
         BUILD_ROOT / "Release" / "lib" / "libompruntime.so",
         BUILD_ROOT / "lib" / "libompruntime.so",
         BUILD_ROOT / "src" / "Runtime" / "omp" / "openmp-build" / "runtime" / "src" / "libomp.so",
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def resolve_cruntime_archive() -> Path | None:
+    candidates = [
+        BUILD_ROOT / "Release" / "lib" / "libcruntime.a",
+        BUILD_ROOT / "lib" / "libcruntime.a",
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -72,404 +87,403 @@ def run_command(args, log_file: Path) -> subprocess.CompletedProcess:
     return proc
 
 
-def module_wrapper_source(companion_name: str) -> str:
-    template = r'''
-#include "__API_HEADER__"
+def locate_generated_object(object_base: Path) -> Path:
+    candidates = [
+        Path(str(object_base) + ".o"),
+        Path(str(object_base) + ".obj"),
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(f"unable to locate generated object for base '{object_base}'")
 
-#include <dlfcn.h>
 
-#include <chrono>
+def discover_direct_entry_symbol(model_object: Path, log_file: Path) -> str:
+    proc = run_command(["nm", str(model_object)], log_file)
+    if proc.returncode != 0:
+        raise RuntimeError(f"failed to inspect generated object '{model_object}'")
+
+    matches = []
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        symbol = parts[-1]
+        if symbol.startswith("_mlir_ciface_main_graph"):
+            matches.append(symbol)
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"expected exactly one direct ABI entry symbol in '{model_object}', found {matches}"
+        )
+    return matches[0]
+
+
+def object_requires_openmp(model_object: Path, log_file: Path) -> bool:
+    proc = run_command(["nm", "-u", str(model_object)], log_file)
+    if proc.returncode != 0:
+        raise RuntimeError(f"failed to inspect undefined symbols for '{model_object}'")
+    return any("__kmpc_" in line or " omp_" in line for line in proc.stdout.splitlines())
+
+
+def stage_shared_runtime(runtime_path: Path, output_dir: Path) -> Path:
+    digest = hashlib.sha256(runtime_path.read_bytes()).hexdigest()
+    artifact_root = output_dir.parent.parent
+    staged_dir = artifact_root / "shared" / "omp" / digest
+    staged_dir.mkdir(parents=True, exist_ok=True)
+    staged_path = staged_dir / "libomp.so"
+    if not staged_path.exists():
+        shutil.copy2(runtime_path, staged_path)
+    return staged_path.resolve()
+
+
+def sanitize_cpp_identifier(name: str) -> str:
+    result = []
+    for ch in name:
+        if ch.isalnum():
+            result.append(ch)
+        else:
+            result.append("_")
+    identifier = "".join(result).strip("_")
+    if not identifier:
+        identifier = "symbol"
+    if identifier[0].isdigit():
+        identifier = f"_{identifier}"
+    return identifier
+
+
+def cpp_type_for_onnx_type(element_type: int) -> str:
+    mapping = {
+        1: "float",
+        2: "uint8_t",
+        3: "int8_t",
+        4: "uint16_t",
+        5: "int16_t",
+        6: "int32_t",
+        7: "int64_t",
+        9: "bool",
+        10: "uint16_t",
+        11: "double",
+        12: "uint32_t",
+        13: "uint64_t",
+        16: "uint16_t",
+    }
+    if element_type not in mapping:
+        raise ValueError(f"unsupported ONNX tensor element type {element_type} for host-sim direct ABI")
+    return mapping[element_type]
+
+
+def emit_shape_array(name: str, shape: list[int]) -> str:
+    if not shape:
+        return f"constexpr std::array<int64_t, 0> {name}{{}};\n"
+    values = ", ".join(str(dim) for dim in shape)
+    return f"constexpr std::array<int64_t, {len(shape)}> {name}{{{{{values}}}}};\n"
+
+
+def extract_string_array_attribute(attr_block: str, attr_name: str) -> list[str]:
+    match = re.search(rf"{attr_name}\s*=\s*\[(.*?)\]", attr_block, re.S)
+    if match is None:
+        return []
+    return re.findall(r'"([^"]+)"', match.group(1))
+
+
+def skip_whitespace(text: str, index: int) -> int:
+    while index < len(text) and text[index].isspace():
+        index += 1
+    return index
+
+
+def find_matching_block(text: str, start: int, open_char: str, close_char: str) -> int:
+    depth = 0
+    in_string = False
+    escape = False
+    for index in range(start, len(text)):
+        ch = text[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == open_char:
+            depth += 1
+            continue
+        if ch == close_char:
+            depth -= 1
+            if depth == 0:
+                return index
+    raise RuntimeError(f"unterminated block starting with '{open_char}'")
+
+
+def extract_single_result_section(text: str, start: int) -> tuple[str, int]:
+    angle_depth = 0
+    paren_depth = 0
+    square_depth = 0
+    in_string = False
+    escape = False
+    index = start
+    while index < len(text):
+        ch = text[index]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+        else:
+            if ch == '"':
+                in_string = True
+            elif ch == "<":
+                angle_depth += 1
+            elif ch == ">":
+                angle_depth = max(0, angle_depth - 1)
+            elif ch == "(":
+                paren_depth += 1
+            elif ch == ")":
+                paren_depth = max(0, paren_depth - 1)
+            elif ch == "[":
+                square_depth += 1
+            elif ch == "]":
+                square_depth = max(0, square_depth - 1)
+            elif ch.isspace() and angle_depth == 0 and paren_depth == 0 and square_depth == 0:
+                break
+        index += 1
+
+    section_end = index
+    index = skip_whitespace(text, index)
+    if index < len(text) and text[index] == "{":
+        section_end = find_matching_block(text, index, "{", "}") + 1
+    return text[start:section_end], section_end
+
+
+def extract_runtime_tensor_names(input_mlir_path: Path) -> tuple[list[str], list[str]]:
+    text = input_mlir_path.read_text(encoding="utf-8")
+    main_graph_index = text.find("func.func @main_graph")
+    if main_graph_index < 0:
+        raise RuntimeError(f"unable to locate main_graph signature in '{input_mlir_path}'")
+
+    inputs_begin = text.find("(", main_graph_index)
+    if inputs_begin < 0:
+        raise RuntimeError(f"unable to locate main_graph inputs in '{input_mlir_path}'")
+    inputs_end = find_matching_block(text, inputs_begin, "(", ")")
+    inputs_section = text[inputs_begin + 1 : inputs_end]
+
+    cursor = skip_whitespace(text, inputs_end + 1)
+    if not text.startswith("->", cursor):
+        raise RuntimeError(f"unable to locate main_graph results in '{input_mlir_path}'")
+    cursor = skip_whitespace(text, cursor + 2)
+
+    if cursor < len(text) and text[cursor] == "(":
+        outputs_end = find_matching_block(text, cursor, "(", ")")
+        outputs_section = text[cursor : outputs_end + 1]
+        cursor = outputs_end + 1
+    else:
+        outputs_section, cursor = extract_single_result_section(text, cursor)
+
+    cursor = skip_whitespace(text, cursor)
+    attrs = ""
+    if text.startswith("attributes", cursor):
+        cursor = skip_whitespace(text, cursor + len("attributes"))
+        if cursor >= len(text) or text[cursor] != "{":
+            raise RuntimeError(f"unable to parse main_graph attributes in '{input_mlir_path}'")
+        attrs_end = find_matching_block(text, cursor, "{", "}")
+        attrs = text[cursor : attrs_end + 1]
+        cursor = attrs_end + 1
+
+    cursor = skip_whitespace(text, cursor)
+    if cursor >= len(text) or text[cursor] != "{":
+        raise RuntimeError(f"unable to locate main_graph body in '{input_mlir_path}'")
+
+    input_names = re.findall(r'onnx\.name = "([^"]+)"', inputs_section)
+    output_names = re.findall(r'onnx\.name = "([^"]+)"', outputs_section)
+    if not input_names:
+        input_names = extract_string_array_attribute(attrs, "input_names")
+    if not output_names:
+        output_names = extract_string_array_attribute(attrs, "output_names")
+    return input_names, output_names
+
+
+def filter_signatures_by_name(signatures: list[dict], expected_names: list[str], kind: str) -> list[dict]:
+    by_name = {signature["name"]: signature for signature in signatures}
+    filtered = []
+    for name in expected_names:
+        signature = by_name.get(name)
+        if signature is None:
+            raise RuntimeError(f"missing {kind} signature for compiler-visible tensor '{name}'")
+        filtered.append(signature)
+    return filtered
+
+
+def build_direct_module_source(
+    api_header: Path,
+    entry_symbol: str,
+    module_basename: str,
+    input_signatures: list[dict],
+    output_signatures: list[dict],
+) -> str:
+    entry_alias = sanitize_cpp_identifier(f"{module_basename}_entry")
+    lines: list[str] = []
+
+    for prefix, signatures in (("Input", input_signatures), ("Output", output_signatures)):
+        for index, signature in enumerate(signatures):
+            shape = signature.get("shape")
+            if shape is None:
+                raise ValueError(
+                    f"{prefix.lower()} tensor '{signature.get('name', index)}' is missing rank information"
+                )
+            lines.append(emit_shape_array(f"k{prefix}{index}ExpectedShape", shape))
+
+    prototype_args = []
+    call_args = []
+    populate_lines = []
+
+    for prefix, signatures, tensor_expr in (
+        ("Input", input_signatures, "inputs"),
+        ("Output", output_signatures, "outputs"),
+    ):
+        for index, signature in enumerate(signatures):
+            rank = len(signature["shape"])
+            cpp_type = cpp_type_for_onnx_type(int(signature["element_type"]))
+            desc_name = f"{prefix.lower()}_{index}"
+            desc_type = f"StridedMemRefType<{cpp_type}, {rank}>"
+            prototype_args.append(f"{desc_type}* {desc_name}")
+            call_args.append(f"&{desc_name}")
+            populate_lines.append(
+                f"""  {desc_type} {desc_name}{{}};
+  if (!PopulateDescriptor<{cpp_type}, {rank}>(
+          {tensor_expr}[{index}],
+          static_cast<uint32_t>({int(signature["element_type"])}),
+          k{prefix}{index}ExpectedShape,
+          {desc_name})) {{
+    return -{20 + index if prefix == "Input" else 60 + index};
+  }}"""
+            )
+
+    prototype = ",\n    ".join(prototype_args)
+    call = ", ".join(call_args)
+    populate_block = "\n\n".join(populate_lines)
+
+    return f'''#include "{api_header}"
+
+#include <array>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <string>
 
-namespace {
+namespace {{
 
-constexpr const char* kCompanionLibraryName = "__COMPANION_NAME__";
-constexpr const char* kModuleBasename = "__MODULE_BASENAME__";
-
-struct OMTensor {
-  void* allocated_ptr;
-  void* aligned_ptr;
+template <typename T, size_t Rank>
+struct StridedMemRefType {{
+  T* allocated;
+  T* aligned;
   int64_t offset;
-  int64_t* shape;
-  int64_t* strides;
-  int64_t rank;
-  uint32_t data_type;
-  int64_t owning;
-};
+  int64_t sizes[Rank];
+  int64_t strides[Rank];
+}};
 
-struct OMTensorList {
-  OMTensor** omts;
-  int64_t size;
-  bool shallow;
-};
+template <typename T>
+struct StridedMemRefType<T, 0> {{
+  T* allocated;
+  T* aligned;
+  int64_t offset;
+}};
 
-using EntryPointFn = OMTensorList* (*)(OMTensorList*);
-using QueryEntryPointsFn = const char* const* (*)(int64_t*);
+template <typename T, size_t Rank>
+bool PopulateDescriptor(const NpuxTensorView& tensor_view,
+                        uint32_t expected_element_type,
+                        const std::array<int64_t, Rank>& expected_shape,
+                        StridedMemRefType<T, Rank>& descriptor) {{
+  if (tensor_view.data == nullptr || tensor_view.element_type != expected_element_type ||
+      tensor_view.rank != Rank || (Rank > 0 && tensor_view.shape == nullptr)) {{
+    return false;
+  }}
 
-struct ModuleState {
-  NpuxRuntimeApi api{};
-  void* omp_handle{nullptr};
-  void* companion_handle{nullptr};
-  EntryPointFn entry_point{nullptr};
-};
+  descriptor.allocated = reinterpret_cast<T*>(tensor_view.data);
+  descriptor.aligned = reinterpret_cast<T*>(tensor_view.data);
+  descriptor.offset = 0;
 
-using SteadyClock = std::chrono::steady_clock;
+  if constexpr (Rank > 0) {{
+    for (size_t dim = 0; dim < Rank; ++dim) {{
+      const int64_t actual_dim = tensor_view.shape[dim];
+      if (actual_dim < 0) {{
+        return false;
+      }}
+      if (expected_shape[dim] >= 0 && actual_dim != expected_shape[dim]) {{
+        return false;
+      }}
+      descriptor.sizes[dim] = actual_dim;
+    }}
 
-uint64_t ToNanoseconds(SteadyClock::duration duration) {
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count());
-}
+    int64_t stride = 1;
+    for (size_t reverse_dim = 0; reverse_dim < Rank; ++reverse_dim) {{
+      const size_t dim = Rank - 1 - reverse_dim;
+      descriptor.strides[dim] = stride;
+      stride *= descriptor.sizes[dim];
+    }}
+  }}
 
-size_t ElementSize(uint32_t element_type) {
-  switch (element_type) {
-    case 1:
-      return 4;
-    case 2:
-    case 3:
-    case 9:
-      return 1;
-    case 4:
-    case 5:
-    case 10:
-      return 2;
-    case 6:
-    case 12:
-    case 13:
-      return 4;
-    case 7:
-    case 11:
-      return 8;
-    case 8:
-      return 0;
-    case 14:
-      return 8;
-    case 15:
-      return 16;
-    case 16:
-      return 4;
-    default:
-      return 0;
-  }
-}
+  return true;
+}}
 
-size_t ComputeTensorBytes(const OMTensor* tensor) {
-  if (tensor == nullptr) {
-    return 0;
-  }
-  const size_t elem_size = ElementSize(tensor->data_type);
-  if (elem_size == 0) {
-    return 0;
-  }
-  size_t num_elements = 1;
-  for (int64_t i = 0; i < tensor->rank; ++i) {
-    num_elements *= static_cast<size_t>(tensor->shape[i]);
-  }
-  return num_elements * elem_size;
-}
+struct ModuleState {{
+  uint32_t abi_version{{NPUX_COMPILED_MODULE_ABI_VERSION}};
+}};
 
-OMTensor* CreateTensorView(const NpuxTensorView& tensor_view) {
-  auto* tensor = static_cast<OMTensor*>(std::malloc(sizeof(OMTensor)));
-  if (tensor == nullptr) {
-    return nullptr;
-  }
-  tensor->allocated_ptr = tensor_view.data;
-  tensor->aligned_ptr = tensor_view.data;
-  tensor->offset = 0;
-  tensor->rank = static_cast<int64_t>(tensor_view.rank);
-  tensor->data_type = tensor_view.element_type;
-  tensor->owning = 0;
-  tensor->shape = nullptr;
-  tensor->strides = nullptr;
+{''.join(lines)}
 
-  if (tensor->rank > 0) {
-    tensor->shape = static_cast<int64_t*>(std::malloc(sizeof(int64_t) * static_cast<size_t>(tensor->rank)));
-    tensor->strides = static_cast<int64_t*>(std::malloc(sizeof(int64_t) * static_cast<size_t>(tensor->rank)));
-    if (tensor->shape == nullptr || tensor->strides == nullptr) {
-      std::free(tensor->shape);
-      std::free(tensor->strides);
-      std::free(tensor);
-      return nullptr;
-    }
+extern "C" void {entry_alias}(
+    {prototype}
+) asm("{entry_symbol}");
 
-    for (int64_t i = tensor->rank - 1; i >= 0; --i) {
-      tensor->shape[i] = tensor_view.shape == nullptr ? 0 : tensor_view.shape[i];
-      if (i == tensor->rank - 1) {
-        tensor->strides[i] = 1;
-      } else {
-        tensor->strides[i] = tensor->strides[i + 1] * tensor->shape[i + 1];
-      }
-    }
-  }
+}}  // namespace
 
-  return tensor;
-}
+extern "C" {{
 
-void DestroyTensor(OMTensor* tensor) {
-  if (tensor == nullptr) {
-    return;
-  }
-  if (tensor->owning != 0) {
-    std::free(tensor->allocated_ptr);
-  }
-  std::free(tensor->shape);
-  std::free(tensor->strides);
-  std::free(tensor);
-}
-
-OMTensorList* CreateTensorList(OMTensor** tensors, size_t size, bool shallow) {
-  auto* list = static_cast<OMTensorList*>(std::malloc(sizeof(OMTensorList)));
-  if (list == nullptr) {
-    return nullptr;
-  }
-  list->omts = static_cast<OMTensor**>(std::malloc(sizeof(OMTensor*) * size));
-  if (list->omts == nullptr) {
-    std::free(list);
-    return nullptr;
-  }
-  std::memcpy(list->omts, tensors, sizeof(OMTensor*) * size);
-  list->size = static_cast<int64_t>(size);
-  list->shallow = shallow;
-  return list;
-}
-
-void DestroyTensorList(OMTensorList* list) {
-  if (list == nullptr) {
-    return;
-  }
-  if (!list->shallow) {
-    for (int64_t i = 0; i < list->size; ++i) {
-      DestroyTensor(list->omts[i]);
-    }
-  }
-  std::free(list->omts);
-  std::free(list);
-}
-
-std::filesystem::path ResolveCompanionLibraryPath() {
-  Dl_info info{};
-  if (dladdr(reinterpret_cast<void*>(&npux_module_get_abi_version), &info) == 0 ||
-      info.dli_fname == nullptr) {
-    return std::filesystem::path{kCompanionLibraryName};
-  }
-
-  return std::filesystem::path{info.dli_fname}.parent_path() / kCompanionLibraryName;
-}
-
-std::filesystem::path ResolveSelfLibraryPath() {
-  Dl_info info{};
-  if (dladdr(reinterpret_cast<void*>(&npux_module_get_abi_version), &info) == 0 ||
-      info.dli_fname == nullptr) {
-    return std::filesystem::path{kModuleBasename}.replace_extension(".so");
-  }
-
-  return std::filesystem::path{info.dli_fname};
-}
-
-std::filesystem::path ResolveOptionalOmpLibraryPath() {
-  return ResolveSelfLibraryPath().parent_path() / "libomp.so";
-}
-
-std::filesystem::path ResolveWrapperProfileLogPath() {
-  return ResolveSelfLibraryPath().string() + ".wrapper_profile.jsonl";
-}
-
-void AppendProfileLine(const std::filesystem::path& path, const std::string& line) {
-  std::ofstream output_stream(path, std::ios::app | std::ios::binary);
-  if (!output_stream.is_open()) {
-    return;
-  }
-  output_stream << line << '\n';
-}
-
-}  // namespace
-
-extern "C" {
-
-int npux_module_get_abi_version(void) {
+int npux_module_get_abi_version(void) {{
   return NPUX_COMPILED_MODULE_ABI_VERSION;
-}
+}}
 
-int npux_module_create(const NpuxRuntimeApi* api, void** module_state) {
-  if (api == nullptr || module_state == nullptr) {
+int npux_module_create(const NpuxRuntimeApi* api, void** module_state) {{
+  if (api == nullptr || module_state == nullptr) {{
     return -1;
-  }
-  if (api->abi_version != NPUX_COMPILED_MODULE_ABI_VERSION || api->struct_size < sizeof(NpuxRuntimeApi)) {
+  }}
+  if (api->abi_version != NPUX_COMPILED_MODULE_ABI_VERSION ||
+      api->struct_size < sizeof(NpuxRuntimeApi)) {{
     return -2;
-  }
+  }}
 
-  auto* state = new ModuleState{};
-  state->api = *api;
-
-  const std::filesystem::path omp_path = ResolveOptionalOmpLibraryPath();
-  if (std::filesystem::exists(omp_path)) {
-    state->omp_handle = dlopen(omp_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    if (state->omp_handle == nullptr) {
-      delete state;
-      return -30;
-    }
-  }
-
-  const std::filesystem::path companion_path = ResolveCompanionLibraryPath();
-  state->companion_handle = dlopen(companion_path.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (state->companion_handle == nullptr) {
-    if (state->omp_handle != nullptr) {
-      dlclose(state->omp_handle);
-    }
-    delete state;
-    return -3;
-  }
-
-  auto query_entry_points = reinterpret_cast<QueryEntryPointsFn>(dlsym(state->companion_handle, "omQueryEntryPoints"));
-  if (query_entry_points != nullptr) {
-    int64_t num_entry_points = 0;
-    const char* const* entry_points = query_entry_points(&num_entry_points);
-    if (entry_points != nullptr && num_entry_points > 0 && entry_points[0] != nullptr) {
-      state->entry_point = reinterpret_cast<EntryPointFn>(dlsym(state->companion_handle, entry_points[0]));
-    }
-  }
-
-  if (state->entry_point == nullptr) {
-    state->entry_point = reinterpret_cast<EntryPointFn>(dlsym(state->companion_handle, "run_main_graph"));
-  }
-  if (state->entry_point == nullptr) {
-    dlclose(state->companion_handle);
-    delete state;
-    return -4;
-  }
-
-  *module_state = state;
+  *module_state = new ModuleState{{}};
   return 0;
-}
+}}
 
 int npux_module_run(void* module_state,
                     const NpuxTensorView* inputs,
                     size_t num_inputs,
                     NpuxTensorView* outputs,
-                    size_t num_outputs) {
-  const auto wrapper_begin = SteadyClock::now();
-  auto* state = static_cast<ModuleState*>(module_state);
-  if (state == nullptr || state->entry_point == nullptr || outputs == nullptr) {
+                    size_t num_outputs) {{
+  if (module_state == nullptr || inputs == nullptr || outputs == nullptr) {{
     return -10;
-  }
-
-  const auto input_prepare_begin = SteadyClock::now();
-  auto** input_tensors = static_cast<OMTensor**>(std::malloc(sizeof(OMTensor*) * num_inputs));
-  if (input_tensors == nullptr) {
+  }}
+  if (num_inputs != {len(input_signatures)} || num_outputs != {len(output_signatures)}) {{
     return -11;
-  }
+  }}
 
-  for (size_t i = 0; i < num_inputs; ++i) {
-    input_tensors[i] = CreateTensorView(inputs[i]);
-    if (input_tensors[i] == nullptr) {
-      for (size_t j = 0; j < i; ++j) {
-        DestroyTensor(input_tensors[j]);
-      }
-      std::free(input_tensors);
-      return -12;
-    }
-  }
+{populate_block}
 
-  OMTensorList* input_list = CreateTensorList(input_tensors, num_inputs, false);
-  std::free(input_tensors);
-  if (input_list == nullptr) {
-    return -13;
-  }
-  const auto input_prepare_end = SteadyClock::now();
-
-  const auto entry_begin = SteadyClock::now();
-  OMTensorList* output_list = state->entry_point(input_list);
-  const auto entry_end = SteadyClock::now();
-  DestroyTensorList(input_list);
-  if (output_list == nullptr) {
-    return -14;
-  }
-
-  if (static_cast<size_t>(output_list->size) != num_outputs) {
-    DestroyTensorList(output_list);
-    return -15;
-  }
-
-  const auto output_copy_begin = SteadyClock::now();
-  for (size_t i = 0; i < num_outputs; ++i) {
-    OMTensor* output_tensor = output_list->omts[i];
-    if (output_tensor == nullptr || outputs[i].data == nullptr) {
-      DestroyTensorList(output_list);
-      return -16;
-    }
-    if (outputs[i].element_type != output_tensor->data_type) {
-      DestroyTensorList(output_list);
-      return -17;
-    }
-    if (outputs[i].rank != static_cast<size_t>(output_tensor->rank) || outputs[i].shape == nullptr) {
-      DestroyTensorList(output_list);
-      return -18;
-    }
-    for (size_t dim = 0; dim < outputs[i].rank; ++dim) {
-      if (outputs[i].shape[dim] != output_tensor->shape[static_cast<int64_t>(dim)]) {
-        DestroyTensorList(output_list);
-        return -19;
-      }
-    }
-    const size_t result_bytes = ComputeTensorBytes(output_tensor);
-    if (result_bytes == 0 || outputs[i].byte_size < result_bytes) {
-      DestroyTensorList(output_list);
-      return -20;
-    }
-    std::memcpy(outputs[i].data, output_tensor->aligned_ptr, result_bytes);
-  }
-  const auto output_copy_end = SteadyClock::now();
-
-  DestroyTensorList(output_list);
-  const auto wrapper_end = SteadyClock::now();
-  {
-    const uint64_t wrapper_total_ns = ToNanoseconds(wrapper_end - wrapper_begin);
-    const uint64_t input_prepare_ns = ToNanoseconds(input_prepare_end - input_prepare_begin);
-    const uint64_t entrypoint_ns = ToNanoseconds(entry_end - entry_begin);
-    const uint64_t output_copy_ns = ToNanoseconds(output_copy_end - output_copy_begin);
-    const uint64_t wrapper_overhead_ns =
-        wrapper_total_ns > entrypoint_ns ? wrapper_total_ns - entrypoint_ns : 0;
-    std::ostringstream profile_line;
-    profile_line
-        << '{'
-        << "\"module_basename\":\"" << kModuleBasename << "\","
-        << "\"wrapper_total_ns\":" << wrapper_total_ns << ','
-        << "\"input_prepare_ns\":" << input_prepare_ns << ','
-        << "\"entrypoint_ns\":" << entrypoint_ns << ','
-        << "\"output_copy_ns\":" << output_copy_ns << ','
-        << "\"wrapper_overhead_ns\":" << wrapper_overhead_ns
-        << '}';
-    AppendProfileLine(ResolveWrapperProfileLogPath(), profile_line.str());
-  }
+  {entry_alias}({call});
   return 0;
-}
+}}
 
-void npux_module_destroy(void* module_state) {
-  auto* state = static_cast<ModuleState*>(module_state);
-  if (state == nullptr) {
-    return;
-  }
-  if (state->companion_handle != nullptr) {
-    dlclose(state->companion_handle);
-  }
-  if (state->omp_handle != nullptr) {
-    dlclose(state->omp_handle);
-  }
-  delete state;
-}
+void npux_module_destroy(void* module_state) {{
+  delete static_cast<ModuleState*>(module_state);
+}}
 
-}  // extern "C"
+}}  // extern "C"
 '''
-    return (
-        template
-        .replace("__API_HEADER__", str(NPUX_API_HEADER))
-        .replace("__COMPANION_NAME__", companion_name)
-        .replace("__MODULE_BASENAME__", companion_name.removesuffix("__om_model.so"))
-    )
 
 
 def compile_subcommand(args: argparse.Namespace) -> int:
@@ -493,63 +507,96 @@ def compile_subcommand(args: argparse.Namespace) -> int:
         raise ValueError("export manifest module_basename does not match requested module name")
 
     onnx_mlir = resolve_onnx_mlir_binary()
-    companion_base = output_dir / f"{args.module_basename}__om_model"
-    companion_library = Path(str(companion_base) + ".so")
     compile_jobs = max(os.cpu_count() or 1, 1)
+    runtime_dependencies: list[Path] = []
 
-    compile_proc = run_command(
-        [
-            str(onnx_mlir),
-            "--parallel",
-            "-j",
-            str(compile_jobs),
-            "-o",
-            str(companion_base),
-            str(Path(args.input).resolve()),
-        ],
-        log_file,
-    )
-    if compile_proc.returncode != 0:
-        raise RuntimeError(f"onnx-mlir failed with exit code {compile_proc.returncode}")
+    with tempfile.TemporaryDirectory(prefix="npux_hostsim_direct_") as temp_dir_text:
+        temp_dir = Path(temp_dir_text)
+        object_base = temp_dir / args.module_basename
+        compile_proc = run_command(
+            [
+                str(onnx_mlir),
+                "--EmitObj",
+                "--npux-host-sim-direct-abi",
+                "--preserveMLIR",
+                "--parallel",
+                "-j",
+                str(compile_jobs),
+                "-o",
+                str(object_base),
+                str(Path(args.input).resolve()),
+            ],
+            log_file,
+        )
+        if compile_proc.returncode != 0:
+            raise RuntimeError(f"onnx-mlir failed with exit code {compile_proc.returncode}")
 
-    wrapper_source = output_dir / f"{args.module_basename}__npux_wrapper.cc"
-    wrapper_source.write_text(module_wrapper_source(companion_library.name), encoding="utf-8")
+        model_object = locate_generated_object(object_base)
+        entry_symbol = discover_direct_entry_symbol(model_object, log_file)
+        input_mlir = Path(str(object_base) + ".input.mlir")
+        runtime_input_names, runtime_output_names = extract_runtime_tensor_names(input_mlir)
+        runtime_input_signatures = filter_signatures_by_name(
+            export_manifest["input_signatures"], runtime_input_names, "input"
+        )
+        runtime_output_signatures = filter_signatures_by_name(
+            export_manifest["output_signatures"], runtime_output_names, "output"
+        )
+        direct_source = temp_dir / f"{args.module_basename}__npux_direct_module.cc"
+        direct_source.write_text(
+            build_direct_module_source(
+                NPUX_API_HEADER,
+                entry_symbol,
+                args.module_basename,
+                runtime_input_signatures,
+                runtime_output_signatures,
+            ),
+            encoding="utf-8",
+        )
 
-    final_module = output_dir / f"{args.module_basename}.so"
-    cxx = resolve_cxx()
-    wrapper_proc = run_command(
-        [
-            cxx,
-            "-std=c++17",
-            "-shared",
-            "-fPIC",
-            str(wrapper_source),
-            "-o",
-            str(final_module),
-            "-ldl",
-        ],
-        log_file,
-    )
-    if wrapper_proc.returncode != 0:
-        raise RuntimeError(f"wrapper compilation failed with exit code {wrapper_proc.returncode}")
+        link_inputs = [str(direct_source), str(model_object)]
+        cruntime_archive = resolve_cruntime_archive()
+        if cruntime_archive is not None:
+            link_inputs.append(str(cruntime_archive))
 
-    libomp_runtime = resolve_libomp_runtime()
-    if libomp_runtime is not None:
-        shutil.copy2(libomp_runtime, output_dir / "libomp.so")
+        if object_requires_openmp(model_object, log_file):
+            libomp_runtime = resolve_libomp_runtime()
+            if libomp_runtime is None:
+                raise FileNotFoundError("unable to locate shared libomp runtime for host-sim direct ABI")
+            staged_runtime = stage_shared_runtime(libomp_runtime, output_dir)
+            runtime_dependencies.append(staged_runtime)
+            link_inputs.append(str(staged_runtime))
+
+        final_module = output_dir / f"{args.module_basename}.so"
+        cxx = resolve_cxx()
+        link_proc = run_command(
+            [
+                cxx,
+                "-std=c++17",
+                "-shared",
+                "-fPIC",
+                *link_inputs,
+                "-o",
+                str(final_module),
+            ],
+            log_file,
+        )
+        if link_proc.returncode != 0:
+            raise RuntimeError(f"direct module linkage failed with exit code {link_proc.returncode}")
 
     compile_manifest = {
-        "schema": "npux-compile-manifest-v1",
+        "schema": COMPILE_MANIFEST_SCHEMA,
         "module_basename": args.module_basename,
         "module_path": str(final_module),
-        "companion_library_path": str(companion_library),
+        "companion_library_path": "",
+        "runtime_dependencies": [str(path) for path in runtime_dependencies],
         "abi_version": int(args.abi_version),
         "target": args.target,
         "compiler_id": DRIVER_VERSION,
         "graph_hash": export_manifest["graph_hash"],
-        "input_signatures": export_manifest["input_signatures"],
-        "output_signatures": export_manifest["output_signatures"],
-        "input_signatures_canonical": export_manifest["input_signatures_canonical"],
-        "output_signatures_canonical": export_manifest["output_signatures_canonical"],
+        "input_signatures": runtime_input_signatures,
+        "output_signatures": runtime_output_signatures,
+        "input_signatures_canonical": json.dumps(runtime_input_signatures, ensure_ascii=True, separators=(",", ":")),
+        "output_signatures_canonical": json.dumps(runtime_output_signatures, ensure_ascii=True, separators=(",", ":")),
         "status": "ok",
     }
     compile_manifest_path = output_dir / "compile_manifest.json"
