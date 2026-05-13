@@ -1,0 +1,4 @@
+bert_base
+resnet50
+vgg16
+mnist

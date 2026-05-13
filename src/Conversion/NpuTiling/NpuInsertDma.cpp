@@ -92,6 +92,30 @@ static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
   return dmaOp.getResult(0);
 }
 
+static bool hasNpuLinalgConsumer(Value value) {
+  for (Operation *user : value.getUsers()) {
+    auto genericUser = dyn_cast<linalg::GenericOp>(user);
+    if (!genericUser)
+      continue;
+    auto targetAttr = genericUser->getAttrOfType<StringAttr>("npu.target");
+    if (targetAttr && targetAttr.getValue() == "npu")
+      return true;
+  }
+  return false;
+}
+
+static bool isEncodingI64(Value value, int64_t expected) {
+  auto type = dyn_cast<RankedTensorType>(value.getType());
+  if (!type)
+    return false;
+  auto encAttr = type.getEncoding();
+  if (!encAttr)
+    return expected == 0;
+  if (auto intAttr = dyn_cast<IntegerAttr>(encAttr))
+    return intAttr.getInt() == expected;
+  return false;
+}
+
 struct MataddQuantPlan {
   int16_t mvinScaleA = 1;
   int16_t mvinScaleB = 1;
@@ -172,11 +196,15 @@ struct NpuConvInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     for (Value operand : op.getInputs()) {
       Value processedInput = operand;
       if (operandIdx == 0) {
-        processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "input");
+        if (!isEncodingI64(operand, 2)) {
+          processedInput =
+              createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "input");
+        }
       } else if (operandIdx == 1) {
-        processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "weight");
+        if (!isEncodingI64(operand, 2)) {
+          processedInput =
+              createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "weight");
+        }
       }
       newInputs.push_back(processedInput);
       operandIdx++;
@@ -211,9 +239,15 @@ struct NpuConvInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
           newMvAcc.getOutputsMutable().assign(mediumTensor);
           newMvAcc.getResult(0).setType(mediumTensor.getType());
 
-          Value mvoutResult = createDmaOp(rewriter, uLoc, newMvAcc.getResult(0),
-              "npu_dma_mvout", 0, "", oldOutput);
-          rewriter.replaceOp(genericUser, mvoutResult);
+          // 中间链路(仍有 NPU consumer)或本来就是 2->2 时，不插 mvout。
+          if (hasNpuLinalgConsumer(genericUser.getResult(0)) ||
+              isEncodingI64(oldOutput, 2)) {
+            rewriter.replaceOp(genericUser, newMvAcc.getResult(0));
+          } else {
+            Value mvoutResult = createDmaOp(rewriter, uLoc,
+                newMvAcc.getResult(0), "npu_dma_mvout", 0, "", oldOutput);
+            rewriter.replaceOp(genericUser, mvoutResult);
+          }
           break;
         }
       }
@@ -251,8 +285,11 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
       size_t index = it.index();
       Value operand = it.value();
       if (index < 2) {
-        Value processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "");
+        Value processedInput = operand;
+        if (!isEncodingI64(operand, 2)) {
+          processedInput =
+              createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "");
+        }
         newInputs.push_back(processedInput);
       } else {
         newInputs.push_back(operand);
@@ -288,9 +325,14 @@ struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
           newMvAcc.getOutputsMutable().assign(mediumTensor);
           newMvAcc.getResult(0).setType(mediumTensor.getType());
 
-          Value mvoutResult = createDmaOp(rewriter, uLoc, newMvAcc.getResult(0),
-              "npu_dma_mvout", 0, "", oldOutput);
-          rewriter.replaceOp(genericUser, mvoutResult);
+          if (hasNpuLinalgConsumer(genericUser.getResult(0)) ||
+              isEncodingI64(oldOutput, 2)) {
+            rewriter.replaceOp(genericUser, newMvAcc.getResult(0));
+          } else {
+            Value mvoutResult = createDmaOp(rewriter, uLoc,
+                newMvAcc.getResult(0), "npu_dma_mvout", 0, "", oldOutput);
+            rewriter.replaceOp(genericUser, mvoutResult);
+          }
           break;
         }
       }
@@ -469,6 +511,11 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
         newInputs.push_back(dummySram);
         continue;
       }
+      // 输入已经位于 NPU 内部内存(encoding=2)时，不再重复插入 mvin。
+      if (isEncodingI64(input, 2)) {
+        newInputs.push_back(input);
+        continue;
+      }
       Value mvinResult =
           createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
       newInputs.push_back(mvinResult);
@@ -476,8 +523,13 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 
     SmallVector<Value> mediumTensors;
     for (Value originalOutput : op.getOutputs()) {
-      Value mediumTensor =
-          createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+      // 如果目标本身已经是 NPU 内部内存(encoding=2)，直接就地写入，
+      // 避免额外 alloc 导致后续 bufferization 落成 memref.copy(2->2)。
+      Value mediumTensor = originalOutput;
+      if (!isEncodingI64(originalOutput, 2)) {
+        mediumTensor =
+            createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+      }
       mediumTensors.push_back(mediumTensor);
     }
 
@@ -494,6 +546,11 @@ struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
     for (auto [idx, mediumTensor] : llvm::enumerate(mediumTensors)) {
       Value originalOutput = op.getOutputs()[idx];
       Value computedResult = newOp.getResult(idx);
+      // 若目标本身就是 NPU 内部内存(encoding=2)，无需插 mvout。
+      if (isEncodingI64(originalOutput, 2)) {
+        finalResults.push_back(computedResult);
+        continue;
+      }
       Value mvoutResult = createDmaOp(rewriter, loc, computedResult,
           "npu_dma_mvout", 0, "output", originalOutput);
       finalResults.push_back(mvoutResult);

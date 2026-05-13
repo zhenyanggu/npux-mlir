@@ -13,11 +13,21 @@ HOST_MLIR_DIR="/opt/llvm-project/build/lib/cmake/mlir"
 HOST_LLVM_DIR="/opt/llvm-project/build/lib/cmake/llvm"
 
 # 3. Python 路径 (宿主机)
-# 请根据实际情况调整，通常 Ubuntu 22.04 是 3.10
-PY_VER="3.10"
-HOST_PY_INC="/usr/include/python${PY_VER}"
-# 注意：这里必须精确指向 .so 文件，不能只是目录
-HOST_PY_LIB="/usr/lib/x86_64-linux-gnu/libpython${PY_VER}.so"
+# 交叉编译 runtime 时这里只用于 CMake 配置阶段，优先使用当前 conda 环境。
+# 也可以手动覆盖：
+#   HOST_PY_INC=/path/to/include/python3.x HOST_PY_LIB=/path/to/libpython3.x.so bash cmake_arm64.sh
+if [ -n "${CONDA_PREFIX:-}" ] && [ -d "${CONDA_PREFIX}/include" ]; then
+    DETECTED_PY_INC=$(find "${CONDA_PREFIX}/include" -maxdepth 1 -type d -name 'python3*' | sort -V | tail -n1)
+    DETECTED_PY_LIB=$(find "${CONDA_PREFIX}/lib" -maxdepth 1 -type f \( -name 'libpython3*.so' -o -name 'libpython3*.so.*' \) | sort -V | tail -n1)
+else
+    DETECTED_PY_INC=""
+    DETECTED_PY_LIB=""
+fi
+
+PY_VER="${PY_VER:-3.10}"
+HOST_PY_INC="${HOST_PY_INC:-${DETECTED_PY_INC:-/usr/include/python${PY_VER}}}"
+# 注意：这里必须精确指向库文件，不能只是目录
+HOST_PY_LIB="${HOST_PY_LIB:-${DETECTED_PY_LIB:-/usr/lib/x86_64-linux-gnu/libpython${PY_VER}.so}}"
 
 # 4. 构建目录
 BUILD_DIR="build-zcu102"
@@ -43,11 +53,17 @@ fi
 # 检查 2: Python Header (关键!)
 if [ ! -d "$HOST_PY_INC" ]; then
     echo -e "${RED}[Error] Python headers not found at $HOST_PY_INC${NC}"
-    echo "You might be missing the dev package."
-    echo "Run: sudo apt install python3-dev"
+    echo "If using conda, check CONDA_PREFIX or pass HOST_PY_INC manually."
+    echo "For system Python, run: sudo apt install python3-dev"
+    exit 1
+fi
+if [ ! -f "$HOST_PY_LIB" ]; then
+    echo -e "${RED}[Error] Python library not found at $HOST_PY_LIB${NC}"
+    echo "If using conda, check CONDA_PREFIX or pass HOST_PY_LIB manually."
     exit 1
 fi
 echo -e " -> Found Python Headers: ${GREEN}$HOST_PY_INC${NC}"
+echo -e " -> Found Python Library: ${GREEN}$HOST_PY_LIB${NC}"
 
 # ================= Toolchain Generation =================
 
@@ -98,7 +114,7 @@ CMD_CMAKE="cmake -G Ninja .. \
 
 if ! eval $CMD_CMAKE; then
     echo -e "${RED}>>> CMake Configuration Failed!${NC}"
-    echo "Check if libpython3.10.so exists in /usr/lib/x86_64-linux-gnu/"
+    echo "Check HOST_PY_INC/HOST_PY_LIB, MLIR_DIR, LLVM_DIR, and absl_DIR."
     exit 1
 fi
 
@@ -120,5 +136,4 @@ LIB_DIR=$(pwd)/lib
 echo ""
 echo -e "${GREEN}>>> Build Complete!${NC}"
 echo -e ">>> Libraries: ${GREEN}$LIB_DIR${NC}"
-ls -lh $LIB_DIR/libonnx_mlir_cruntime_wrapper.* 2>/dev/null
-ls -lh $LIB_DIR/libOMTensor.* 2>/dev/null
+ls -lh "$LIB_DIR"/libcruntime.* "$LIB_DIR"/libOMTensorUtils.* "$LIB_DIR"/libOMExecutionSession.* 2>/dev/null

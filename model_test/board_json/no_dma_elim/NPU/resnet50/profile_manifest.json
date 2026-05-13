@@ -1,0 +1,10227 @@
+{
+  "layers": [
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "NoValue"
+      ],
+      "input_bytes": 0,
+      "input_dtypes": [],
+      "input_shapes": [],
+      "layer_id": 0,
+      "macs": null,
+      "onnx_node_name": "onnx.NoValue_37",
+      "origin_op_type": "NoValue",
+      "output_bytes": 0,
+      "output_dtypes": [],
+      "output_shapes": [],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 158700,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          3,
+          230,
+          230
+        ],
+        [
+          1,
+          1,
+          230,
+          230,
+          3
+        ],
+        [
+          2,
+          1,
+          7,
+          7,
+          3,
+          32
+        ]
+      ],
+      "layer_id": 1,
+      "macs": 118013952,
+      "onnx_node_name": "resnetv17_conv0_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ]
+      ],
+      "weight_bytes": 168108
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 3211520,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 2,
+      "macs": null,
+      "onnx_node_name": "resnetv17_batchnorm0_fwd_10",
+      "origin_op_type": "Mul",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 3211520,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 3,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_batchnorm0_fwd_50",
+      "origin_op_type": "Add",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 3211264,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ]
+      ],
+      "layer_id": 4,
+      "macs": null,
+      "onnx_node_name": "resnetv17_relu0_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "MaxPoolSingleOut"
+      ],
+      "input_bytes": 3211264,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          112,
+          112
+        ]
+      ],
+      "layer_id": 5,
+      "macs": null,
+      "onnx_node_name": "resnetv17_pool0_fwd",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          1,
+          2,
+          56,
+          56,
+          32
+        ],
+        [
+          2,
+          2,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          2,
+          32
+        ]
+      ],
+      "layer_id": 6,
+      "macs": 12845056,
+      "onnx_node_name": "resnetv17_stage1_conv0_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 417792,
+      "output_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          8,
+          2,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          1,
+          2,
+          56,
+          56,
+          32
+        ]
+      ],
+      "weight_bytes": 205056
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          1,
+          2,
+          56,
+          56,
+          32
+        ],
+        [
+          8,
+          2,
+          1,
+          1,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 7,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage1_conv3_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 217088
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 8,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm0_fwd_77",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 9,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage1_batchnorm0_fwd_27",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 10,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm3_fwd_73",
+      "origin_op_type": "Mul",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 11,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_stage1_batchnorm3_fwd_38",
+      "origin_op_type": "Add",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 12,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_relu0_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 215296,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          58,
+          58
+        ],
+        [
+          1,
+          2,
+          58,
+          58,
+          32
+        ],
+        [
+          2,
+          2,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 13,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage1_conv1_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 252160
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 14,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm1_fwd_74",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 15,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage1_batchnorm1_fwd_12",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 16,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_relu1_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          1,
+          2,
+          56,
+          56,
+          32
+        ],
+        [
+          8,
+          2,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 17,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage1_conv2_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 218112
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 18,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm2_fwd_14",
+      "origin_op_type": "Mul",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 19,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_stage1_batchnorm2_fwd_103",
+      "origin_op_type": "Add",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 2408448,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 20,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_stage1__plus0",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 3211264,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 21,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_activation0",
+      "origin_op_type": "Relu",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          8,
+          56,
+          56,
+          32
+        ],
+        [
+          2,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          2,
+          32
+        ]
+      ],
+      "layer_id": 22,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage1_conv4_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 819456
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 23,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm4_fwd_47",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 24,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage1_batchnorm4_fwd_24",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 25,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_relu2_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 215296,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          58,
+          58
+        ],
+        [
+          1,
+          2,
+          58,
+          58,
+          32
+        ],
+        [
+          2,
+          2,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 26,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage1_conv5_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 252160
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 27,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm5_fwd_35",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 28,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage1_batchnorm5_fwd_58",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 29,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_relu3_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          1,
+          2,
+          56,
+          56,
+          32
+        ],
+        [
+          8,
+          2,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 30,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage1_conv6_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 218112
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 31,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm6_fwd_11",
+      "origin_op_type": "Mul",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 32,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_stage1_batchnorm6_fwd_69",
+      "origin_op_type": "Add",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 2408448,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 33,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_stage1__plus1",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 3211264,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 34,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_activation1",
+      "origin_op_type": "Relu",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          8,
+          56,
+          56,
+          32
+        ],
+        [
+          2,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          2,
+          32
+        ]
+      ],
+      "layer_id": 35,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage1_conv7_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 819456
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 36,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm7_fwd_107",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 37,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage1_batchnorm7_fwd_86",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 38,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_relu4_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 215296,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          58,
+          58
+        ],
+        [
+          1,
+          2,
+          58,
+          58,
+          32
+        ],
+        [
+          2,
+          2,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 39,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage1_conv8_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 252160
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 40,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm8_fwd_56",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 803072,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          64,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 41,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage1_batchnorm8_fwd_33",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 42,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_relu5_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          56,
+          56
+        ],
+        [
+          1,
+          2,
+          56,
+          56,
+          32
+        ],
+        [
+          8,
+          2,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 43,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage1_conv9_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 218112
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 44,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_batchnorm9_fwd_87",
+      "origin_op_type": "Mul",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 3212288,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 45,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_stage1_batchnorm9_fwd_84",
+      "origin_op_type": "Add",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 2408448,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 46,
+      "macs": 802816,
+      "onnx_node_name": "resnetv17_stage1__plus2",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 3211264,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 47,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage1_activation2",
+      "origin_op_type": "Relu",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          8,
+          56,
+          56,
+          32
+        ],
+        [
+          4,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ]
+      ],
+      "layer_id": 48,
+      "macs": 25690112,
+      "onnx_node_name": "resnetv17_stage2_conv0_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 1034240,
+      "output_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          16,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          1,
+          8,
+          56,
+          56,
+          32
+        ]
+      ],
+      "weight_bytes": 836096
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          1,
+          8,
+          56,
+          56,
+          32
+        ],
+        [
+          16,
+          8,
+          1,
+          1,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 49,
+      "macs": 102760448,
+      "onnx_node_name": "resnetv17_stage2_conv3_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 933888
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 50,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm0_fwd_62",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 51,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm0_fwd_18",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 52,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm3_fwd_13",
+      "origin_op_type": "Mul",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 53,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2_batchnorm3_fwd_52",
+      "origin_op_type": "Add",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 54,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu0_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 115200,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          30,
+          30
+        ],
+        [
+          1,
+          4,
+          30,
+          30,
+          32
+        ],
+        [
+          4,
+          4,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 55,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage2_conv1_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 262656
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 56,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm1_fwd_15",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 57,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm1_fwd_43",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 58,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu1_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          1,
+          4,
+          28,
+          28,
+          32
+        ],
+        [
+          16,
+          4,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 59,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage2_conv2_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 167936
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 60,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm2_fwd_17",
+      "origin_op_type": "Mul",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 61,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2_batchnorm2_fwd_98",
+      "origin_op_type": "Add",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1204224,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 62,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2__plus0",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 1605632,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 63,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_activation0",
+      "origin_op_type": "Relu",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          16,
+          28,
+          28,
+          32
+        ],
+        [
+          4,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ]
+      ],
+      "layer_id": 64,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage2_conv4_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 467456
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 65,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm4_fwd_49",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 66,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm4_fwd_90",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 67,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu2_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 115200,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          30,
+          30
+        ],
+        [
+          1,
+          4,
+          30,
+          30,
+          32
+        ],
+        [
+          4,
+          4,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 68,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage2_conv5_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 262656
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 69,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm5_fwd_95",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 70,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm5_fwd_80",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 71,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu3_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          1,
+          4,
+          28,
+          28,
+          32
+        ],
+        [
+          16,
+          4,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 72,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage2_conv6_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 167936
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 73,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm6_fwd_85",
+      "origin_op_type": "Mul",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 74,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2_batchnorm6_fwd_96",
+      "origin_op_type": "Add",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1204224,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 75,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2__plus1",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 1605632,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 76,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_activation1",
+      "origin_op_type": "Relu",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          16,
+          28,
+          28,
+          32
+        ],
+        [
+          4,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ]
+      ],
+      "layer_id": 77,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage2_conv7_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 467456
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 78,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm7_fwd_19",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 79,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm7_fwd_21",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 80,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu4_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 115200,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          30,
+          30
+        ],
+        [
+          1,
+          4,
+          30,
+          30,
+          32
+        ],
+        [
+          4,
+          4,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 81,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage2_conv8_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 262656
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 82,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm8_fwd_67",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 83,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm8_fwd_99",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 84,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu5_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          1,
+          4,
+          28,
+          28,
+          32
+        ],
+        [
+          16,
+          4,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 85,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage2_conv9_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 167936
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 86,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm9_fwd_70",
+      "origin_op_type": "Mul",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 87,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2_batchnorm9_fwd_30",
+      "origin_op_type": "Add",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1204224,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 88,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2__plus2",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 1605632,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 89,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_activation2",
+      "origin_op_type": "Relu",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          16,
+          28,
+          28,
+          32
+        ],
+        [
+          4,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ]
+      ],
+      "layer_id": 90,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage2_conv10_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 467456
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 91,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm10_fwd_78",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 92,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm10_fwd_68",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 93,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu6_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 115200,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          30,
+          30
+        ],
+        [
+          1,
+          4,
+          30,
+          30,
+          32
+        ],
+        [
+          4,
+          4,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 94,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage2_conv11_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 262656
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 95,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm11_fwd_93",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 401920,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          128,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 96,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage2_batchnorm11_fwd_9",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 97,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_relu7_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          28,
+          28
+        ],
+        [
+          1,
+          4,
+          28,
+          28,
+          32
+        ],
+        [
+          16,
+          4,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 98,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage2_conv12_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 167936
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 99,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_batchnorm12_fwd_82",
+      "origin_op_type": "Mul",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1607680,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 100,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2_batchnorm12_fwd_65",
+      "origin_op_type": "Add",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 1204224,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 101,
+      "macs": 401408,
+      "onnx_node_name": "resnetv17_stage2__plus3",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 1605632,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 102,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage2_activation3",
+      "origin_op_type": "Relu",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          16,
+          28,
+          28,
+          32
+        ],
+        [
+          8,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 103,
+      "macs": 25690112,
+      "onnx_node_name": "resnetv17_stage3_conv0_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 975872,
+      "output_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          32,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          1,
+          16,
+          28,
+          28,
+          32
+        ]
+      ],
+      "weight_bytes": 533504
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          1,
+          16,
+          28,
+          28,
+          32
+        ],
+        [
+          32,
+          16,
+          1,
+          1,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 104,
+      "macs": 102760448,
+      "onnx_node_name": "resnetv17_stage3_conv3_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 925696
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 105,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm0_fwd_66",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 106,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm0_fwd_25",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 107,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm3_fwd_26",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 108,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3_batchnorm3_fwd_53",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 109,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu0_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 65536,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          16,
+          16
+        ],
+        [
+          1,
+          8,
+          16,
+          16,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 110,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage3_conv1_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 655360
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 111,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm1_fwd_44",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 112,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm1_fwd_97",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 113,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu1_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 50176,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          1,
+          8,
+          14,
+          14,
+          32
+        ],
+        [
+          32,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          32,
+          32
+        ]
+      ],
+      "layer_id": 114,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv2_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 316416
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 115,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm2_fwd_40",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 116,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3_batchnorm2_fwd_75",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 602112,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 117,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3__plus0",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 118,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_activation0",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ],
+        [
+          8,
+          32,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 119,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv4_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 463872
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 120,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm4_fwd_42",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 121,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm4_fwd_2",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 122,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu2_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 65536,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          16,
+          16
+        ],
+        [
+          1,
+          8,
+          16,
+          16,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 123,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage3_conv5_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 655360
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 124,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm5_fwd_89",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 125,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm5_fwd_8",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 126,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu3_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 50176,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          1,
+          8,
+          14,
+          14,
+          32
+        ],
+        [
+          32,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          32,
+          32
+        ]
+      ],
+      "layer_id": 127,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv6_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 316416
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 128,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm6_fwd_79",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 129,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3_batchnorm6_fwd_45",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 602112,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 130,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3__plus1",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 131,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_activation1",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ],
+        [
+          8,
+          32,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 132,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv7_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 463872
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 133,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm7_fwd_36",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 134,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm7_fwd_54",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 135,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu4_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 65536,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          16,
+          16
+        ],
+        [
+          1,
+          8,
+          16,
+          16,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 136,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage3_conv8_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 655360
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 137,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm8_fwd_104",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 138,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm8_fwd_29",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 139,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu5_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 50176,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          1,
+          8,
+          14,
+          14,
+          32
+        ],
+        [
+          32,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          32,
+          32
+        ]
+      ],
+      "layer_id": 140,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv9_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 316416
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 141,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm9_fwd_32",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 142,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3_batchnorm9_fwd_64",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 602112,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 143,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3__plus2",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 144,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_activation2",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ],
+        [
+          8,
+          32,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 145,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv10_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 463872
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 146,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm10_fwd_39",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 147,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm10_fwd_28",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 148,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu6_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 65536,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          16,
+          16
+        ],
+        [
+          1,
+          8,
+          16,
+          16,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 149,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage3_conv11_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 655360
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 150,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm11_fwd_59",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 151,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm11_fwd_76",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 152,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu7_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 50176,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          1,
+          8,
+          14,
+          14,
+          32
+        ],
+        [
+          32,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          32,
+          32
+        ]
+      ],
+      "layer_id": 153,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv12_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 316416
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 154,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm12_fwd_100",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 155,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3_batchnorm12_fwd_4",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 602112,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 156,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3__plus3",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 157,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_activation3",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ],
+        [
+          8,
+          32,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 158,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv13_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 463872
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 159,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm13_fwd_22",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 160,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm13_fwd_81",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 161,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu8_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 65536,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          16,
+          16
+        ],
+        [
+          1,
+          8,
+          16,
+          16,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 162,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage3_conv14_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 655360
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 163,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm14_fwd_6",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 164,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm14_fwd_72",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 165,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu9_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 50176,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          1,
+          8,
+          14,
+          14,
+          32
+        ],
+        [
+          32,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          32,
+          32
+        ]
+      ],
+      "layer_id": 166,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv15_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 316416
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 167,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm15_fwd_23",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 168,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3_batchnorm15_fwd_60",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 602112,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 169,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3__plus4",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 170,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_activation4",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ],
+        [
+          8,
+          32,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 171,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv16_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 463872
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 172,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm16_fwd_16",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 173,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm16_fwd_83",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 174,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu10_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 65536,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          16,
+          16
+        ],
+        [
+          1,
+          8,
+          16,
+          16,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 175,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage3_conv17_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 50176,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 655360
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 176,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm17_fwd_57",
+      "origin_op_type": "Mul",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 201728,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          256,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 177,
+      "macs": 50176,
+      "onnx_node_name": "resnetv17_stage3_batchnorm17_fwd_91",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 178,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_relu11_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 50176,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          14,
+          14
+        ],
+        [
+          1,
+          8,
+          14,
+          14,
+          32
+        ],
+        [
+          32,
+          8,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          32,
+          32
+        ]
+      ],
+      "layer_id": 179,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage3_conv18_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 316416
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 180,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_batchnorm18_fwd_94",
+      "origin_op_type": "Mul",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 806912,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1024,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 181,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3_batchnorm18_fwd_48",
+      "origin_op_type": "Add",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 602112,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 182,
+      "macs": 200704,
+      "onnx_node_name": "resnetv17_stage3__plus5",
+      "origin_op_type": "Add",
+      "output_bytes": 200704,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 802816,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 183,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage3_activation5",
+      "origin_op_type": "Relu",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ],
+        [
+          16,
+          32,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 184,
+      "macs": 25690112,
+      "onnx_node_name": "resnetv17_stage4_conv0_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 2322944,
+      "output_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          64,
+          32,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ]
+      ],
+      "weight_bytes": 727040
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 200704,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1024,
+          14,
+          14
+        ],
+        [
+          1,
+          32,
+          14,
+          14,
+          32
+        ],
+        [
+          64,
+          32,
+          1,
+          1,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 185,
+      "macs": 102760448,
+      "onnx_node_name": "resnetv17_stage4_conv3_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 2297856
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 186,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm0_fwd_101",
+      "origin_op_type": "Mul",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 187,
+      "macs": 25088,
+      "onnx_node_name": "resnetv17_stage4_batchnorm0_fwd_46",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 188,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm3_fwd_1",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 189,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage4_batchnorm3_fwd_34",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 190,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_relu0_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 41472,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          9,
+          9
+        ],
+        [
+          1,
+          16,
+          9,
+          9,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 191,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage4_conv1_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 25088,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 2400768
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 192,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm1_fwd_3",
+      "origin_op_type": "Mul",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 193,
+      "macs": 25088,
+      "onnx_node_name": "resnetv17_stage4_batchnorm1_fwd_106",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 194,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_relu1_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 25088,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          1,
+          16,
+          7,
+          7,
+          32
+        ],
+        [
+          64,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          64,
+          32
+        ]
+      ],
+      "layer_id": 195,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage4_conv2_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 1081856
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 196,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm2_fwd_41",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 197,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage4_batchnorm2_fwd_88",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 301056,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 198,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage4__plus0",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 199,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_activation0",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          64,
+          7,
+          7,
+          32
+        ],
+        [
+          16,
+          64,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 200,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage4_conv4_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 25088,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 1150976
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 201,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm4_fwd_63",
+      "origin_op_type": "Mul",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 202,
+      "macs": 25088,
+      "onnx_node_name": "resnetv17_stage4_batchnorm4_fwd_71",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 203,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_relu2_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 41472,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          9,
+          9
+        ],
+        [
+          1,
+          16,
+          9,
+          9,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 204,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage4_conv5_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 25088,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 2400768
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 205,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm5_fwd_61",
+      "origin_op_type": "Mul",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 206,
+      "macs": 25088,
+      "onnx_node_name": "resnetv17_stage4_batchnorm5_fwd_51",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 207,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_relu3_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 25088,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          1,
+          16,
+          7,
+          7,
+          32
+        ],
+        [
+          64,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          64,
+          32
+        ]
+      ],
+      "layer_id": 208,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage4_conv6_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 1081856
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 209,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm6_fwd_55",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 210,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage4_batchnorm6_fwd_7",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 301056,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 211,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage4__plus1",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 212,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_activation1",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          64,
+          7,
+          7,
+          32
+        ],
+        [
+          16,
+          64,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 213,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage4_conv7_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 25088,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 1150976
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 214,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm7_fwd_31",
+      "origin_op_type": "Mul",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 215,
+      "macs": 25088,
+      "onnx_node_name": "resnetv17_stage4_batchnorm7_fwd_92",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 216,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_relu4_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 41472,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          9,
+          9
+        ],
+        [
+          1,
+          16,
+          9,
+          9,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ]
+      ],
+      "layer_id": 217,
+      "macs": 115605504,
+      "onnx_node_name": "resnetv17_stage4_conv8_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 25088,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 2400768
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 218,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm8_fwd_0",
+      "origin_op_type": "Mul",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 102400,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          512,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 219,
+      "macs": 25088,
+      "onnx_node_name": "resnetv17_stage4_batchnorm8_fwd_20",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 220,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_relu5_fwd",
+      "origin_op_type": "Relu",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 25088,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ],
+        [
+          1,
+          16,
+          7,
+          7,
+          32
+        ],
+        [
+          64,
+          16,
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          64,
+          32
+        ]
+      ],
+      "layer_id": 221,
+      "macs": 51380224,
+      "onnx_node_name": "resnetv17_stage4_conv9_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": 1081856
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Mul"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 222,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_batchnorm9_fwd_102",
+      "origin_op_type": "Mul",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 409600,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 223,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage4_batchnorm9_fwd_105",
+      "origin_op_type": "Add",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 301056,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          2048,
+          7,
+          7
+        ],
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 224,
+      "macs": 100352,
+      "onnx_node_name": "resnetv17_stage4__plus2",
+      "origin_op_type": "Add",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 225,
+      "macs": null,
+      "onnx_node_name": "resnetv17_stage4_activation2",
+      "origin_op_type": "Relu",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "ReduceMeanV13"
+      ],
+      "input_bytes": 401408,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 226,
+      "macs": null,
+      "onnx_node_name": "resnetv17_pool1_fwd_5",
+      "origin_op_type": "ReduceMeanV13",
+      "output_bytes": 8192,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048,
+          1,
+          1
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Flatten"
+      ],
+      "input_bytes": 8192,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          2048,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 227,
+      "macs": null,
+      "onnx_node_name": "flatten_473",
+      "origin_op_type": "Flatten",
+      "output_bytes": 8192,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          2048
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Gemm"
+      ],
+      "input_bytes": 2048000,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1000,
+          2048
+        ],
+        [
+          2048,
+          1000
+        ],
+        [
+          1,
+          2048
+        ],
+        [
+          1000
+        ]
+      ],
+      "layer_id": 228,
+      "macs": 2048000,
+      "onnx_node_name": "resnetv17_dense0_fwd",
+      "origin_op_type": "Gemm",
+      "output_bytes": 1000,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1000
+        ]
+      ],
+      "weight_bytes": 2054048
+    }
+  ]
+}

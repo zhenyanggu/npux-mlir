@@ -1,4 +1,5 @@
 import argparse
+import os
 import shutil
 from pathlib import Path
 
@@ -21,6 +22,12 @@ DEFAULT_SAMPLE_COUNT = 2
 DEFAULT_SEED = 2026
 DEFAULT_CALIBRATION_COUNT = 8
 DEFAULT_TARGET_OPSET = 17
+DEFAULT_CACHE_DIR = Path(
+    os.environ.get(
+        "MODEL_TEST_CACHE_DIR",
+        str(Path(__file__).resolve().parents[2] / "cache"),
+    )
+).resolve()
 
 
 def resolve_dim(value, fallback):
@@ -365,6 +372,22 @@ def report_qdq_node_counts(quant_model):
     print(f"[quant] QDQ node counts: QuantizeLinear={q_count}, DequantizeLinear={dq_count}")
 
 
+def ensure_input_model(input_model):
+    if input_model.exists():
+        return
+
+    cache_model = DEFAULT_CACHE_DIR / input_model.name
+    if cache_model.exists():
+        print(f"[copy] cached BERT model: {cache_model} -> {input_model}")
+        shutil.copyfile(cache_model, input_model)
+        return
+
+    raise FileNotFoundError(
+        f"Input model not found: {input_model}\n"
+        f"Expected cached model: {cache_model}"
+    )
+
+
 def main():
     args = parse_args()
     if args.sample_count <= 0:
@@ -380,8 +403,7 @@ def main():
     input_model = (workdir / args.input_model).resolve()
     output_model = (workdir / args.output_model).resolve()
 
-    if not input_model.exists():
-        raise FileNotFoundError(f"Input model not found: {input_model}")
+    ensure_input_model(input_model)
 
     temp_source = workdir / f"{MODEL_NAME}_tmp_source.onnx"
     temp_static = workdir / f"{MODEL_NAME}_tmp_static.onnx"

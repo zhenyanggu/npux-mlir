@@ -10,15 +10,21 @@ SHELL := /bin/bash
 #   8. 清理指定模型：make clean gelu
 #   9. 临时跳过部分模型：make SKIP_MODELS="gelu resize"
 #  10. 持久跳过某个模型：touch models/gelu/.disabled
+#  11. 消融实验隔离目录：make paper_models EXPERIMENT_NAME=costmodel
 PYTHON ?= python3
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 PROJECT_ROOT := $(abspath $(ROOT_DIR)/..)
 ONNX_MLIR ?= $(or $(shell command -v onnx-mlir 2>/dev/null),$(firstword $(wildcard $(PROJECT_ROOT)/build/Release/bin/onnx-mlir) $(wildcard $(PROJECT_ROOT)/build/Debug/bin/onnx-mlir) $(wildcard $(PROJECT_ROOT)/install/bin/onnx-mlir)),onnx-mlir)
 MODELS_DIR := $(ROOT_DIR)/models
 SCRIPTS_DIR := $(ROOT_DIR)/scripts
-BUILD_DIR := $(ROOT_DIR)/build
 CACHE_DIR := $(ROOT_DIR)/cache
+EXPERIMENT_NAME ?=
+BUILD_DIR := $(ROOT_DIR)/build
 OUTPUT_ROOT := $(ROOT_DIR)/output
+ifneq ($(strip $(EXPERIMENT_NAME)),)
+BUILD_DIR := $(ROOT_DIR)/build/$(EXPERIMENT_NAME)
+OUTPUT_ROOT := $(ROOT_DIR)/output/$(EXPERIMENT_NAME)
+endif
 OUTPUT_NPU_DIR := $(OUTPUT_ROOT)/NPU
 OUTPUT_CPU_DIR := $(OUTPUT_ROOT)/CPU
 NPU_BUILD_DIR_PREFIX := $(BUILD_DIR)/NPU_
@@ -33,6 +39,15 @@ ACC_KB ?= 256
 SHAPE ?=
 SKIP_MODELS ?=
 MODEL_PY_ARGS ?=
+GEMM_TILING_STRATEGY ?= costmodel
+CONV_TILING_STRATEGY ?= $(GEMM_TILING_STRATEGY)
+ifeq ($(strip $(EXPERIMENT_NAME)),no_dma_elim)
+NPU_TILING_FUSION_STRATEGY ?= legacy
+else
+NPU_TILING_FUSION_STRATEGY ?= extended
+endif
+NPU_REMOVE_REDUNDANT_DMA ?= 1
+NPU_OPS ?=
 
 # 仅收集模型目录，避免把 models 下的 md 文件当作 testcase
 MODEL_DIRS := $(wildcard $(MODELS_DIR)/*/)
@@ -49,6 +64,10 @@ RESNET50_BLOCK_MODEL_NAMES := $(sort $(filter resnet50_block_%,$(ALL_MODEL_NAMES
 RESNET50_BLOCK_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(RESNET50_BLOCK_MODEL_NAMES))
 BERT_BASE_LAYER_MODEL_NAMES := $(sort $(filter bert_base_layer_%,$(ALL_MODEL_NAMES)))
 BERT_BASE_LAYER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(BERT_BASE_LAYER_MODEL_NAMES))
+PAPER_MODEL_NAMES := bert_base resnet50 vgg16 mnist
+PAPER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(PAPER_MODEL_NAMES))
+FUSION_MODEL_NAMES := lenet5 alexnet mobilenet squeezenet
+FUSION_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(FUSION_MODEL_NAMES))
 SELECTIVE_CLEAN_MODELS := $(filter $(ALL_MODEL_NAMES),$(filter-out clean,$(MAKECMDGOALS)))
 VGG16_CONV_DIAG_MODELS := \
 	vgg16_layer_conv_3x224_to_64x224 \
@@ -63,7 +82,8 @@ VGG16_CONV_DIAG_MODELS := \
 .PHONY: all cpu init run_one clean clean_cache list check_model \
 	prepare tile mlir llvm zcu102 rebuild vgg16_layers vgg16_layers_all vgg16_conv_diag \
 	resnet50_layers resnet50_layers_all resnet50_blocks resnet50_blocks_all \
-	bert_base_layers bert_base_layers_all \
+	bert_base_layers bert_base_layers_all paper_models paper_models_all \
+	fusion_models fusion_models_all \
 	$(ALL_MODEL_NAMES)
 
 MODEL_PREPARE_TARGETS := $(addsuffix .prepare,$(ALL_MODEL_NAMES))
@@ -103,6 +123,14 @@ resnet50_blocks_all: $(RESNET50_BLOCK_MODEL_NAMES)
 bert_base_layers: $(BERT_BASE_LAYER_ENABLED_MODEL_NAMES)
 
 bert_base_layers_all: $(BERT_BASE_LAYER_MODEL_NAMES)
+
+paper_models: $(PAPER_ENABLED_MODEL_NAMES)
+
+paper_models_all: $(PAPER_MODEL_NAMES)
+
+fusion_models: $(FUSION_ENABLED_MODEL_NAMES)
+
+fusion_models_all: $(FUSION_MODEL_NAMES)
 
 init:
 	@mkdir -p "$(BUILD_DIR)" "$(OUTPUT_ROOT)"
@@ -257,7 +285,10 @@ $(BUILD_DIR)/NPU_%/.tile.stamp: $(BUILD_DIR)/NPU_%/.prepare.stamp
 	elif [[ "$$model" == "mnist" ]]; then \
 		shape_args="--shape 1,1,28,28"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,28,28"; \
-	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" ]]; then \
+	elif [[ "$$model" == "lenet5" ]]; then \
+		shape_args="--shape 1,1,32,32"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,32,32"; \
+	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" || "$$model" == "mobilenet" || "$$model" == "alexnet" || "$$model" == "squeezenet" ]]; then \
 		shape_args="--shape 1,3,224,224"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,224,224"; \
 	elif [[ "$$model" == "bert_base" ]]; then \
@@ -295,7 +326,10 @@ $(BUILD_DIR)/CPU_%/.tile.stamp: $(BUILD_DIR)/CPU_%/.prepare.stamp
 	elif [[ "$$model" == "mnist" ]]; then \
 		shape_args="--shape 1,1,28,28"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,28,28"; \
-	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" ]]; then \
+	elif [[ "$$model" == "lenet5" ]]; then \
+		shape_args="--shape 1,1,32,32"; \
+		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,1,32,32"; \
+	elif [[ "$$model" == "resnet50" || "$$model" == "vgg16" || "$$model" == "mobilenet" || "$$model" == "alexnet" || "$$model" == "squeezenet" ]]; then \
 		shape_args="--shape 1,3,224,224"; \
 		echo "[tile] $$model 未指定 SHAPE，默认使用 --shape 1,3,224,224"; \
 	elif [[ "$$model" == "bert_base" ]]; then \
@@ -364,7 +398,7 @@ $(BUILD_DIR)/NPU_%/.llvm.stamp: $(BUILD_DIR)/NPU_%/.mlir.stamp
 		echo "[tile] $$model 缺失 tile_config.json，已自动补齐空配置"; \
 	fi; \
 	echo "[llvm] $$mlir_file -> $$work_dir/NpuToLLVM/llvm.mlir"; \
-	(cd "$$work_dir" && "$(SCRIPTS_DIR)/onnx_to_llvm.sh" "$$mlir_file" "$$tile_json") || { echo "[error] $$model MLIR Lowering 失败"; exit 2; }; \
+	(cd "$$work_dir" && NPU_OPS="$(NPU_OPS)" GEMM_TILING_STRATEGY="$(GEMM_TILING_STRATEGY)" CONV_TILING_STRATEGY="$(CONV_TILING_STRATEGY)" NPU_TILING_FUSION_STRATEGY="$(NPU_TILING_FUSION_STRATEGY)" NPU_REMOVE_REDUNDANT_DMA="$(NPU_REMOVE_REDUNDANT_DMA)" "$(SCRIPTS_DIR)/onnx_to_llvm.sh" "$$mlir_file" "$$tile_json") || { echo "[error] $$model MLIR Lowering 失败"; exit 2; }; \
 	touch "$@"
 
 $(BUILD_DIR)/CPU_%/.cpu_llvm.stamp: $(BUILD_DIR)/CPU_%/.mlir.stamp
@@ -557,6 +591,11 @@ list:
 	@echo "resnet50 layer debug set: make resnet50_layers (enabled only) | make resnet50_layers_all (include disabled)"
 	@echo "resnet50 block debug set: make resnet50_blocks (enabled only) | make resnet50_blocks_all (include disabled)"
 	@echo "bert_base layer debug set: make bert_base_layers (enabled only) | make bert_base_layers_all (include disabled)"
+	@echo "paper model set: make paper_models (bert_base resnet50 vgg16 mnist; enabled only)"
+	@echo "fusion ablation set: make fusion_models (lenet5 alexnet mobilenet squeezenet; enabled only)"
+	@echo "experiment output: make paper_models EXPERIMENT_NAME=costmodel -> build/costmodel and output/costmodel"
+	@echo "baseline options: GEMM_TILING_STRATEGY=costmodel CONV_TILING_STRATEGY=costmodel NPU_TILING_FUSION_STRATEGY=extended NPU_REMOVE_REDUNDANT_DMA=1"
+	@echo "no_dma_elim default: EXPERIMENT_NAME=no_dma_elim uses NPU_TILING_FUSION_STRATEGY=legacy unless explicitly overridden"
 	@echo "skip temporarily: make SKIP_MODELS=\"gelu resize\""
 	@echo "skip persistently: touch models/<model>/.disabled"
 

@@ -1,0 +1,12 @@
+# One image per line.
+# Format A: <absolute_or_relative_image_path>,<label_id>
+# Format B: <absolute_or_relative_image_path>   (label inferred from parent folder synset)
+#
+# Relative paths are resolved in order:
+# 1) relative to this image-list file
+# 2) relative to --imagenet-root
+#
+# Examples:
+# /data/imagenette2-320/val/n01440764/ILSVRC2012_val_00009111.JPEG,0
+# n02102040/ILSVRC2012_val_00014413.JPEG,217
+# n02979186/ILSVRC2012_val_00020518.JPEG

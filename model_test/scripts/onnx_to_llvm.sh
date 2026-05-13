@@ -42,6 +42,10 @@ BUFFER_STAGE=""
 LLVM_STAGE=""
 PIPELINE_LABEL=""
 NPU_OPS=""
+GEMM_TILING_STRATEGY="${GEMM_TILING_STRATEGY:-costmodel}"
+CONV_TILING_STRATEGY="${CONV_TILING_STRATEGY:-$GEMM_TILING_STRATEGY}"
+NPU_TILING_FUSION_STRATEGY="${NPU_TILING_FUSION_STRATEGY:-extended}"
+NPU_REMOVE_REDUNDANT_DMA="${NPU_REMOVE_REDUNDANT_DMA:-1}"
 
 # 报错并退出的函数
 error_exit() {
@@ -206,15 +210,27 @@ if [[ "$PIPELINE_MODE" == "npu" ]]; then
     enter_stage "NpuTiling"
 
     run_pass "Tiling " \
-             "--npu-tiling --canonicalize --npu-tiling-config=$TILING_CONFIG" \
+             "--npu-tiling --canonicalize --npu-tiling-config=$TILING_CONFIG --gemm-tiling-strategy=$GEMM_TILING_STRATEGY --conv-tiling-strategy=$CONV_TILING_STRATEGY --gemm-fusion-strategy=$NPU_TILING_FUSION_STRATEGY --conv-fusion-strategy=$NPU_TILING_FUSION_STRATEGY" \
              "NpuTiling.mlir"
 
-    run_pass "Insert Dma " \
-             "--npu-insert-dma" \
+    dma_flags="--npu-insert-dma"
+    case "${NPU_REMOVE_REDUNDANT_DMA,,}" in
+        1|true|yes|on)
+            dma_flags="${dma_flags} --npu-remove-redundant-dma"
+            ;;
+        0|false|no|off)
+            ;;
+        *)
+            error_exit "Invalid NPU_REMOVE_REDUNDANT_DMA=${NPU_REMOVE_REDUNDANT_DMA} (expected 1/0, true/false, yes/no, on/off)"
+            ;;
+    esac
+
+    run_pass "Insert and Remove Redundant Dma " \
+             "${dma_flags}" \
              "NpuInsertDma.mlir"
 
     run_pass "Op Splitting " \
-             "--npu-op-splitting --npu-remove-redundant-dma" \
+             "--npu-op-splitting" \
              "NpuOpSplitting.mlir"
 
     # # # ------------------------------------------------

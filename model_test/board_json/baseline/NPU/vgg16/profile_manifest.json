@@ -1,0 +1,1513 @@
+{
+  "layers": [
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 153228,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          3,
+          226,
+          226
+        ],
+        [
+          1,
+          1,
+          226,
+          226,
+          3
+        ],
+        [
+          2,
+          1,
+          3,
+          3,
+          3,
+          32
+        ],
+        [
+          2,
+          32
+        ]
+      ],
+      "layer_id": 0,
+      "macs": 486,
+      "onnx_node_name": "vgg0_conv0_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 6574848,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          2,
+          2,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          2,
+          32
+        ],
+        [
+          1,
+          64,
+          226,
+          226
+        ],
+        [
+          1,
+          2,
+          226,
+          226,
+          32
+        ]
+      ],
+      "weight_bytes": 155212
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 3268864,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          226,
+          226
+        ],
+        [
+          1,
+          2,
+          226,
+          226,
+          32
+        ],
+        [
+          2,
+          2,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          2,
+          32
+        ]
+      ],
+      "layer_id": 1,
+      "macs": 1849688064,
+      "onnx_node_name": "vgg0_conv1_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 3211264,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          224,
+          224
+        ]
+      ],
+      "weight_bytes": 3305984
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "MaxPool"
+      ],
+      "input_bytes": 4014084,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          224,
+          224
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          64,
+          112,
+          112
+        ]
+      ],
+      "layer_id": 2,
+      "macs": null,
+      "onnx_node_name": "vgg0_pool0_fwd",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 1737728,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          4,
+          2,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ],
+        [
+          1,
+          64,
+          114,
+          114
+        ],
+        [
+          1,
+          2,
+          114,
+          114,
+          32
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 831744,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          114,
+          114
+        ],
+        [
+          1,
+          2,
+          114,
+          114,
+          32
+        ],
+        [
+          4,
+          2,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ]
+      ],
+      "layer_id": 3,
+      "macs": 20736,
+      "onnx_node_name": "vgg0_conv2_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 3474944,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          4,
+          4,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ],
+        [
+          1,
+          128,
+          114,
+          114
+        ],
+        [
+          1,
+          4,
+          114,
+          114,
+          32
+        ]
+      ],
+      "weight_bytes": 905984
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 1663488,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          114,
+          114
+        ],
+        [
+          1,
+          4,
+          114,
+          114,
+          32
+        ],
+        [
+          4,
+          4,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          4,
+          32
+        ]
+      ],
+      "layer_id": 4,
+      "macs": 1849688064,
+      "onnx_node_name": "vgg0_conv3_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 1605632,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          112,
+          112
+        ]
+      ],
+      "weight_bytes": 1811456
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "MaxPool"
+      ],
+      "input_bytes": 2007044,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          112,
+          112
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          128,
+          56,
+          56
+        ]
+      ],
+      "layer_id": 5,
+      "macs": null,
+      "onnx_node_name": "vgg0_pool1_fwd",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 1157120,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          8,
+          4,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ],
+        [
+          1,
+          128,
+          58,
+          58
+        ],
+        [
+          1,
+          4,
+          58,
+          58,
+          32
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 430592,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          58,
+          58
+        ],
+        [
+          1,
+          4,
+          58,
+          58,
+          32
+        ],
+        [
+          8,
+          4,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 6,
+      "macs": 82944,
+      "onnx_node_name": "vgg0_conv4_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 2313216,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ],
+        [
+          1,
+          256,
+          58,
+          58
+        ],
+        [
+          1,
+          8,
+          58,
+          58,
+          32
+        ]
+      ],
+      "weight_bytes": 726528
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 861184,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          58,
+          58
+        ],
+        [
+          1,
+          8,
+          58,
+          58,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 7,
+      "macs": 165888,
+      "onnx_node_name": "vgg0_conv5_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 2313216,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ],
+        [
+          1,
+          256,
+          58,
+          58
+        ],
+        [
+          1,
+          8,
+          58,
+          58,
+          32
+        ]
+      ],
+      "weight_bytes": 1452032
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 861184,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          58,
+          58
+        ],
+        [
+          1,
+          8,
+          58,
+          58,
+          32
+        ],
+        [
+          8,
+          8,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          8,
+          32
+        ]
+      ],
+      "layer_id": 8,
+      "macs": 1849688064,
+      "onnx_node_name": "vgg0_conv6_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 802816,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ]
+      ],
+      "weight_bytes": 1452032
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "MaxPool"
+      ],
+      "input_bytes": 1003524,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          56,
+          56
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          256,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 9,
+      "macs": null,
+      "onnx_node_name": "vgg0_pool2_fwd",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 1642496,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          16,
+          8,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ],
+        [
+          1,
+          256,
+          30,
+          30
+        ],
+        [
+          1,
+          8,
+          30,
+          30,
+          32
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 230400,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256,
+          30,
+          30
+        ],
+        [
+          1,
+          8,
+          30,
+          30,
+          32
+        ],
+        [
+          16,
+          8,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 10,
+      "macs": 331776,
+      "onnx_node_name": "vgg0_conv7_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 3282944,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ],
+        [
+          1,
+          512,
+          30,
+          30
+        ],
+        [
+          1,
+          16,
+          30,
+          30,
+          32
+        ]
+      ],
+      "weight_bytes": 1412096
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 460800,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          30,
+          30
+        ],
+        [
+          1,
+          16,
+          30,
+          30,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 11,
+      "macs": 663552,
+      "onnx_node_name": "vgg0_conv8_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 3282944,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ],
+        [
+          1,
+          512,
+          30,
+          30
+        ],
+        [
+          1,
+          16,
+          30,
+          30,
+          32
+        ]
+      ],
+      "weight_bytes": 2822144
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 460800,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          30,
+          30
+        ],
+        [
+          1,
+          16,
+          30,
+          30,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 12,
+      "macs": 1849688064,
+      "onnx_node_name": "vgg0_conv9_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 401408,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 2822144
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "MaxPool"
+      ],
+      "input_bytes": 501764,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          28,
+          28
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          512,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 13,
+      "macs": null,
+      "onnx_node_name": "vgg0_pool3_fwd",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 2623488,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ],
+        [
+          1,
+          512,
+          16,
+          16
+        ],
+        [
+          1,
+          16,
+          16,
+          16,
+          32
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 131072,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          16,
+          16
+        ],
+        [
+          1,
+          16,
+          16,
+          16,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 14,
+      "macs": 663552,
+      "onnx_node_name": "vgg0_conv10_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 2623488,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ],
+        [
+          1,
+          512,
+          16,
+          16
+        ],
+        [
+          1,
+          16,
+          16,
+          16,
+          32
+        ]
+      ],
+      "weight_bytes": 2492416
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 131072,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          16,
+          16
+        ],
+        [
+          1,
+          16,
+          16,
+          16,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 15,
+      "macs": 663552,
+      "onnx_node_name": "vgg0_conv11_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 2623488,
+      "output_dtypes": [
+        "i8",
+        "i32",
+        "i8",
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ],
+        [
+          1,
+          512,
+          16,
+          16
+        ],
+        [
+          1,
+          16,
+          16,
+          16,
+          32
+        ]
+      ],
+      "weight_bytes": 2492416
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv",
+        "Relu"
+      ],
+      "input_bytes": 131072,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          16,
+          16
+        ],
+        [
+          1,
+          16,
+          16,
+          16,
+          32
+        ],
+        [
+          16,
+          16,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          16,
+          32
+        ]
+      ],
+      "layer_id": 16,
+      "macs": 462422016,
+      "onnx_node_name": "vgg0_conv12_fwd",
+      "origin_op_type": "Conv",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 2492416
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "MaxPool"
+      ],
+      "input_bytes": 125444,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          14,
+          14
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 17,
+      "macs": null,
+      "onnx_node_name": "vgg0_pool4_fwd",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 25088,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Flatten"
+      ],
+      "input_bytes": 100352,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          512,
+          7,
+          7
+        ]
+      ],
+      "layer_id": 18,
+      "macs": null,
+      "onnx_node_name": "flatten_60",
+      "origin_op_type": "Flatten",
+      "output_bytes": 100352,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          25088
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Gemm",
+        "Relu"
+      ],
+      "input_bytes": 102760448,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          4096,
+          25088
+        ],
+        [
+          25088,
+          4096
+        ],
+        [
+          1,
+          25088
+        ],
+        [
+          4096
+        ]
+      ],
+      "layer_id": 19,
+      "macs": 102760448,
+      "onnx_node_name": "vgg0_dense0_fwd",
+      "origin_op_type": "Gemm",
+      "output_bytes": 4096,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          4096
+        ]
+      ],
+      "weight_bytes": 102801920
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Flatten"
+      ],
+      "input_bytes": 16384,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          4096
+        ]
+      ],
+      "layer_id": 20,
+      "macs": null,
+      "onnx_node_name": "flatten_65",
+      "origin_op_type": "Flatten",
+      "output_bytes": 16384,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          4096
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Gemm",
+        "Relu"
+      ],
+      "input_bytes": 16777216,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          4096,
+          4096
+        ],
+        [
+          4096,
+          4096
+        ],
+        [
+          1,
+          4096
+        ],
+        [
+          4096
+        ]
+      ],
+      "layer_id": 21,
+      "macs": 16777216,
+      "onnx_node_name": "vgg0_dense1_fwd",
+      "origin_op_type": "Gemm",
+      "output_bytes": 4096,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          4096
+        ]
+      ],
+      "weight_bytes": 16797696
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Flatten"
+      ],
+      "input_bytes": 16384,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          4096
+        ]
+      ],
+      "layer_id": 22,
+      "macs": null,
+      "onnx_node_name": "flatten_70",
+      "origin_op_type": "Flatten",
+      "output_bytes": 16384,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          4096
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Gemm"
+      ],
+      "input_bytes": 4096000,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1000,
+          4096
+        ],
+        [
+          4096,
+          1000
+        ],
+        [
+          1,
+          4096
+        ],
+        [
+          1000
+        ]
+      ],
+      "layer_id": 23,
+      "macs": 4096000,
+      "onnx_node_name": "vgg0_dense2_fwd",
+      "origin_op_type": "Gemm",
+      "output_bytes": 1000,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          1000
+        ]
+      ],
+      "weight_bytes": 4104096
+    }
+  ]
+}

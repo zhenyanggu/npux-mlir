@@ -218,6 +218,22 @@ def _download_file(url: str, dst: Path) -> None:
     urllib.request.urlretrieve(url, str(dst))
 
 
+def _ensure_input_model(input_model: Path) -> None:
+    if input_model.exists():
+        return
+
+    cache_model = DEFAULT_CACHE_DIR / input_model.name
+    if cache_model.exists():
+        print(f"[copy] cached VGG16 model: {cache_model} -> {input_model}")
+        shutil.copyfile(cache_model, input_model)
+        return
+
+    raise FileNotFoundError(
+        f"Input model not found: {input_model}\n"
+        f"Expected cached model: {cache_model}"
+    )
+
+
 def _ensure_default_subset_dataset(cache_dir: Path) -> Path:
     dataset_root = cache_dir / DATASET_NAME
     val_root = dataset_root / "val"
@@ -802,8 +818,7 @@ def main() -> None:
         else None
     )
 
-    if not input_model.exists():
-        raise FileNotFoundError(f"Input model not found: {input_model}")
+    _ensure_input_model(input_model)
     imagenet_root = _normalize_imagenet_root(Path(args.imagenet_root).resolve())
     need_imagenet_root = (not args.skip_quantization) or (image_list_file is None)
     if need_imagenet_root and not imagenet_root.exists():

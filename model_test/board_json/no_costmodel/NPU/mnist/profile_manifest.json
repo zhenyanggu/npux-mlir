@@ -1,0 +1,473 @@
+{
+  "layers": [
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "NoValue"
+      ],
+      "input_bytes": 0,
+      "input_dtypes": [],
+      "input_shapes": [],
+      "layer_id": 0,
+      "macs": null,
+      "onnx_node_name": "onnx.NoValue_0",
+      "origin_op_type": "NoValue",
+      "output_bytes": 0,
+      "output_dtypes": [],
+      "output_shapes": [],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 1024,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          1,
+          32,
+          32
+        ],
+        [
+          1,
+          1,
+          32,
+          32,
+          1
+        ],
+        [
+          1,
+          1,
+          5,
+          5,
+          1,
+          8
+        ]
+      ],
+      "layer_id": 1,
+      "macs": 156800,
+      "onnx_node_name": "Convolution28",
+      "origin_op_type": "Conv",
+      "output_bytes": 6272,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          8,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": 1224
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 25120,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          8,
+          28,
+          28
+        ],
+        [
+          8,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 2,
+      "macs": 6272,
+      "onnx_node_name": "Plus30",
+      "origin_op_type": "Add",
+      "output_bytes": 25088,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          8,
+          28,
+          28
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "missing_strict_qdq_context",
+      "fused_ops": [
+        "MaxPoolSingleOut"
+      ],
+      "input_bytes": 25088,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          8,
+          28,
+          28
+        ]
+      ],
+      "layer_id": 3,
+      "macs": null,
+      "onnx_node_name": "Pooling66_1",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 6272,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          8,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 6272,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          8,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 4,
+      "macs": null,
+      "onnx_node_name": "ReLU32_2",
+      "origin_op_type": "Relu",
+      "output_bytes": 6272,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          8,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 2592,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          8,
+          18,
+          18
+        ],
+        [
+          1,
+          1,
+          18,
+          18,
+          8
+        ],
+        [
+          1,
+          1,
+          5,
+          5,
+          8,
+          16
+        ]
+      ],
+      "layer_id": 5,
+      "macs": 627200,
+      "onnx_node_name": "Convolution110",
+      "origin_op_type": "Conv",
+      "output_bytes": 3136,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          16,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": 5792
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 12608,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          16,
+          14,
+          14
+        ],
+        [
+          16,
+          1,
+          1
+        ]
+      ],
+      "layer_id": 6,
+      "macs": 3136,
+      "onnx_node_name": "Plus112",
+      "origin_op_type": "Add",
+      "output_bytes": 12544,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          16,
+          14,
+          14
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "MaxPoolSingleOut"
+      ],
+      "input_bytes": 12544,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          16,
+          14,
+          14
+        ]
+      ],
+      "layer_id": 7,
+      "macs": null,
+      "onnx_node_name": "Pooling160_3",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 1024,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          16,
+          4,
+          4
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Relu"
+      ],
+      "input_bytes": 1024,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          16,
+          4,
+          4
+        ]
+      ],
+      "layer_id": 8,
+      "macs": null,
+      "onnx_node_name": "ReLU114_4",
+      "origin_op_type": "Relu",
+      "output_bytes": 1024,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          16,
+          4,
+          4
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "unsupported_op",
+      "fused_ops": [
+        "Reshape"
+      ],
+      "input_bytes": 1040,
+      "input_dtypes": [
+        "f32",
+        "i64"
+      ],
+      "input_shapes": [
+        [
+          1,
+          16,
+          4,
+          4
+        ],
+        [
+          2
+        ]
+      ],
+      "layer_id": 9,
+      "macs": null,
+      "onnx_node_name": "Times212_reshape0",
+      "origin_op_type": "Reshape",
+      "output_bytes": 1024,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          256
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "QLinearMatMul"
+      ],
+      "input_bytes": 256,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          256
+        ],
+        [
+          256,
+          10
+        ],
+        [
+          1,
+          10
+        ]
+      ],
+      "layer_id": 10,
+      "macs": 2560,
+      "onnx_node_name": "Times212_Output_0_QuantizeLinear_5",
+      "origin_op_type": "QLinearMatMul",
+      "output_bytes": 10,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          10
+        ]
+      ],
+      "weight_bytes": 2600
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "missing_strict_qdq_context",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 80,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          10
+        ],
+        [
+          1,
+          10
+        ]
+      ],
+      "layer_id": 11,
+      "macs": 10,
+      "onnx_node_name": "Plus214",
+      "origin_op_type": "Add",
+      "output_bytes": 40,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          10
+        ]
+      ],
+      "weight_bytes": null
+    }
+  ]
+}

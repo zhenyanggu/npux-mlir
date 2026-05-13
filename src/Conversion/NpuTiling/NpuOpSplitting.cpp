@@ -128,12 +128,63 @@ struct NpuDmaTilingPattern : public OpRewritePattern<linalg::GenericOp> {
       }
     }
 
-    // 条件 3: 对于 MVOUT，检查其输出目标是否为 tensor.extract_slice
+    // 条件 3: 对于 MVOUT，检查其输出目标是否为 tensor.extract_slice，并分析分块维度
     if (isMvout) {
       Value mvoutDest = op.getOutputs()[0];
-      if (!mvoutDest.getDefiningOp<tensor::ExtractSliceOp>()) {
+      auto sliceOp = mvoutDest.getDefiningOp<tensor::ExtractSliceOp>();
+      if (!sliceOp) {
         op->setAttr("npu.split_done", rewriter.getUnitAttr());
         return failure();
+      }
+
+      auto srcType = cast<RankedTensorType>(sliceOp.getSource().getType());
+      int rank = srcType.getRank();
+
+      // 仅针对 4 维 mvout 执行特定的 split_dim 分析逻辑
+      if (rank == 4) {
+        SmallVector<int> splitDims;
+        auto mixedOffsets = sliceOp.getMixedOffsets();
+        auto mixedSizes = sliceOp.getMixedSizes();
+
+        for (int i = 0; i < rank; ++i) {
+          bool isSplit = false;
+
+          // 检查 offset 是否非 0 或是动态值
+          if (mixedOffsets[i].is<Value>()) {
+            isSplit = true;
+          } else {
+            auto attr = mixedOffsets[i].get<Attribute>();
+            if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
+              if (intAttr.getInt() != 0) isSplit = true;
+            }
+          }
+
+          // 检查 size 是否与原 tensor 大小不同，或者为动态值
+          if (mixedSizes[i].is<Value>()) {
+            isSplit = true;
+          } else {
+            auto attr = mixedSizes[i].get<Attribute>();
+            if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
+              if (intAttr.getInt() != srcType.getDimSize(i)) isSplit = true;
+            }
+          }
+
+          if (isSplit) {
+            splitDims.push_back(i);
+          }
+        }
+
+        // 仅有一维被分块时的处理逻辑
+        if (splitDims.size() == 1) {
+          int splitIdx = splitDims[0];
+          // 判断是否为倒数第二、倒数第三、或倒数第四维
+          if (splitIdx == rank - 2 || splitIdx == rank - 3 || splitIdx == rank - 4) {
+            // 打上 label 并停止进一步 split
+            op->setAttr("npu.split_dim", rewriter.getI32IntegerAttr(2));
+            op->setAttr("npu.split_done", rewriter.getUnitAttr());
+            return failure();
+          }
+        }
       }
     }
 

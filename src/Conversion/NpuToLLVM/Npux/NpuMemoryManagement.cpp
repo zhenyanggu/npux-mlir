@@ -176,10 +176,32 @@ public:
           << dramType;
       return failure();
     }
-    auto flattenInfo = getFlattened2DInfo(shape, op);
-    int64_t rows = flattenInfo.row;
-    int64_t cols = flattenInfo.col;
-    int64_t splitIdx = flattenInfo.splitIdx;
+
+    int64_t rows = 1;
+    int64_t cols = 1;
+    int64_t splitIdx = -1;
+
+    // 如果 op 上带有 npu.split_dim 属性，使用它直接作为 splitIdx 并计算行和列
+    if (auto splitDimAttr = op->getAttrOfType<IntegerAttr>("npu.split_dim")) {
+      splitIdx = splitDimAttr.getInt();
+      
+      // 边界保护
+      if (splitIdx < 0) splitIdx = 0;
+      if (splitIdx > (int64_t)shape.size()) splitIdx = shape.size();
+
+      for (int64_t i = splitIdx; i < (int64_t)shape.size(); ++i) {
+        cols *= shape[i];
+      }
+      for (int64_t i = 0; i < splitIdx; ++i) {
+        rows *= shape[i];
+      }
+    } else {
+      // 否则使用默认推导逻辑
+      auto flattenInfo = getFlattened2DInfo(shape, op);
+      rows = flattenInfo.row;
+      cols = flattenInfo.col;
+      splitIdx = flattenInfo.splitIdx;
+    }
 
     Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
     Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
@@ -193,7 +215,7 @@ public:
 
     int64_t dramStrideVal = cols;
     // 对于有 row 维度的情况，优先使用真实 memref stride，兼容非连续 layout。
-    // 对于 splitIdx == 0（row=1）则退回 cols。
+    // 这里提取的是 splitIdx - 1 的 stride
     if (splitIdx > 0 && (splitIdx - 1) < (int64_t)strides.size()) {
       dramStrideVal = strides[splitIdx - 1];
     }
