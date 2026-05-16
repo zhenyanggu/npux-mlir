@@ -49,7 +49,13 @@ struct RemoveRedundantDma : public OpRewritePattern<linalg::GenericOp> {
 
     Value originalTensor = mvoutOp.getDpsInputOperand(0)->get();
 
-    // 5. 旁路 (Bypass)：将 mvinOp 的所有使用者直接替换为 originalTensor
+    // 5. 类型守卫：仅当 bypass 前后类型完全一致时才移除冗余 DMA。
+    // 否则会把期望 i32 的使用点错误替换为 i8 等其他类型，破坏 linalg verifier。
+    Value mvinResult = mvinOp.getResult(0);
+    if (originalTensor.getType() != mvinResult.getType())
+      return failure();
+
+    // 6. 旁路 (Bypass)：将 mvinOp 的所有使用者直接替换为 originalTensor
     // 替换后，mvinOp 变成死代码被删除。如果 mvoutOp 的结果也没有其他使用者，
     // 它也会被贪心重写驱动器 (Greedy Pattern Rewrite Driver) 自动消除。
     rewriter.replaceOp(mvinOp, originalTensor);

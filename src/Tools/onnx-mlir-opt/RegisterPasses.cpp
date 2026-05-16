@@ -267,6 +267,10 @@ void registerNpuPasses() {
     return npux::createEraseNpuMemorySpacePass();
   });
 
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuFusionAnalysisPass();
+  });
+
   npux::registerBufferDeallocTest();
 }
 

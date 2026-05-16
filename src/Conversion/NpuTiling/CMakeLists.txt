@@ -10,6 +10,8 @@ add_onnx_mlir_library(NpuTiling
     NpuOpSplitting.cpp
     RestoreAllocSpace.cpp
     RemoveRedundantDma.cpp
+    FusionAnalysis/NpuFusionAnalysis.cpp
+    FusionAnalysis/FusionEvaluator.cpp
 
     CostModel/NpuCostModel.cpp
     CostModel/Conv.cpp
