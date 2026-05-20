@@ -3,6 +3,14 @@ add_onnx_mlir_library(NpuTiling
     NpuTiling.cpp
     Conv.cpp
     Gemm.cpp
+    Strategy/Dispatcher.cpp
+    Strategy/Conv.cpp
+    Strategy/Gemm.cpp
+    Strategy/ElemWise.cpp
+    Strategy/Layout.cpp
+    Strategy/Softmax.cpp
+    Strategy/LayerNorm.cpp
+    Strategy/MaxPool.cpp
     Layout.cpp
     MaxPool.cpp
     NpuTilingHelper.cpp
@@ -10,13 +18,17 @@ add_onnx_mlir_library(NpuTiling
     NpuOpSplitting.cpp
     RestoreAllocSpace.cpp
     RemoveRedundantDma.cpp
-    FusionAnalysis/NpuFusionAnalysis.cpp
+    FusionAnalysis/NpuFusionPlanner.cpp
+    FusionAnalysis/NpuFusionPlanning.cpp
+    FusionAnalysis/NpuFusionMaterialize.cpp
     FusionAnalysis/FusionEvaluator.cpp
 
     CostModel/NpuCostModel.cpp
     CostModel/Conv.cpp
     CostModel/Gemm.cpp
     CostModel/Gelu.cpp
+    CostModel/Softmax.cpp
+    CostModel/LayerNorm.cpp
     CostModel/MatAdd.cpp
     CostModel/Layout.cpp
     CostModel/MaxPool.cpp

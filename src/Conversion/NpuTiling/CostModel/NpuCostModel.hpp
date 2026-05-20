@@ -61,15 +61,17 @@ private:
     HardwareConfig hw;
 
     // 算子分发具体实现
-    llvm::SmallVector<int64_t> getConv2DTileSizes(mlir::linalg::GenericOp op);
     TileResult evaluateConvTile(const ConvParams& layer, int64_t t_oh, int64_t t_ow, int64_t t_oc, int64_t t_ic);
     std::vector<int64_t> getSafeRange(int64_t limit, int64_t step, int64_t maxVal = 64);
 
+    llvm::SmallVector<int64_t> getConv2DTileSizes(mlir::linalg::GenericOp op);  
     llvm::SmallVector<int64_t> getGemmTileSizes(mlir::linalg::GenericOp op);
     llvm::SmallVector<int64_t> getGeluTileSizes(mlir::linalg::GenericOp op);
     llvm::SmallVector<int64_t> getMatAddTileSizes(mlir::linalg::GenericOp op);
     llvm::SmallVector<int64_t> getLayoutTileSizes(mlir::linalg::GenericOp op);
     llvm::SmallVector<int64_t> getMaxPoolTileSizes(mlir::linalg::GenericOp op);
+    llvm::SmallVector<int64_t> getSoftmaxTileSizes(mlir::linalg::GenericOp op);
+    llvm::SmallVector<int64_t> getLayerNormTileSizes(mlir::linalg::GenericOp op);
 
 
 public:

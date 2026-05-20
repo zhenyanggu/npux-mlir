@@ -36,11 +36,14 @@ llvm::SmallVector<int64_t> NPUCostModel::getOptimalTileSizes(
             {"npu_matmul",                 &NPUCostModel::getGemmTileSizes},
             {"npu_gemm",                   &NPUCostModel::getGemmTileSizes},
             {"npu_gelu",                   &NPUCostModel::getGeluTileSizes},
+            {"mv_acc_to_spm",              &NPUCostModel::getGeluTileSizes},
             {"npu_matadd",                 &NPUCostModel::getMatAddTileSizes},
             {"npu_layout_nchw_to_nchwc32", &NPUCostModel::getLayoutTileSizes},
             {"npu_layout_nchwc32_to_nchw", &NPUCostModel::getLayoutTileSizes},
             {"npu_transpose",              &NPUCostModel::getLayoutTileSizes},
-            {"npu_maxpool",                &NPUCostModel::getMaxPoolTileSizes}
+            {"npu_maxpool",                &NPUCostModel::getMaxPoolTileSizes},
+            {"npu_softmax",                &NPUCostModel::getSoftmaxTileSizes},
+            {"npu_layernorm",              &NPUCostModel::getLayerNormTileSizes}
         };
 
         // 3. 查表并调用

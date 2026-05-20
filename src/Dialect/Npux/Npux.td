@@ -216,6 +216,41 @@ def Npux_DmaMvoutOp : Npux_Op<"dma_mvout"> {
   }];
 }
 
+def Npux_GroupYieldOp : Npux_Op<"group_yield", [Pure, Terminator, ReturnLike]> {
+  let summary = "Yield values from an npux fusion group";
+  let description = [{
+    Terminator for `npux.fusion_group`. The yielded values become the results
+    of the enclosing fusion group op.
+  }];
+
+  let arguments = (ins Variadic<AnyType>:$results);
+  let results = (outs);
+
+  let assemblyFormat = [{
+    ($results^ `:` type($results))? attr-dict
+  }];
+}
+
+def ImplicitNpuxFusionGroupYield
+    : SingleBlockImplicitTerminator<"GroupYieldOp">;
+
+def Npux_FusionGroupOp : Npux_Op<"fusion_group",
+    [SingleBlock, ImplicitNpuxFusionGroupYield]> {
+  let summary = "Logical container for a fusion chain";
+  let description = [{
+    Wraps one analyzed fusion chain before materialization. The region contains
+    the original untiled ops of the chain, while the parent op carries the
+    fusion plan such as tiling strategy, tile sizes and DMA decisions.
+
+    This op is intended to be created by a planning pass and consumed by a
+    later materialization pass.
+  }];
+
+  let arguments = (ins Variadic<AnyType>:$captures);
+  let results = (outs Variadic<AnyType>:$group_results);
+  let regions = (region SizedRegion<1>:$bodyRegion);
+}
+
 def SFU_Op_SOFTMAX : I32EnumAttrCase<"softmax", 0>;
 def SFU_Op_GELU : I32EnumAttrCase<"gelu", 1>;
 def SFU_Op_LAYERNORM : I32EnumAttrCase<"layernorm", 2>;

@@ -194,7 +194,9 @@ std::unique_ptr<mlir::Pass> createRemoveDuplicateMvinBiasPass();
 
 std::unique_ptr<mlir::Pass> createEraseNpuMemorySpacePass();
 
-std::unique_ptr<mlir::Pass> createNpuFusionAnalysisPass();
+std::unique_ptr<mlir::Pass> createNpuFusionPlanningPass();
+
+std::unique_ptr<mlir::Pass> createNpuFusionMaterializePass();
 
 void registerBufferDeallocTest();
 }// namespace npux

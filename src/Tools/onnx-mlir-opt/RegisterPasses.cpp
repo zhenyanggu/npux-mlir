@@ -268,7 +268,11 @@ void registerNpuPasses() {
   });
 
   mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
-    return npux::createNpuFusionAnalysisPass();
+    return npux::createNpuFusionPlanningPass();
+  });
+
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createNpuFusionMaterializePass();
   });
 
   npux::registerBufferDeallocTest();

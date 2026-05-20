@@ -7,23 +7,26 @@
 #ifndef NPUX_CONVERSION_NPUTILING_FUSIONANALYSIS_FUSIONEVALUATOR_HPP
 #define NPUX_CONVERSION_NPUTILING_FUSIONANALYSIS_FUSIONEVALUATOR_HPP
 
+#include "llvm/ADT/ArrayRef.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 
 namespace mlir {
 
 class FusionCostEvaluator {
 public:
-  explicit FusionCostEvaluator(double cpuWaitIrqTime = 15.0);
+  explicit FusionCostEvaluator(
+      double cpuWaitIrqTime = 210.0, double dmaCallTime = 65.0);
 
-  double calculateOpCost(linalg::LinalgOp op);
-
-  double evaluateFusionBenefit(linalg::LinalgOp seed, linalg::LinalgOp consumer);
+  double evaluateFusionBenefit(linalg::LinalgOp tail, linalg::LinalgOp consumer,
+      llvm::ArrayRef<int64_t> currentTailTileSizes,
+      llvm::ArrayRef<int64_t> fusedConsumerTileSizes);
 
 private:
   double waitIrqTime;
+  double dmaTime;
 
-  double calculateDMATime(linalg::LinalgOp op);
-  double calculateFusedDMATime(linalg::LinalgOp seed, linalg::LinalgOp consumer);
+  double calculateOpCostWithTile(
+      linalg::LinalgOp op, llvm::ArrayRef<int64_t> outputTileSizes);
 };
 
 } // namespace mlir
