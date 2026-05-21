@@ -10,6 +10,6 @@ mlir::LogicalResult tileLayoutWithRoot(
     const FusionCursor &cursor, mlir::PatternRewriter &rewriter);
 
 mlir::LogicalResult tileLayoutOp(
-    mlir::linalg::GenericOp op, mlir::PatternRewriter &rewriter);
+    mlir::Operation *op, mlir::PatternRewriter &rewriter);
 
 } // namespace npux

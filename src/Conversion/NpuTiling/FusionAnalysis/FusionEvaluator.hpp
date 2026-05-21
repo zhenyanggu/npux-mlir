@@ -17,7 +17,7 @@ public:
   explicit FusionCostEvaluator(
       double cpuWaitIrqTime = 210.0, double dmaCallTime = 65.0);
 
-  double evaluateFusionBenefit(linalg::LinalgOp tail, linalg::LinalgOp consumer,
+  double evaluateFusionBenefit(mlir::Operation *tail, mlir::Operation *consumer,
       llvm::ArrayRef<int64_t> currentTailTileSizes,
       llvm::ArrayRef<int64_t> fusedConsumerTileSizes);
 
@@ -26,7 +26,7 @@ private:
   double dmaTime;
 
   double calculateOpCostWithTile(
-      linalg::LinalgOp op, llvm::ArrayRef<int64_t> outputTileSizes);
+      mlir::Operation *op, llvm::ArrayRef<int64_t> outputTileSizes);
 };
 
 } // namespace mlir

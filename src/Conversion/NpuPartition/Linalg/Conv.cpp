@@ -36,60 +36,30 @@ static RankedTensorType addEncoding1(RankedTensorType type, OpBuilder &b) {
 }
 
 // ============================================================
-// Helper: 创建用于 Layout 转换的 Generic Op (Call CAPI)
+// Helper: 创建用于 Layout 转换的 Pack / UnPack Op
 // ============================================================
-Operation *createLayoutGeneric(OpBuilder &rewriter, Location loc, Value input,
-    Value outputInit, StringRef libraryCallName,StringRef node_name, int64_t n, int64_t c,
-    int64_t h, int64_t w, int64_t tileSize) {
-
+Operation *createLayoutRelayoutOp(OpBuilder &rewriter, Location loc, Value input,
+    Value outputInit, StringRef libraryCallName, StringAttr nodeName,
+    int64_t tileSize) {
   auto inputType = mlir::cast<RankedTensorType>(input.getType());
   auto outputType = mlir::cast<RankedTensorType>(outputInit.getType());
 
-  int64_t inputRank = inputType.getRank();
-  int64_t outputRank = outputType.getRank();
-  int64_t maxRank = std::max(inputRank, outputRank); // 应该是 5
+  SmallVector<int64_t> innerDimsPos = {1};
+  SmallVector<OpFoldResult> innerTiles = {rewriter.getIndexAttr(tileSize)};
 
-  SmallVector<utils::IteratorType> iterators(
-      maxRank, utils::IteratorType::parallel);
-  SmallVector<AffineMap> indexingMaps;
-
-  auto context = rewriter.getContext();
-
-  // 定义 Affine 表达式符号
-  // d0: N, d1: C_chunk, d2: H, d3: W, d4: C_block
-  auto d0 = rewriter.getAffineDimExpr(0);
-  auto d1 = rewriter.getAffineDimExpr(1);
-  auto d2 = rewriter.getAffineDimExpr(2);
-  auto d3 = rewriter.getAffineDimExpr(3);
-  auto d4 = rewriter.getAffineDimExpr(4);
-
-  // 1. 构建 5D (Tiled) 的 Map: Identity (d0, d1, d2, d3, d4)
-  auto tiledMap = AffineMap::getMultiDimIdentityMap(5, context);
-
-  // 2. 构建 4D (Flat) 的 Map: (d0, d1*32 + d4, d2, d3)
-  // 逻辑：Flat Channel = ChunkIdx * 32 + BlockIdx
-  SmallVector<AffineExpr> flatExprs = {d0, d1 * tileSize + d4, d2, d3};
-  auto flatMap = AffineMap::get(5, 0, flatExprs, context);
-
-  // 根据是 Pack (4D->5D) 还是 Unpack (5D->4D) 决定 Map 顺序
-  if (inputRank < outputRank) {
-    // Case: NCHW -> NCHWc32 (Pack)
-    indexingMaps.push_back(flatMap);  // Input uses Flat Map
-    indexingMaps.push_back(tiledMap); // Output uses Tiled Map
+  Operation *op = nullptr;
+  if (inputType.getRank() < outputType.getRank()) {
+    auto packOp = rewriter.create<linalg::PackOp>(
+        loc, input, outputInit, innerDimsPos, innerTiles);
+    op = packOp.getOperation();
   } else {
-    // Case: NCHWc32 -> NCHW (Unpack)
-    indexingMaps.push_back(tiledMap); // Input uses Tiled Map
-    indexingMaps.push_back(flatMap);  // Output uses Flat Map
+    auto unPackOp = rewriter.create<linalg::UnPackOp>(
+        loc, input, outputInit, innerDimsPos, innerTiles);
+    op = unPackOp.getOperation();
   }
 
-  auto op = rewriter.create<linalg::GenericOp>(loc, outputType,
-      ValueRange{input}, outputInit, indexingMaps, iterators,
-      [&](OpBuilder &b, Location loc, ValueRange args) {
-        b.create<linalg::YieldOp>(loc, args[0]); // Dummy Body
-      });
-
   op->setAttr("library_call", rewriter.getStringAttr(libraryCallName));
-  op->setAttr("npu.layer_name", rewriter.getStringAttr(node_name));
+  op->setAttr("npu.layer_name", nodeName);
   op->setAttr("npu.target", rewriter.getStringAttr("npu"));
   return op;
 }
@@ -515,8 +485,9 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
 
     // 注意传入 paddedH 和 paddedW，保证转换是按照 Padded 后的尺寸
     Operation *packInputOp =
-        createLayoutGeneric(rewriter, loc, paddedInput, packedInputAlloc,
-            "npu_layout_nchw_to_nchwc32", rewriter.getStringAttr(nodeName), N, IC, paddedH, paddedW, inTileFactor);
+        createLayoutRelayoutOp(rewriter, loc, paddedInput, packedInputAlloc,
+            "npu_layout_nchw_to_nchwc32", rewriter.getStringAttr(nodeName),
+            inTileFactor);
 
     Value convInput = packInputOp->getResult(0); // 带有 encoding=1
 
@@ -689,8 +660,9 @@ struct ConvToLinalg : public OpConversionPattern<ONNXConvOp> {
         loc, outputType1, ValueRange{});
 
     Operation *unpackOp =
-        createLayoutGeneric(rewriter, loc, packedConvResult, outputInit,
-            "npu_layout_nchwc32_to_nchw", rewriter.getStringAttr(nodeName), N, OC, OH, OW, outTileFactor);
+        createLayoutRelayoutOp(rewriter, loc, packedConvResult, outputInit,
+            "npu_layout_nchwc32_to_nchw", rewriter.getStringAttr(nodeName),
+            outTileFactor);
 
     Value finalResult = unpackOp->getResult(0); // 带有 encoding=1
 

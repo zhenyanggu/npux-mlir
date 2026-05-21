@@ -24,7 +24,11 @@ namespace {
 
 static constexpr StringLiteral kFusionLookupAttr = "__npux.fusion_lookup_id";
 
-static StringRef getLibraryCallName(linalg::GenericOp op) {
+static bool isSupportedFusionOp(Operation *op) {
+  return isa<linalg::GenericOp, linalg::PackOp, linalg::UnPackOp>(op);
+}
+
+static StringRef getLibraryCallName(Operation *op) {
   auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
   return libCallAttr ? libCallAttr.getValue() : StringRef{};
 }
@@ -163,6 +167,52 @@ FailureOr<linalg::GenericOp> cloneGenericOpToMemorySpace(
   return newOp;
 }
 
+FailureOr<Operation *> cloneLinalgOpToMemorySpace(
+    Operation *op, int64_t memorySpace, PatternRewriter &rewriter) {
+  if (auto genericOp = dyn_cast<linalg::GenericOp>(op))
+    return cloneGenericOpToMemorySpace(genericOp, memorySpace, rewriter);
+
+  Location loc = op->getLoc();
+  rewriter.setInsertionPoint(op);
+  RankedTensorType outType;
+  Value outVal;
+  if (auto packOp = dyn_cast<linalg::PackOp>(op)) {
+    outVal = packOp.getDest();
+    outType = packOp.getDestType();
+  } else if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op)) {
+    outVal = unpackOp.getDest();
+    outType = unpackOp.getDestType();
+  } else {
+    return failure();
+  }
+  if (!outType)
+    return failure();
+
+  auto newTensorType = RankedTensorType::get(outType.getShape(),
+      outType.getElementType(), rewriter.getI64IntegerAttr(memorySpace));
+  Value alloc = rewriter.create<bufferization::AllocTensorOp>(loc,
+      newTensorType, buildDynamicSizesForTensor(rewriter, loc, outVal, outType));
+
+  Operation *newOp = nullptr;
+  if (auto packOp = dyn_cast<linalg::PackOp>(op)) {
+    auto newPackOp = linalg::PackOp::create(rewriter, loc, packOp.getSource(),
+        alloc, packOp.getInnerDimsPos(), packOp.getMixedTiles(),
+        packOp.getPaddingValue(), packOp.getOuterDimsPerm());
+    newOp = newPackOp.getOperation();
+  } else if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op)) {
+    auto newUnpackOp = linalg::UnPackOp::create(rewriter, loc,
+        unpackOp.getSource(), alloc, unpackOp.getInnerDimsPos(),
+        unpackOp.getMixedTiles(), unpackOp.getOuterDimsPerm());
+    newOp = newUnpackOp.getOperation();
+  } else {
+    return failure();
+  }
+
+  newOp->setAttrs(op->getAttrs());
+  rewriter.replaceOp(op, newOp->getResults());
+  return newOp;
+}
+
 std::optional<DmaTileAnalysis> buildFullTensorDmaAnalysis(Value value) {
   auto type = dyn_cast<RankedTensorType>(value.getType());
   if (!type || !type.hasStaticShape())
@@ -174,56 +224,88 @@ std::optional<DmaTileAnalysis> buildFullTensorDmaAnalysis(Value value) {
 
 namespace {
 
-static linalg::GenericOp findSingleTiledGenericOp(
+static Operation *findSingleTiledLinalgOp(
     Block *block, StringRef libCallName) {
   if (!block)
     return nullptr;
   for (Operation &op : *block) {
-    auto genericOp = dyn_cast<linalg::GenericOp>(&op);
-    if (!genericOp || !genericOp->hasAttr("npu.tiled"))
+    if (!isSupportedFusionOp(&op) || !op.hasAttr("npu.tiled"))
       continue;
-    if (getLibraryCallName(genericOp) == libCallName)
-      return genericOp;
+    if (getLibraryCallName(&op) == libCallName)
+      return &op;
   }
   return nullptr;
 }
 
-static linalg::GenericOp findTiledGenericOpByMarker(
+static Operation *findTiledLinalgOpByMarker(
     Block *block, int64_t marker) {
   if (!block)
     return nullptr;
   for (Operation &op : *block) {
-    auto genericOp = dyn_cast<linalg::GenericOp>(&op);
-    if (!genericOp)
+    if (!isSupportedFusionOp(&op))
       continue;
-    auto markerAttr =
-        genericOp->getAttrOfType<IntegerAttr>(kFusionLookupAttr);
+    auto markerAttr = op.getAttrOfType<IntegerAttr>(kFusionLookupAttr);
     if (markerAttr && markerAttr.getInt() == marker)
-      return genericOp;
+      return &op;
   }
   return nullptr;
 }
 
-static SmallVector<linalg::GenericOp> collectCurrentTiledGenericOps(Block *block) {
-  SmallVector<linalg::GenericOp> ops;
+static SmallVector<Operation *> collectCurrentTiledLinalgOps(Block *block) {
+  SmallVector<Operation *> ops;
   if (!block)
     return ops;
 
   for (Operation &op : *block) {
-    auto genericOp = dyn_cast<linalg::GenericOp>(&op);
-    if (!genericOp || !genericOp->hasAttr("npu.tiled"))
+    if (!isSupportedFusionOp(&op) || !op.hasAttr("npu.tiled"))
       continue;
-    ops.push_back(genericOp);
+    ops.push_back(&op);
   }
   return ops;
 }
 
-static int64_t getStandaloneComputeOutputMemorySpace(linalg::GenericOp op) {
+static int64_t getStandaloneComputeOutputMemorySpace(Operation *op) {
   StringRef libCall = getLibraryCallName(op);
   if (libCall == "npu_conv" || libCall == "npu_gemm" ||
       libCall == "npu_matmul")
     return 3;
   return 2;
+}
+
+static SmallVector<Value> getDpsInputs(Operation *op) {
+  if (auto genericOp = dyn_cast<linalg::GenericOp>(op))
+    return SmallVector<Value>(genericOp.getDpsInputs().begin(),
+        genericOp.getDpsInputs().end());
+  if (auto packOp = dyn_cast<linalg::PackOp>(op))
+    return {packOp.getSource()};
+  if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op))
+    return {unpackOp.getSource()};
+  return {};
+}
+
+static Value getDpsInitValue(Operation *op) {
+  if (auto genericOp = dyn_cast<linalg::GenericOp>(op))
+    return genericOp.getDpsInitOperand(0)->get();
+  if (auto packOp = dyn_cast<linalg::PackOp>(op))
+    return packOp.getDest();
+  if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op))
+    return unpackOp.getDest();
+  return nullptr;
+}
+
+static void setDpsInputs(Operation *op, ArrayRef<Value> newInputs) {
+  for (auto [idx, newValue] : llvm::enumerate(newInputs))
+    op->setOperand(idx, newValue);
+}
+
+static SmallVector<int64_t> getLoopTileSizesForTiling(
+    Operation *op, ArrayRef<int64_t> tileSizes) {
+  if (getLibraryCallName(op) == "npu_layout_nchw_to_nchwc32" &&
+      tileSizes.size() == 5) {
+    return {tileSizes[0], tileSizes[1] * tileSizes[4], tileSizes[2],
+        tileSizes[3]};
+  }
+  return SmallVector<int64_t>(tileSizes.begin(), tileSizes.end());
 }
 
 static LogicalResult materializeStandaloneTiledMatAddWithDma(
@@ -357,15 +439,16 @@ static LogicalResult materializeStandaloneTiledMatAddWithDma(
 }
 
 static LogicalResult materializeStandaloneTiledOpWithDma(
-    linalg::GenericOp tiledOp, PatternRewriter &rewriter) {
-  if (!tiledOp || tiledOp.getNumDpsInits() != 1 || tiledOp->getNumResults() != 1)
+    Operation *tiledOp, PatternRewriter &rewriter) {
+  if (!tiledOp || tiledOp->getNumResults() != 1)
     return failure();
 
   if (getLibraryCallName(tiledOp) == "npu_matadd")
-    return materializeStandaloneTiledMatAddWithDma(tiledOp, rewriter);
+    return materializeStandaloneTiledMatAddWithDma(
+        cast<linalg::GenericOp>(tiledOp), rewriter);
 
-  Value externalDest = tiledOp.getDpsInitOperand(0)->get();
-  auto relocatedOp = cloneGenericOpToMemorySpace(
+  Value externalDest = getDpsInitValue(tiledOp);
+  auto relocatedOp = cloneLinalgOpToMemorySpace(
       tiledOp, getStandaloneComputeOutputMemorySpace(tiledOp), rewriter);
   if (failed(relocatedOp))
     return failure();
@@ -373,11 +456,23 @@ static LogicalResult materializeStandaloneTiledOpWithDma(
   (*relocatedOp)->setAttr("npu.tiled", rewriter.getUnitAttr());
 
   SmallVector<Value> dmaInputs;
-  dmaInputs.reserve((*relocatedOp).getInputs().size());
-  for (Value operand : (*relocatedOp).getInputs()) {
+  SmallVector<Value> relocatedInputs = getDpsInputs(*relocatedOp);
+  dmaInputs.reserve(relocatedInputs.size());
+  for (auto [inputIdx, operand] : llvm::enumerate(relocatedInputs)) {
+    Operation *defOp = operand.getDefiningOp();
+    if (defOp && defOp->getBlock() == (*relocatedOp)->getBlock()) {
+      dmaInputs.push_back(operand);
+      continue;
+    }
+
+    if (getLibraryCallName(*relocatedOp) == "npu_maxpool" && inputIdx == 1) {
+      dmaInputs.push_back(operand);
+      continue;
+    }
+
     rewriter.setInsertionPoint(*relocatedOp);
     auto mvinOp = createDmaGenericOp(
-        rewriter, (*relocatedOp).getLoc(), operand, "npu_dma_mvin", 2);
+        rewriter, (*relocatedOp)->getLoc(), operand, "npu_dma_mvin", 2);
     FailureOr<Value> dmaResult = mvinOp.getResult(0);
     if (auto inputAnalysis = buildFullTensorDmaAnalysis(operand)) {
       dmaResult = maybeSplitDmaOp(mvinOp, *inputAnalysis, rewriter);
@@ -388,18 +483,18 @@ static LogicalResult materializeStandaloneTiledOpWithDma(
   }
 
   rewriter.modifyOpInPlace(*relocatedOp, [&]() {
-    (*relocatedOp).getInputsMutable().assign(dmaInputs);
+    setDpsInputs(*relocatedOp, dmaInputs);
   });
 
   rewriter.setInsertionPointAfter(*relocatedOp);
-  auto mvoutOp = createDmaGenericOp(rewriter, (*relocatedOp).getLoc(),
-      (*relocatedOp).getResult(0), "npu_dma_mvout", 1, externalDest);
+  auto mvoutOp = createDmaGenericOp(rewriter, (*relocatedOp)->getLoc(),
+      (*relocatedOp)->getResult(0), "npu_dma_mvout", 1, externalDest);
   if (auto outputAnalysis = buildFullTensorDmaAnalysis(externalDest)) {
     if (failed(maybeSplitDmaOp(mvoutOp, *outputAnalysis, rewriter)))
       return failure();
   }
   rewriter.replaceAllUsesExcept(
-      (*relocatedOp).getResult(0), mvoutOp.getResult(0), mvoutOp.getOperation());
+      (*relocatedOp)->getResult(0), mvoutOp.getResult(0), mvoutOp.getOperation());
   return success();
 }
 
@@ -493,9 +588,9 @@ std::optional<DmaTileAnalysis> analyzeDmaTileFromKnownTile(
 }
 
 LogicalResult tileStandaloneOp(
-    linalg::GenericOp op, ArrayRef<int64_t> tileSizes,
+    Operation *op, ArrayRef<int64_t> tileSizes,
     PatternRewriter &rewriter) {
-  auto tilingInterfaceOp = cast<TilingInterface>(op.getOperation());
+  auto tilingInterfaceOp = cast<TilingInterface>(op);
   SmallVector<OpFoldResult> tileSizesOfr =
       getAsOpFoldResult(rewriter.getI64ArrayAttr(tileSizes));
   scf::SCFTilingOptions options;
@@ -526,7 +621,7 @@ LogicalResult tileStandaloneOp(
 }
 
 LogicalResult tileFusedChainOp(
-    linalg::GenericOp seed, linalg::GenericOp root, ArrayRef<int64_t> tileSizes,
+    Operation *seed, Operation *root, ArrayRef<int64_t> tileSizes,
     PatternRewriter &rewriter, ArrayRef<DmaTileAnalysis> seedInputDmaAnalyses,
     const std::optional<DmaTileAnalysis> &rootOutputDmaAnalysis,
     llvm::function_ref<void(ArrayRef<Operation *>, PatternRewriter &)>
@@ -535,10 +630,12 @@ LogicalResult tileFusedChainOp(
   // should not go through producer-fusion utilities. Those helpers may inspect
   // unrelated tensor producers and require extra interfaces we don't register.
   if (seed == root) {
-    auto tilingInterfaceOp = cast<TilingInterface>(root.getOperation());
+    auto tilingInterfaceOp = cast<TilingInterface>(root);
     StringRef rootLibCall = getLibraryCallName(root);
+    SmallVector<int64_t> loopTileSizes =
+        getLoopTileSizesForTiling(root, tileSizes);
     SmallVector<OpFoldResult> tileSizesOfr =
-        getAsOpFoldResult(rewriter.getI64ArrayAttr(tileSizes));
+        getAsOpFoldResult(rewriter.getI64ArrayAttr(loopTileSizes));
     scf::SCFTilingOptions options;
     options.setTileSizes(tileSizesOfr);
 
@@ -554,8 +651,8 @@ LogicalResult tileFusedChainOp(
 
     Block *tiledBlock = nullptr;
     for (Operation *tiledOp : tilingResult->tiledOps) {
-      if (auto genericOp = dyn_cast<linalg::GenericOp>(tiledOp)) {
-        tiledBlock = genericOp->getBlock();
+      if (isSupportedFusionOp(tiledOp)) {
+        tiledBlock = tiledOp->getBlock();
         break;
       }
     }
@@ -566,7 +663,7 @@ LogicalResult tileFusedChainOp(
       postprocessTiledOps(tiledOps, rewriter);
     }
 
-    if (auto tiledRoot = findSingleTiledGenericOp(tiledBlock, rootLibCall)) {
+    if (auto tiledRoot = findSingleTiledLinalgOp(tiledBlock, rootLibCall)) {
       if (failed(materializeStandaloneTiledOpWithDma(tiledRoot, rewriter)))
         return failure();
     }
@@ -594,13 +691,15 @@ LogicalResult tileFusedChainOp(
     return success();
   }
 
-  auto rootTilingInterface = cast<TilingInterface>(root.getOperation());
+  auto rootTilingInterface = cast<TilingInterface>(root);
+  SmallVector<int64_t> rootLoopTileSizes =
+      getLoopTileSizesForTiling(root, tileSizes);
 
   scf::SCFTileAndFuseOptions fuseOptions;
   fuseOptions.tilingOptions.setTileSizes(
-      getAsOpFoldResult(rewriter.getI64ArrayAttr(tileSizes)));
+      getAsOpFoldResult(rewriter.getI64ArrayAttr(rootLoopTileSizes)));
 
-  Operation *targetOpPtr = seed.getOperation();
+  Operation *targetOpPtr = seed;
   auto stopAfterSeed = std::make_shared<bool>(false);
   fuseOptions.setFusionControlFn(
       [targetOpPtr, stopAfterSeed](tensor::ExtractSliceOp, OpResult originalProducer, bool)
@@ -643,16 +742,16 @@ LogicalResult tileFusedChainOp(
     postprocessTiledOps(tiledAndFusedOps, rewriter);
   }
 
-  auto tiledSeed = findTiledGenericOpByMarker(tiledBlock, 0);
-  auto tiledRoot = findTiledGenericOpByMarker(tiledBlock, 1);
+  Operation *tiledSeed = findTiledLinalgOpByMarker(tiledBlock, 0);
+  Operation *tiledRoot = findTiledLinalgOpByMarker(tiledBlock, 1);
   if (!tiledSeed || !tiledRoot)
     return failure();
   tiledSeed->removeAttr(kFusionLookupAttr);
   tiledRoot->removeAttr(kFusionLookupAttr);
 
-  Value rootExternalDest = tiledRoot.getDpsInitOperand(0)->get();
+  Value rootExternalDest = getDpsInitValue(tiledRoot);
 
-  auto relocatedRoot = cloneGenericOpToMemorySpace(tiledRoot, 2, rewriter);
+  auto relocatedRoot = cloneLinalgOpToMemorySpace(tiledRoot, 2, rewriter);
   if (failed(relocatedRoot))
     return failure();
   tiledRoot = *relocatedRoot;
@@ -660,7 +759,7 @@ LogicalResult tileFusedChainOp(
 
   if (tiledSeed != tiledRoot) {
     int64_t seedMemorySpace = getStandaloneComputeOutputMemorySpace(tiledSeed);
-    auto relocatedSeed = cloneGenericOpToMemorySpace(
+    auto relocatedSeed = cloneLinalgOpToMemorySpace(
         tiledSeed, seedMemorySpace, rewriter);
     if (failed(relocatedSeed))
       return failure();
@@ -668,16 +767,17 @@ LogicalResult tileFusedChainOp(
     tiledSeed->setAttr("npu.tiled", rewriter.getUnitAttr());
   }
 
-  SmallVector<linalg::GenericOp> currentTiledOps =
-      collectCurrentTiledGenericOps(tiledBlock);
+  SmallVector<Operation *> currentTiledOps =
+      collectCurrentTiledLinalgOps(tiledBlock);
 
   llvm::DenseMap<Value, Value> dmaReplacementMap;
-  for (linalg::GenericOp genericOp : currentTiledOps) {
+  for (Operation *linalgOp : currentTiledOps) {
 
-    rewriter.setInsertionPoint(genericOp);
+    rewriter.setInsertionPoint(linalgOp);
     SmallVector<Value> updatedInputs;
-    updatedInputs.reserve(genericOp.getInputs().size());
-    for (auto [inputIdx, operand] : llvm::enumerate(genericOp.getInputs())) {
+    SmallVector<Value> opInputs = getDpsInputs(linalgOp);
+    updatedInputs.reserve(opInputs.size());
+    for (auto [inputIdx, operand] : llvm::enumerate(opInputs)) {
       auto replacementIt = dmaReplacementMap.find(operand);
       if (replacementIt != dmaReplacementMap.end()) {
         updatedInputs.push_back(replacementIt->second);
@@ -685,21 +785,21 @@ LogicalResult tileFusedChainOp(
       }
 
       Operation *defOp = operand.getDefiningOp();
-      if (defOp && defOp->getBlock() == genericOp->getBlock()) {
+      if (defOp && defOp->getBlock() == linalgOp->getBlock()) {
         updatedInputs.push_back(operand);
         continue;
       }
 
-      if (getLibraryCallName(genericOp) == "npu_maxpool" &&
-          genericOp == tiledRoot && inputIdx == 1) {
+      if (getLibraryCallName(linalgOp) == "npu_maxpool" &&
+          linalgOp == tiledRoot && inputIdx == 1) {
         updatedInputs.push_back(operand);
         continue;
       }
 
       auto mvinOp = createDmaGenericOp(
-          rewriter, genericOp.getLoc(), operand, "npu_dma_mvin", 2);
+          rewriter, linalgOp->getLoc(), operand, "npu_dma_mvin", 2);
       FailureOr<Value> dmaResult = mvinOp.getResult(0);
-      if (genericOp == tiledSeed && inputIdx < seedInputDmaAnalyses.size()) {
+      if (linalgOp == tiledSeed && inputIdx < seedInputDmaAnalyses.size()) {
         dmaResult = maybeSplitDmaOp(
             mvinOp, seedInputDmaAnalyses[inputIdx], rewriter);
       } else if (auto inputAnalysis = buildFullTensorDmaAnalysis(operand)) {
@@ -711,14 +811,14 @@ LogicalResult tileFusedChainOp(
       updatedInputs.push_back(*dmaResult);
     }
 
-    rewriter.modifyOpInPlace(genericOp, [&]() {
-      genericOp.getInputsMutable().assign(updatedInputs);
+    rewriter.modifyOpInPlace(linalgOp, [&]() {
+      setDpsInputs(linalgOp, updatedInputs);
     });
   }
 
   rewriter.setInsertionPointAfter(tiledRoot);
-  auto mvoutOp = createDmaGenericOp(rewriter, tiledRoot.getLoc(),
-      tiledRoot.getResult(0), "npu_dma_mvout", 1, rootExternalDest);
+  auto mvoutOp = createDmaGenericOp(rewriter, tiledRoot->getLoc(),
+      tiledRoot->getResult(0), "npu_dma_mvout", 1, rootExternalDest);
   if (rootOutputDmaAnalysis) {
     if (failed(maybeSplitDmaOp(
             mvoutOp, *rootOutputDmaAnalysis, rewriter)))
@@ -728,7 +828,7 @@ LogicalResult tileFusedChainOp(
       return failure();
   }
   rewriter.replaceAllUsesExcept(
-      tiledRoot.getResult(0), mvoutOp.getResult(0), mvoutOp.getOperation());
+      tiledRoot->getResult(0), mvoutOp.getResult(0), mvoutOp.getOperation());
 
   for (auto loop : fuseResult->loops)
     loop->setAttr("npu.target", rewriter.getStringAttr("npu"));

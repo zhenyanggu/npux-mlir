@@ -56,8 +56,8 @@ struct NpuFusionPlanningPass
         if (op->getBlock() != &block)
           continue;
 
-        auto seed = dyn_cast<linalg::GenericOp>(op);
-        if (!seed || !npux::isCandidateSeedOp(seed))
+        Operation *seed = op;
+        if (!npux::isCandidateSeedOp(seed))
           continue;
 
         FailureOr<npux::FusionCursor> cursor =
@@ -67,7 +67,7 @@ struct NpuFusionPlanningPass
 
         rewriter.setInsertionPoint(seed);
         auto group = rewriter.create<npux::FusionGroupOp>(
-            seed.getLoc(), cursor->tail->getResultTypes(), ValueRange{});
+            seed->getLoc(), cursor->tail->getResultTypes(), ValueRange{});
         npux::serializeFusionCursorToGroup(*cursor, group, rewriter);
 
         Block *groupBlock = new Block();
@@ -75,10 +75,10 @@ struct NpuFusionPlanningPass
         rewriter.setInsertionPointToStart(groupBlock);
 
         llvm::SmallPtrSet<Operation *, 16> moveSet;
-        for (linalg::GenericOp chainOp : cursor->chainOps) {
-          moveSet.insert(chainOp.getOperation());
+        for (Operation *chainOp : cursor->chainOps) {
+          moveSet.insert(chainOp);
           collectMovableDependencies(
-              chainOp.getOperation(), seed.getOperation(), &block, moveSet);
+              chainOp, seed, &block, moveSet);
         }
 
         for (Operation *candidate : originalOps) {
@@ -90,7 +90,7 @@ struct NpuFusionPlanningPass
         }
 
         auto yield = rewriter.create<npux::GroupYieldOp>(
-            cursor->tail.getLoc(), cursor->tail->getResults());
+            cursor->tail->getLoc(), cursor->tail->getResults());
 
         rewriter.replaceUsesWithIf(cursor->tail->getResults(), group.getResults(),
             [&](OpOperand &use) {

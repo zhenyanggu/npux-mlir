@@ -57,9 +57,13 @@ static StringRef getLoopLabelForGemmSpatialDim(int64_t rank, size_t dimIdx) {
 }
 
 static SmallVector<int64_t> getLoopTileSizesFromResultTileShape(
-    linalg::GenericOp op, ArrayRef<int64_t> resultTileShape) {
-  ArrayRef<AffineMap> indexingMaps = op.getIndexingMapsArray();
-  unsigned resultMapIdx = op.getNumDpsInputs();
+    Operation *op, ArrayRef<int64_t> resultTileShape) {
+  auto genericOp = dyn_cast<linalg::GenericOp>(op);
+  if (!genericOp)
+    return {};
+
+  ArrayRef<AffineMap> indexingMaps = genericOp.getIndexingMapsArray();
+  unsigned resultMapIdx = genericOp.getNumDpsInputs();
   if (resultMapIdx >= indexingMaps.size())
     return {};
 
@@ -78,7 +82,7 @@ static SmallVector<int64_t> getLoopTileSizesFromResultTileShape(
     loopTileSizes[pos] = resultTileShape[idx];
   }
 
-  SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
+  SmallVector<int64_t> loopRanges = genericOp.getStaticLoopRanges();
   if (loopRanges.size() != loopTileSizes.size())
     return {};
   for (auto [idx, size] : llvm::enumerate(loopTileSizes)) {
@@ -138,8 +142,9 @@ static SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op) {
 
 LogicalResult npux::tileGemmWithRoot(
     const FusionCursor &cursor, PatternRewriter &rewriter) {
-  auto seed = cursor.seed;
+  auto seedBase = cursor.seed;
   auto root = cursor.tail;
+  auto seed = cast<linalg::GenericOp>(seedBase);
   auto seedLibCall = seed->getAttrOfType<StringAttr>("library_call");
   if (seedLibCall.getValue() != "npu_gemm" &&
       seedLibCall.getValue() != "npu_matmul")
@@ -151,7 +156,7 @@ LogicalResult npux::tileGemmWithRoot(
 
   SmallVector<int64_t> rootTileSizes;
   SmallVector<int64_t> spatialTileSizes = tileSizes;
-  if (root == seed) {
+  if (root == seed.getOperation()) {
     spatialTileSizes.back() = 0;
     rootTileSizes = spatialTileSizes;
   } else {
@@ -163,14 +168,14 @@ LogicalResult npux::tileGemmWithRoot(
   SmallVector<int64_t> kTileSizes(tileSizes.size(), 0);
   kTileSizes.back() = tileSizes.back();
 
-  auto rootTilingInterface = cast<TilingInterface>(root.getOperation());
+  auto rootTilingInterface = cast<TilingInterface>(root);
   scf::SCFTileAndFuseOptions fuseOptions;
   fuseOptions.tilingOptions.setTileSizes(
       getAsOpFoldResult(rewriter.getI64ArrayAttr(rootTileSizes)));
 
   llvm::SmallPtrSet<Operation *, 8> chainOps;
-  for (linalg::GenericOp op : cursor.chainOps)
-    chainOps.insert(op.getOperation());
+  for (Operation *op : cursor.chainOps)
+    chainOps.insert(op);
   Operation *targetOpPtr = seed.getOperation();
   auto stopAfterSeed = std::make_shared<bool>(false);
   fuseOptions.setFusionControlFn(
@@ -226,7 +231,7 @@ LogicalResult npux::tileGemmWithRoot(
   }
 
   linalg::GenericOp fusedGemmOp = findTiledGenericOpByMarker(*fuseResult, 0);
-  bool isStandaloneGemm = (root == seed);
+  bool isStandaloneGemm = (root == seed.getOperation());
   if (!fusedGemmOp)
     return failure();
   fusedGemmOp->setAttr("npu.tiled", rewriter.getUnitAttr());

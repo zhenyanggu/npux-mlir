@@ -31,17 +31,21 @@ int64_t ceilDiv(int64_t lhs, int64_t rhs) {
   return (lhs + rhs - 1) / rhs;
 }
 
-StringRef getLibraryCallName(linalg::LinalgOp op) {
+bool isSupportedFusionOp(Operation *op) {
+  return isa<linalg::GenericOp, linalg::PackOp, linalg::UnPackOp>(op);
+}
+
+StringRef getLibraryCallName(Operation *op) {
   auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
   return libCallAttr ? libCallAttr.getValue() : StringRef{};
 }
 
-bool isNpuOp(linalg::LinalgOp op) {
+bool isNpuOp(Operation *op) {
   StringRef libCall = getLibraryCallName(op);
   return libCall.starts_with("npu_") || libCall.starts_with("mv_");
 }
 
-bool hasCostModelTile(linalg::LinalgOp op) {
+bool hasCostModelTile(Operation *op) {
   StringRef libCall = getLibraryCallName(op);
   return libCall == "npu_conv" || libCall == "npu_gemm" ||
          libCall == "npu_matmul" || libCall == "npu_gelu" ||
@@ -52,26 +56,26 @@ bool hasCostModelTile(linalg::LinalgOp op) {
          libCall == "npu_softmax" || libCall == "npu_layernorm";
 }
 
-bool isFullShapeOnlyOp(linalg::LinalgOp op) {
+bool isFullShapeOnlyOp(Operation *op) {
   StringRef libCall = getLibraryCallName(op);
   return libCall == "npu_softmax" || libCall == "npu_layernorm";
 }
 
-bool isFusionBarrier(linalg::LinalgOp op) {
+bool isFusionBarrier(Operation *op) {
   StringRef libCall = getLibraryCallName(op);
   return libCall == "npu_matadd" || libCall == "npu_conv" ||
          libCall == "npu_gemm" || libCall == "npu_matmul";
 }
 
-bool mustFuseConsumer(linalg::LinalgOp seed, linalg::LinalgOp consumer) {
+bool mustFuseConsumer(Operation *seed, Operation *consumer) {
   StringRef seedLibCall = getLibraryCallName(seed);
   return (seedLibCall == "npu_conv" || seedLibCall == "npu_gemm" ||
              seedLibCall == "npu_matmul") &&
          getLibraryCallName(consumer) == "mv_acc_to_spm";
 }
 
-bool isEligibleConsumer(linalg::LinalgOp seed, linalg::LinalgOp consumer) {
-  if (!consumer || !isNpuOp(consumer))
+bool isEligibleConsumer(Operation *seed, Operation *consumer) {
+  if (!consumer || !isSupportedFusionOp(consumer) || !isNpuOp(consumer))
     return false;
   if (consumer->hasAttr("npu.tiled"))
     return false;
@@ -80,32 +84,40 @@ bool isEligibleConsumer(linalg::LinalgOp seed, linalg::LinalgOp consumer) {
   return seed->getBlock() == consumer->getBlock();
 }
 
-SmallVector<linalg::LinalgOp> getDirectConsumers(linalg::LinalgOp op) {
-  SmallVector<linalg::LinalgOp> consumers;
+SmallVector<Operation *> getDirectConsumers(Operation *op) {
+  SmallVector<Operation *> consumers;
   llvm::SmallPtrSet<Operation *, 4> seen;
   for (OpResult result : op->getResults()) {
     if (!result.hasOneUse())
       continue;
     Operation *user = *result.getUsers().begin();
-    auto consumer = dyn_cast<linalg::LinalgOp>(user);
-    if (consumer && seen.insert(user).second)
-      consumers.push_back(consumer);
+    if (isSupportedFusionOp(user) && seen.insert(user).second)
+      consumers.push_back(user);
   }
   return consumers;
 }
 
-SmallVector<int64_t> getOutputShape(linalg::LinalgOp op) {
-  if (op.getNumDpsInits() == 0)
+SmallVector<int64_t> getOutputShape(Operation *op) {
+  RankedTensorType outputType;
+  if (auto genericOp = dyn_cast<linalg::GenericOp>(op)) {
+    if (genericOp.getNumDpsInits() == 0)
+      return {};
+    outputType = dyn_cast<RankedTensorType>(
+        genericOp.getDpsInitOperand(0)->get().getType());
+  } else if (auto packOp = dyn_cast<linalg::PackOp>(op)) {
+    outputType = packOp.getDestType();
+  } else if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op)) {
+    outputType = unpackOp.getDestType();
+  } else {
     return {};
-  auto outputType =
-      dyn_cast<RankedTensorType>(op.getDpsInitOperand(0)->get().getType());
+  }
   if (!outputType || !outputType.hasStaticShape())
     return {};
   return SmallVector<int64_t>(outputType.getShape().begin(),
       outputType.getShape().end());
 }
 
-SmallVector<int64_t> getDefaultOutputTile(linalg::LinalgOp op) {
+SmallVector<int64_t> getDefaultOutputTile(Operation *op) {
   SmallVector<int64_t> shape = getOutputShape(op);
   for (int64_t &dim : shape) {
     if (dim < 0)
@@ -114,11 +126,39 @@ SmallVector<int64_t> getDefaultOutputTile(linalg::LinalgOp op) {
   return shape;
 }
 
-SmallVector<int64_t> initializeSeedTileSizes(linalg::LinalgOp seed) {
+SmallVector<int64_t> initializeSeedTileSizes(Operation *seed) {
+  StringRef libCall = getLibraryCallName(seed);
+  if (libCall == "npu_layout_nchw_to_nchwc32") {
+    SmallVector<int64_t> inputShape;
+    RankedTensorType inputType;
+    if (auto genericOp = dyn_cast<linalg::GenericOp>(seed)) {
+      if (genericOp.getNumDpsInputs() == 0)
+        return {};
+      inputType = dyn_cast<RankedTensorType>(
+          genericOp.getDpsInputOperand(0)->get().getType());
+    } else if (auto packOp = dyn_cast<linalg::PackOp>(seed)) {
+      inputType = packOp.getSourceType();
+    } else {
+      return {};
+    }
+    if (!inputType || !inputType.hasStaticShape())
+      return {};
+    inputShape.assign(inputType.getShape().begin(), inputType.getShape().end());
+    if (inputShape.size() == 5)
+      inputShape.pop_back();
+    return inputShape;
+  }
+
+  if (libCall == "npu_layout_nchwc32_to_nchw")
+    return getOutputShape(seed);
+
   if (hasCostModelTile(seed)) {
+    auto genericOp = dyn_cast<linalg::GenericOp>(seed);
+    if (!genericOp)
+      return getDefaultOutputTile(seed);
     npux::HardwareConfig hwConfig;
     npux::NPUCostModel costModel(hwConfig);
-    SmallVector<int64_t> tileSizes = costModel.getOptimalTileSizes(seed);
+    SmallVector<int64_t> tileSizes = costModel.getOptimalTileSizes(genericOp);
     if (!tileSizes.empty())
       return tileSizes;
   }
@@ -146,12 +186,17 @@ SmallVector<int64_t> inferTileShapeFromIndexingMap(
 }
 
 SmallVector<int64_t> inferInputTileShapeForConsumer(
-    linalg::LinalgOp consumer, unsigned inputIndex,
+    Operation *consumer, unsigned inputIndex,
     ArrayRef<int64_t> outputTileShape) {
   StringRef libCall = getLibraryCallName(consumer);
   if (libCall == "npu_layout_nchwc32_to_nchw") {
-    auto inputType = dyn_cast<RankedTensorType>(
-        consumer.getDpsInputOperand(inputIndex)->get().getType());
+    RankedTensorType inputType;
+    if (auto genericOp = dyn_cast<linalg::GenericOp>(consumer)) {
+      inputType = dyn_cast<RankedTensorType>(
+          genericOp.getDpsInputOperand(inputIndex)->get().getType());
+    } else if (auto unpackOp = dyn_cast<linalg::UnPackOp>(consumer)) {
+      inputType = unpackOp.getSourceType();
+    }
     if (!inputType || inputType.getRank() != 5 || outputTileShape.size() != 4)
       return {};
     return {outputTileShape[0],
@@ -160,41 +205,68 @@ SmallVector<int64_t> inferInputTileShapeForConsumer(
   }
 
   if (libCall == "npu_layout_nchw_to_nchwc32") {
-    auto inputType = dyn_cast<RankedTensorType>(
-        consumer.getDpsInputOperand(inputIndex)->get().getType());
+    RankedTensorType inputType;
+    if (auto genericOp = dyn_cast<linalg::GenericOp>(consumer)) {
+      inputType = dyn_cast<RankedTensorType>(
+          genericOp.getDpsInputOperand(inputIndex)->get().getType());
+    } else if (auto packOp = dyn_cast<linalg::PackOp>(consumer)) {
+      inputType = packOp.getSourceType();
+    }
     if (!inputType || inputType.getRank() != 4 || outputTileShape.size() != 5)
       return {};
     return {outputTileShape[0], outputTileShape[1] * outputTileShape[4],
         outputTileShape[2], outputTileShape[3]};
   }
 
-  ArrayRef<AffineMap> indexingMaps = consumer.getIndexingMapsArray();
+  auto genericConsumer = dyn_cast<linalg::GenericOp>(consumer);
+  if (!genericConsumer)
+    return {};
+  ArrayRef<AffineMap> indexingMaps = genericConsumer.getIndexingMapsArray();
   if (inputIndex >= indexingMaps.size())
     return {};
   return inferTileShapeFromIndexingMap(indexingMaps[inputIndex], outputTileShape);
 }
 
-bool hasReductionIterator(linalg::LinalgOp op) {
-  return op.getNumReductionLoops() > 0;
+bool hasReductionIterator(Operation *op) {
+  if (auto genericOp = dyn_cast<linalg::GenericOp>(op))
+    return genericOp.getNumReductionLoops() > 0;
+  return false;
 }
 
-AffineMap getPrimaryResultIndexingMap(linalg::LinalgOp op) {
-  ArrayRef<AffineMap> indexingMaps = op.getIndexingMapsArray();
-  unsigned resultMapIdx = op.getNumDpsInputs();
+AffineMap getPrimaryResultIndexingMap(Operation *op) {
+  auto genericOp = dyn_cast<linalg::GenericOp>(op);
+  if (!genericOp)
+    return AffineMap();
+  ArrayRef<AffineMap> indexingMaps = genericOp.getIndexingMapsArray();
+  unsigned resultMapIdx = genericOp.getNumDpsInputs();
   if (resultMapIdx >= indexingMaps.size())
     return AffineMap();
   return indexingMaps[resultMapIdx];
 }
 
 SmallVector<int64_t> initializeRootTileSizes(
-    linalg::LinalgOp seed, ArrayRef<int64_t> seedTileSizes) {
-  if (!hasReductionIterator(seed))
+    Operation *seed, ArrayRef<int64_t> seedTileSizes) {
+  if (!hasReductionIterator(seed)) {
+    StringRef libCall = getLibraryCallName(seed);
+    if (libCall == "npu_layout_nchw_to_nchwc32") {
+      SmallVector<int64_t> outputShape = getOutputShape(seed);
+      if (outputShape.size() != 5 || seedTileSizes.size() != 4)
+        return {};
+      int64_t innerC = outputShape[4];
+      return {seedTileSizes[0],
+          std::min<int64_t>(outputShape[1],
+              std::max<int64_t>(1, ceilDiv(seedTileSizes[1], innerC))),
+          seedTileSizes[2], seedTileSizes[3],
+          std::min<int64_t>(innerC, seedTileSizes[1])};
+    }
     return SmallVector<int64_t>(seedTileSizes.begin(), seedTileSizes.end());
+  }
 
   StringRef libCall = getLibraryCallName(seed);
   if (libCall == "npu_conv") {
+    auto genericSeed = cast<linalg::GenericOp>(seed);
     auto outputType = dyn_cast<RankedTensorType>(
-        seed.getDpsInitOperand(0)->get().getType());
+        genericSeed.getDpsInitOperand(0)->get().getType());
     if (!outputType || !outputType.hasStaticShape() || outputType.getRank() != 5 ||
         seedTileSizes.size() < 5)
       return {};
@@ -218,34 +290,56 @@ SmallVector<int64_t> initializeRootTileSizes(
 }
 LogicalResult populateRootOutputDmaAnalysis(
     npux::FusionCursor &cursor, ArrayRef<int64_t> rootOutputTileShape) {
-  if (cursor.tail == cursor.seed)
+  auto tail = cursor.tail;
+  auto seed = cursor.seed;
+  if (tail == seed)
     return success();
 
-  auto rootOutputType = dyn_cast<RankedTensorType>(
-      cursor.tail.getDpsInitOperand(0)->get().getType());
-  if (!rootOutputType || !rootOutputType.hasStaticShape() ||
-      rootOutputTileShape.empty())
+  SmallVector<int64_t> rootOutputShape = getOutputShape(tail);
+  if (rootOutputShape.empty() || rootOutputTileShape.empty())
     return failure();
 
   cursor.rootOutputDmaAnalysis = npux::analyzeDmaTileFromKnownTile(
-      rootOutputType.getShape(), rootOutputTileShape);
+      rootOutputShape, rootOutputTileShape);
   return cursor.rootOutputDmaAnalysis ? success() : failure();
 }
 
 LogicalResult analyzeNonReductionSeedDma(
-    linalg::GenericOp seed, npux::FusionCursor &cursor) {
-  ArrayRef<AffineMap> indexingMaps = seed.getIndexingMapsArray();
-  if (indexingMaps.size() < seed.getNumDpsInputs())
+    Operation *seed, npux::FusionCursor &cursor) {
+  StringRef libCall = getLibraryCallName(seed);
+  auto genericSeed = dyn_cast<linalg::GenericOp>(seed);
+  ArrayRef<AffineMap> indexingMaps =
+      genericSeed ? genericSeed.getIndexingMapsArray() : ArrayRef<AffineMap>{};
+  if (libCall != "npu_layout_nchw_to_nchwc32" &&
+      libCall != "npu_layout_nchwc32_to_nchw" &&
+      (!genericSeed || indexingMaps.size() < genericSeed.getNumDpsInputs()))
     return success();
 
   cursor.seedInputDmaAnalyses.clear();
-  for (auto [idx, operand] : llvm::enumerate(seed.getDpsInputOperands())) {
-    auto inputType = dyn_cast<RankedTensorType>(operand->get().getType());
+  SmallVector<RankedTensorType> inputTypes;
+  if (genericSeed) {
+    for (OpOperand *operand : genericSeed.getDpsInputOperands())
+      inputTypes.push_back(dyn_cast<RankedTensorType>(operand->get().getType()));
+  } else if (auto packOp = dyn_cast<linalg::PackOp>(seed)) {
+    inputTypes.push_back(packOp.getSourceType());
+  } else if (auto unpackOp = dyn_cast<linalg::UnPackOp>(seed)) {
+    inputTypes.push_back(unpackOp.getSourceType());
+  }
+
+  for (auto [idx, inputType] : llvm::enumerate(inputTypes)) {
     if (!inputType || !inputType.hasStaticShape())
       return success();
 
-    SmallVector<int64_t> inputTileShape = inferTileShapeFromIndexingMap(
-        indexingMaps[idx], cursor.seedTileSizes);
+    SmallVector<int64_t> inputTileShape;
+    if (libCall == "npu_layout_nchw_to_nchwc32") {
+      inputTileShape = cursor.seedTileSizes;
+    } else if (libCall == "npu_layout_nchwc32_to_nchw") {
+      inputTileShape = inferInputTileShapeForConsumer(
+          seed, idx, cursor.seedTileSizes);
+    } else {
+      inputTileShape = inferTileShapeFromIndexingMap(
+          indexingMaps[idx], cursor.seedTileSizes);
+    }
     if (inputTileShape.empty())
       return success();
 
@@ -263,21 +357,22 @@ LogicalResult analyzeNonReductionSeedDma(
 }
 
 LogicalResult analyzeReductionSeedDma(
-    linalg::GenericOp seed, npux::FusionCursor &cursor) {
+    Operation *seed, npux::FusionCursor &cursor) {
   StringRef seedLibCall = getLibraryCallName(seed);
+  auto genericSeed = cast<linalg::GenericOp>(seed);
 
   if (seedLibCall == "npu_conv") {
     SmallVector<int64_t> activationTileShape =
-        npux::inferConvActivationTileShape(seed, cursor.seedTileSizes);
+        npux::inferConvActivationTileShape(genericSeed, cursor.seedTileSizes);
     SmallVector<int64_t> weightTileShape =
-        npux::inferConvWeightTileShape(seed, cursor.seedTileSizes);
+        npux::inferConvWeightTileShape(genericSeed, cursor.seedTileSizes);
     if (activationTileShape.empty() || weightTileShape.empty())
       return failure();
 
     auto inputType0 =
-        dyn_cast<RankedTensorType>(seed.getDpsInputOperand(0)->get().getType());
+        dyn_cast<RankedTensorType>(genericSeed.getDpsInputOperand(0)->get().getType());
     auto inputType1 =
-        dyn_cast<RankedTensorType>(seed.getDpsInputOperand(1)->get().getType());
+        dyn_cast<RankedTensorType>(genericSeed.getDpsInputOperand(1)->get().getType());
     if (!inputType0 || !inputType1 || !inputType0.hasStaticShape() ||
         !inputType1.hasStaticShape())
       return failure();
@@ -299,14 +394,14 @@ LogicalResult analyzeReductionSeedDma(
 
   if (seedLibCall == "npu_gemm" || seedLibCall == "npu_matmul") {
     auto inputType0 =
-        dyn_cast<RankedTensorType>(seed.getDpsInputOperand(0)->get().getType());
+        dyn_cast<RankedTensorType>(genericSeed.getDpsInputOperand(0)->get().getType());
     auto inputType1 =
-        dyn_cast<RankedTensorType>(seed.getDpsInputOperand(1)->get().getType());
+        dyn_cast<RankedTensorType>(genericSeed.getDpsInputOperand(1)->get().getType());
     if (!inputType0 || !inputType1 || !inputType0.hasStaticShape() ||
         !inputType1.hasStaticShape())
       return failure();
 
-    ArrayRef<AffineMap> indexingMaps = seed.getIndexingMapsArray();
+    ArrayRef<AffineMap> indexingMaps = genericSeed.getIndexingMapsArray();
     if (indexingMaps.size() < 2)
       return failure();
 
@@ -333,7 +428,7 @@ LogicalResult analyzeReductionSeedDma(
 
   if (seedLibCall == "npu_maxpool") {
     auto inputType0 =
-        dyn_cast<RankedTensorType>(seed.getDpsInputOperand(0)->get().getType());
+        dyn_cast<RankedTensorType>(genericSeed.getDpsInputOperand(0)->get().getType());
     if (!inputType0 || !inputType0.hasStaticShape())
       return failure();
 
@@ -347,7 +442,7 @@ LogicalResult analyzeReductionSeedDma(
     // the supported lowered form is 2x2 / stride=2 even if the attr is omitted.
     int64_t strideH = 2;
     int64_t strideW = 2;
-    if (auto attr = seed->getAttrOfType<ArrayAttr>("strides")) {
+    if (auto attr = genericSeed->getAttrOfType<ArrayAttr>("strides")) {
       if (attr.size() >= 2) {
         strideH = cast<IntegerAttr>(attr[0]).getInt();
         strideW = cast<IntegerAttr>(attr[1]).getInt();
@@ -357,7 +452,7 @@ LogicalResult analyzeReductionSeedDma(
     int64_t kernelH = 1;
     int64_t kernelW = 1;
     auto windowType =
-        dyn_cast<RankedTensorType>(seed.getDpsInputOperand(1)->get().getType());
+        dyn_cast<RankedTensorType>(genericSeed.getDpsInputOperand(1)->get().getType());
     if (windowType && windowType.hasStaticShape() && windowType.getRank() == 2) {
       kernelH = windowType.getShape()[0];
       kernelW = windowType.getShape()[1];
@@ -385,15 +480,16 @@ LogicalResult analyzeReductionSeedDma(
 }
 
 LogicalResult updateMaxPoolTileSizes(
-    linalg::LinalgOp consumer, SmallVector<int64_t> &tileSizes) {
+    Operation *consumer, SmallVector<int64_t> &tileSizes) {
+  auto genericConsumer = cast<linalg::GenericOp>(consumer);
   SmallVector<int64_t> outputShape = getOutputShape(consumer);
   if (tileSizes.size() != 4 || outputShape.size() != 4)
     return failure();
 
-  if (consumer->getNumOperands() < 2)
+  if (genericConsumer->getNumOperands() < 2)
     return failure();
   auto windowType =
-      dyn_cast<RankedTensorType>(consumer->getOperand(1).getType());
+      dyn_cast<RankedTensorType>(genericConsumer->getOperand(1).getType());
   if (!windowType || !windowType.hasStaticShape() || windowType.getRank() != 2)
     return failure();
 
@@ -402,13 +498,13 @@ LogicalResult updateMaxPoolTileSizes(
   // keep the planner aligned with that legalization contract by defaulting to 2.
   int64_t strideH = 2;
   int64_t strideW = 2;
-  if (auto stridesAttr = consumer->getAttrOfType<ArrayAttr>("strides")) {
+  if (auto stridesAttr = genericConsumer->getAttrOfType<ArrayAttr>("strides")) {
     if (stridesAttr.size() >= 2) {
       strideH = cast<IntegerAttr>(stridesAttr[0]).getInt();
       strideW = cast<IntegerAttr>(stridesAttr[1]).getInt();
     }
   } else if (auto denseStridesAttr =
-                 consumer->getAttrOfType<DenseI64ArrayAttr>("strides")) {
+                 genericConsumer->getAttrOfType<DenseI64ArrayAttr>("strides")) {
     if (denseStridesAttr.size() >= 2) {
       strideH = denseStridesAttr[0];
       strideW = denseStridesAttr[1];
@@ -439,7 +535,7 @@ LogicalResult updateMaxPoolTileSizes(
 }
 
 LogicalResult updateLayoutTileSizes(
-    linalg::LinalgOp consumer, SmallVector<int64_t> &tileSizes) {
+    Operation *consumer, SmallVector<int64_t> &tileSizes) {
   StringRef libCall = getLibraryCallName(consumer);
   SmallVector<int64_t> outputShape = getOutputShape(consumer);
   if (outputShape.empty())
@@ -474,7 +570,7 @@ LogicalResult updateLayoutTileSizes(
 }
 
 LogicalResult updateTileSizesForConsumer(
-    linalg::LinalgOp consumer, SmallVector<int64_t> &tileSizes) {
+    Operation *consumer, SmallVector<int64_t> &tileSizes) {
   StringRef libCall = getLibraryCallName(consumer);
   SmallVector<int64_t> outputShape = getOutputShape(consumer);
 
@@ -503,13 +599,13 @@ LogicalResult updateTileSizesForConsumer(
   return success();
 }
 
-linalg::LinalgOp chooseBestConsumer(linalg::LinalgOp seed, linalg::LinalgOp tail,
+Operation *chooseBestConsumer(Operation *seed, Operation *tail,
     ArrayRef<int64_t> currentTileSizes, FusionCostEvaluator &evaluator,
     double &bestBenefit) {
-  linalg::LinalgOp bestConsumer;
+  Operation *bestConsumer = nullptr;
   bestBenefit = 0.0;
 
-  for (linalg::LinalgOp consumer : getDirectConsumers(tail)) {
+  for (Operation *consumer : getDirectConsumers(tail)) {
     if (!isEligibleConsumer(seed, consumer))
       continue;
 
@@ -575,12 +671,12 @@ FailureOr<npux::DmaTileAnalysis> decodeDmaTileAnalysis(Attribute attr) {
 
 } // namespace
 
-bool npux::isCandidateSeedOp(linalg::LinalgOp op) {
-  return isNpuOp(op) && !op->hasAttr("npu.tiled");
+bool npux::isCandidateSeedOp(Operation *op) {
+  return isSupportedFusionOp(op) && isNpuOp(op) && !op->hasAttr("npu.tiled");
 }
 
 FailureOr<npux::FusionCursor> npux::buildFusionCursorFromSeed(
-    linalg::GenericOp seed, FusionCostEvaluator &evaluator) {
+    Operation *seed, FusionCostEvaluator &evaluator) {
   SmallVector<int64_t> seedTileSizes = initializeSeedTileSizes(seed);
   if (seedTileSizes.empty())
     return failure();
@@ -592,10 +688,10 @@ FailureOr<npux::FusionCursor> npux::buildFusionCursorFromSeed(
   cursor.seedTileSizes = seedTileSizes;
   cursor.tailTileSizes = initializeRootTileSizes(seed, seedTileSizes);
 
-  linalg::LinalgOp tail = seed;
+  Operation *tail = seed;
   while (true) {
     double stepBenefit = 0.0;
-    linalg::LinalgOp consumer = chooseBestConsumer(
+    Operation *consumer = chooseBestConsumer(
         seed, tail, cursor.tailTileSizes, evaluator, stepBenefit);
     if (!consumer || stepBenefit <= 0.0)
       break;
@@ -604,11 +700,8 @@ FailureOr<npux::FusionCursor> npux::buildFusionCursorFromSeed(
       break;
 
     tail = consumer;
-    auto genericConsumer = dyn_cast<linalg::GenericOp>(consumer.getOperation());
-    if (!genericConsumer)
-      return failure();
-    cursor.tail = genericConsumer;
-    cursor.chainOps.push_back(genericConsumer);
+    cursor.tail = consumer;
+    cursor.chainOps.push_back(consumer);
   }
 
   if (hasReductionIterator(seed)) {
@@ -653,13 +746,12 @@ FailureOr<npux::FusionCursor> npux::deserializeFusionCursorFromGroup(
   for (Operation &op : group.getBodyRegion().front()) {
     if (isa<npux::GroupYieldOp>(op))
       continue;
-    auto genericOp = dyn_cast<linalg::GenericOp>(&op);
-    if (!genericOp)
+    if (!isSupportedFusionOp(&op))
       continue;
     if (!cursor.seed)
-      cursor.seed = genericOp;
-    cursor.tail = genericOp;
-    cursor.chainOps.push_back(genericOp);
+      cursor.seed = &op;
+    cursor.tail = &op;
+    cursor.chainOps.push_back(&op);
   }
 
   if (!cursor.seed || !cursor.tail)

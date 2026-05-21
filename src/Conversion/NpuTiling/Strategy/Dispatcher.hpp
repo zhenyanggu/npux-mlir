@@ -7,9 +7,9 @@
 namespace npux {
 
 struct FusionCursor {
-  mlir::linalg::GenericOp seed;
-  mlir::linalg::GenericOp tail;
-  llvm::SmallVector<mlir::linalg::GenericOp> chainOps;
+  mlir::Operation *seed = nullptr;
+  mlir::Operation *tail = nullptr;
+  llvm::SmallVector<mlir::Operation *> chainOps;
   llvm::SmallVector<int64_t> seedTileSizes;
   llvm::SmallVector<int64_t> tailTileSizes;
   llvm::SmallVector<DmaTileAnalysis> seedInputDmaAnalyses;

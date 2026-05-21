@@ -14,10 +14,10 @@
 
 namespace npux {
 
-bool isCandidateSeedOp(mlir::linalg::LinalgOp op);
+bool isCandidateSeedOp(mlir::Operation *op);
 
 mlir::FailureOr<FusionCursor> buildFusionCursorFromSeed(
-    mlir::linalg::GenericOp seed, mlir::FusionCostEvaluator &evaluator);
+    mlir::Operation *seed, mlir::FusionCostEvaluator &evaluator);
 
 void serializeFusionCursorToGroup(const FusionCursor &cursor,
     npux::FusionGroupOp group, mlir::Builder &builder);

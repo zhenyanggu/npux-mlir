@@ -34,6 +34,10 @@ mlir::FailureOr<mlir::linalg::GenericOp> cloneGenericOpToMemorySpace(
     mlir::linalg::GenericOp op, int64_t memorySpace,
     mlir::PatternRewriter &rewriter);
 
+mlir::FailureOr<mlir::Operation *> cloneLinalgOpToMemorySpace(
+    mlir::Operation *op, int64_t memorySpace,
+    mlir::PatternRewriter &rewriter);
+
 mlir::linalg::CopyOp createDmaGenericOp(
     mlir::PatternRewriter &rewriter, mlir::Location loc, mlir::Value input,
     llvm::StringRef dmaName, int64_t encoding, mlir::Value dest = nullptr);
@@ -44,12 +48,12 @@ mlir::FailureOr<mlir::Value> maybeSplitDmaOp(
 
 // Tiles one standalone op with the provided tile sizes and peels the tail loops.
 mlir::LogicalResult tileStandaloneOp(
-    mlir::linalg::GenericOp op, llvm::ArrayRef<int64_t> tileSizes,
+    mlir::Operation *op, llvm::ArrayRef<int64_t> tileSizes,
     mlir::PatternRewriter &rewriter);
 
 // Tiles the root consumer and fuses producers until the seed, then peels tails.
 mlir::LogicalResult tileFusedChainOp(
-    mlir::linalg::GenericOp seed, mlir::linalg::GenericOp root,
+    mlir::Operation *seed, mlir::Operation *root,
     llvm::ArrayRef<int64_t> tileSizes, mlir::PatternRewriter &rewriter,
     llvm::ArrayRef<DmaTileAnalysis> seedInputDmaAnalyses = {},
     const std::optional<DmaTileAnalysis> &rootOutputDmaAnalysis = std::nullopt,

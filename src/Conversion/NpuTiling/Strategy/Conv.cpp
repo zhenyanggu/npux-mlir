@@ -20,7 +20,11 @@ static const SmallVector<StringRef> kDimensionLabels = {
     "N", "OC", "OH", "OW", "IC"};
 static constexpr StringLiteral kFusionLookupAttr = "__npux.fusion_lookup_id";
 
-static StringRef getLibraryCallName(linalg::GenericOp op) {
+static bool isSupportedFusionOp(Operation *op) {
+  return isa<linalg::GenericOp, linalg::PackOp, linalg::UnPackOp>(op);
+}
+
+static StringRef getLibraryCallName(Operation *op) {
   auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
   return libCallAttr ? libCallAttr.getValue() : StringRef{};
 }
@@ -54,27 +58,64 @@ static void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) {
     target->setAttr("npu.loop_dim", attr);
 }
 
-static SmallVector<linalg::GenericOp> collectCurrentTiledGenericOps(Block *block) {
-  SmallVector<linalg::GenericOp> ops;
+static SmallVector<Operation *> collectCurrentTiledOps(Block *block) {
+  SmallVector<Operation *> ops;
   if (!block)
     return ops;
   for (Operation &op : *block) {
-    auto genericOp = dyn_cast<linalg::GenericOp>(&op);
-    if (!genericOp || !genericOp->hasAttr("npu.tiled"))
+    if (!isSupportedFusionOp(&op) || !op.hasAttr("npu.tiled"))
       continue;
-    ops.push_back(genericOp);
+    ops.push_back(&op);
   }
   return ops;
+}
+
+static Operation *findTiledOpByMarker(
+    scf::SCFTileAndFuseResult &fuseResult, int64_t marker) {
+  for (Operation *op : fuseResult.tiledAndFusedOps) {
+    if (!isSupportedFusionOp(op))
+      continue;
+    auto markerAttr = op->getAttrOfType<IntegerAttr>(kFusionLookupAttr);
+    if (markerAttr && markerAttr.getInt() == marker)
+      return op;
+  }
+  return nullptr;
+}
+
+static SmallVector<Value> getDpsInputs(Operation *op) {
+  if (auto genericOp = dyn_cast<linalg::GenericOp>(op))
+    return SmallVector<Value>(
+        genericOp.getDpsInputs().begin(), genericOp.getDpsInputs().end());
+  if (auto packOp = dyn_cast<linalg::PackOp>(op))
+    return {packOp.getSource()};
+  if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op))
+    return {unpackOp.getSource()};
+  return {};
+}
+
+static Value getDpsInitValue(Operation *op) {
+  if (auto genericOp = dyn_cast<linalg::GenericOp>(op))
+    return genericOp.getDpsInitOperand(0)->get();
+  if (auto packOp = dyn_cast<linalg::PackOp>(op))
+    return packOp.getDest();
+  if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op))
+    return unpackOp.getDest();
+  return nullptr;
+}
+
+static void setDpsInputs(Operation *op, ArrayRef<Value> newInputs) {
+  for (auto [idx, newValue] : llvm::enumerate(newInputs))
+    op->setOperand(idx, newValue);
 }
 
 struct PreparedConvTiling {
   linalg::GenericOp originalConv;
   linalg::GenericOp activeConv;
-  linalg::GenericOp activeRoot;
+  Operation *activeRoot = nullptr;
   SmallVector<LoopLikeOpInterface> outerLoops;
   SmallVector<Value> outerReplacements;
   SmallVector<Operation *> fusedOps;
-  linalg::GenericOp consumerOp;
+  Operation *consumerOp = nullptr;
   Value consumerResult;
   Value consumerReplacement;
   Value rootExternalDest;
@@ -155,24 +196,10 @@ static SmallVector<int64_t> inferConvWeightTileShapeImpl(
   return tileShape;
 }
 
-static linalg::GenericOp findTiledGenericOpByMarker(
-    scf::SCFTileAndFuseResult &fuseResult, int64_t marker) {
-  for (Operation *op : fuseResult.tiledAndFusedOps) {
-    auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (!genericOp)
-      continue;
-    auto markerAttr =
-        genericOp->getAttrOfType<IntegerAttr>(kFusionLookupAttr);
-    if (markerAttr && markerAttr.getInt() == marker)
-      return genericOp;
-  }
-  return nullptr;
-}
-
 static FailureOr<scf::SCFTileAndFuseResult> fuseConvToConsumer(
-    linalg::GenericOp consumerOp, linalg::GenericOp convOp,
+    Operation *consumerOp, linalg::GenericOp convOp,
     ArrayRef<int64_t> spatialTileSizes, PatternRewriter &rewriter) {
-  auto consumerTilingInterface = cast<TilingInterface>(consumerOp.getOperation());
+  auto consumerTilingInterface = cast<TilingInterface>(consumerOp);
   scf::SCFTileAndFuseOptions fuseOptions;
   fuseOptions.tilingOptions.setTileSizes(
       getAsOpFoldResult(rewriter.getI64ArrayAttr(spatialTileSizes)));
@@ -212,7 +239,7 @@ static void labelOuterLoops(ArrayRef<LoopLikeOpInterface> loops,
 }
 
 static FailureOr<PreparedConvTiling> prepareFusedConv(
-    linalg::GenericOp seed, linalg::GenericOp consumerOp,
+    linalg::GenericOp seed, Operation *consumerOp,
     ArrayRef<int64_t> spatialTileSizes, ArrayRef<int64_t> seedTileSizes,
     ArrayRef<int64_t> tailTileSizes,
     ArrayRef<npux::DmaTileAnalysis> seedInputDmaAnalyses,
@@ -231,10 +258,11 @@ static FailureOr<PreparedConvTiling> prepareFusedConv(
     op->setAttr("npu.tiled", rewriter.getUnitAttr());
   }
 
-  auto fusedConvOp = findTiledGenericOpByMarker(*fuseResult, 0);
+  auto fusedConvOp = dyn_cast_or_null<linalg::GenericOp>(
+      findTiledOpByMarker(*fuseResult, 0));
   if (!fusedConvOp)
     return failure();
-  auto fusedRootOp = findTiledGenericOpByMarker(*fuseResult, 1);
+  Operation *fusedRootOp = findTiledOpByMarker(*fuseResult, 1);
   if (!fusedRootOp)
     return failure();
   fusedConvOp->removeAttr(kFusionLookupAttr);
@@ -251,7 +279,7 @@ static FailureOr<PreparedConvTiling> prepareFusedConv(
   prepared.consumerResult = consumerOp->getNumResults() > 0
       ? consumerOp->getResult(0)
       : Value{};
-  prepared.rootExternalDest = fusedRootOp.getDpsInitOperand(0)->get();
+  prepared.rootExternalDest = getDpsInitValue(fusedRootOp);
   prepared.seedTileSizes =
       SmallVector<int64_t>(seedTileSizes.begin(), seedTileSizes.end());
   prepared.seedInputDmaAnalyses.assign(
@@ -298,7 +326,7 @@ static FailureOr<PreparedConvTiling> prepareStandaloneConv(
   PreparedConvTiling prepared;
   prepared.originalConv = seed;
   prepared.activeConv = tiledConv;
-  prepared.activeRoot = tiledConv;
+  prepared.activeRoot = tiledConv.getOperation();
   prepared.rootExternalDest = tiledConv.getDpsInitOperand(0)->get();
   prepared.seedTileSizes =
       SmallVector<int64_t>(seedTileSizes.begin(), seedTileSizes.end());
@@ -318,18 +346,19 @@ static LogicalResult finalizePreparedConv(PreparedConvTiling &prepared,
 
   if (!prepared.fusedOps.empty() && prepared.consumerOp) {
     for (Operation *op : prepared.fusedOps) {
-      auto genericOp = dyn_cast<linalg::GenericOp>(op);
-      if (!genericOp || genericOp == prepared.activeConv)
+      if (!isSupportedFusionOp(op) || op == prepared.activeConv.getOperation())
         continue;
 
       int64_t memorySpace = 2;
       auto relocatedOp =
-          npux::cloneGenericOpToMemorySpace(genericOp, memorySpace, rewriter);
+          npux::cloneLinalgOpToMemorySpace(op, memorySpace, rewriter);
       if (failed(relocatedOp))
         return failure();
       (*relocatedOp)->setAttr("npu.tiled", rewriter.getUnitAttr());
-      if (genericOp == prepared.activeRoot)
+      if (op == prepared.activeRoot)
         prepared.activeRoot = *relocatedOp;
+      if (op == prepared.consumerOp)
+        prepared.consumerOp = *relocatedOp;
     }
   }
 
@@ -342,19 +371,90 @@ static LogicalResult finalizePreparedConv(PreparedConvTiling &prepared,
   prepared.activeConv = fusedConvOp;
   fusedConvOp->setAttr("npu.tiled", rewriter.getUnitAttr());
 
-  Block *tiledBlock = prepared.activeRoot
-      ? prepared.activeRoot->getBlock()
-      : fusedConvOp->getBlock();
-  SmallVector<linalg::GenericOp> currentTiledOps =
-      collectCurrentTiledGenericOps(tiledBlock);
+  Block *tiledBlock =
+      prepared.activeRoot ? prepared.activeRoot->getBlock() : fusedConvOp->getBlock();
+  SmallVector<Operation *> currentTiledOps = collectCurrentTiledOps(tiledBlock);
 
   llvm::DenseMap<Value, Value> dmaReplacementMap;
-  for (linalg::GenericOp genericOp : currentTiledOps) {
-    rewriter.setInsertionPoint(genericOp);
-    SmallVector<Value> updatedInputs;
-    updatedInputs.reserve(genericOp.getInputs().size());
+  auto rewriteOperandWithDma = [&](Operation *op, unsigned inputIdx, Value operand)
+      -> FailureOr<Value> {
+    auto replacementIt = dmaReplacementMap.find(operand);
+    if (replacementIt != dmaReplacementMap.end())
+      return replacementIt->second;
 
-    for (auto [inputIdx, operand] : llvm::enumerate(genericOp.getInputs())) {
+    Operation *defOp = operand.getDefiningOp();
+    if (defOp && defOp->getBlock() == op->getBlock())
+      return operand;
+
+    if (op == fusedConvOp.getOperation() && inputIdx >= 2)
+      return operand;
+
+    if (getLibraryCallName(op) == "npu_maxpool" &&
+        op == prepared.activeRoot && inputIdx == 1)
+      return operand;
+
+    auto mvinOp = npux::createDmaGenericOp(
+        rewriter, op->getLoc(), operand, "npu_dma_mvin", 2);
+    FailureOr<Value> dmaResult = mvinOp.getResult(0);
+    if (op == fusedConvOp.getOperation() &&
+        inputIdx < prepared.seedInputDmaAnalyses.size()) {
+      dmaResult = npux::maybeSplitDmaOp(
+          mvinOp, prepared.seedInputDmaAnalyses[inputIdx], rewriter);
+    } else if (auto inputAnalysis = npux::buildFullTensorDmaAnalysis(operand)) {
+      dmaResult = npux::maybeSplitDmaOp(mvinOp, *inputAnalysis, rewriter);
+    }
+    if (failed(dmaResult))
+      return failure();
+
+    dmaReplacementMap[operand] = *dmaResult;
+    return *dmaResult;
+  };
+
+  for (Operation *op : currentTiledOps) {
+    rewriter.setInsertionPoint(op);
+
+    if (auto genericOp = dyn_cast<linalg::GenericOp>(op)) {
+      SmallVector<Value> updatedInputs;
+      updatedInputs.reserve(genericOp.getInputs().size());
+
+      for (auto [inputIdx, operand] : llvm::enumerate(genericOp.getInputs())) {
+        FailureOr<Value> rewritten = rewriteOperandWithDma(op, inputIdx, operand);
+        if (failed(rewritten))
+          return failure();
+        updatedInputs.push_back(*rewritten);
+      }
+
+      rewriter.modifyOpInPlace(genericOp, [&]() {
+        genericOp.getInputsMutable().assign(updatedInputs);
+      });
+      continue;
+    }
+
+    if (auto packOp = dyn_cast<linalg::PackOp>(op)) {
+      FailureOr<Value> rewritten = rewriteOperandWithDma(op, 0, packOp.getSource());
+      if (failed(rewritten))
+        return failure();
+      rewriter.modifyOpInPlace(packOp, [&]() {
+        packOp->setOperand(0, *rewritten);
+      });
+      continue;
+    }
+
+    if (auto unpackOp = dyn_cast<linalg::UnPackOp>(op)) {
+      FailureOr<Value> rewritten =
+          rewriteOperandWithDma(op, 0, unpackOp.getSource());
+      if (failed(rewritten))
+        return failure();
+      rewriter.modifyOpInPlace(unpackOp, [&]() {
+        unpackOp->setOperand(0, *rewritten);
+      });
+      continue;
+    }
+
+    SmallVector<Value> updatedInputs;
+    SmallVector<Value> inputs = getDpsInputs(op);
+    updatedInputs.reserve(inputs.size());
+    for (auto [inputIdx, operand] : llvm::enumerate(inputs)) {
       auto replacementIt = dmaReplacementMap.find(operand);
       if (replacementIt != dmaReplacementMap.end()) {
         updatedInputs.push_back(replacementIt->second);
@@ -362,30 +462,30 @@ static LogicalResult finalizePreparedConv(PreparedConvTiling &prepared,
       }
 
       Operation *defOp = operand.getDefiningOp();
-      if (defOp && defOp->getBlock() == genericOp->getBlock()) {
+      if (defOp && defOp->getBlock() == op->getBlock()) {
         updatedInputs.push_back(operand);
         continue;
       }
 
       // Keep parity with the legacy Conv path: only activation/weight use
       // mvin on the seed conv itself; bias-like operands stay external.
-      if (genericOp == fusedConvOp && inputIdx >= 2) {
+      if (op == fusedConvOp.getOperation() && inputIdx >= 2) {
         updatedInputs.push_back(operand);
         continue;
       }
 
       // MaxPool's window tensor is not materialized with mvin in the legacy
       // DMA pass; it is treated as a special in-SRAM auxiliary operand.
-      if (getLibraryCallName(genericOp) == "npu_maxpool" &&
-          genericOp == prepared.activeRoot && inputIdx == 1) {
+      if (getLibraryCallName(op) == "npu_maxpool" &&
+          op == prepared.activeRoot && inputIdx == 1) {
         updatedInputs.push_back(operand);
         continue;
       }
 
       auto mvinOp = npux::createDmaGenericOp(
-          rewriter, genericOp.getLoc(), operand, "npu_dma_mvin", 2);
+          rewriter, op->getLoc(), operand, "npu_dma_mvin", 2);
       FailureOr<Value> dmaResult = mvinOp.getResult(0);
-      if (genericOp == fusedConvOp &&
+      if (op == fusedConvOp.getOperation() &&
           inputIdx < prepared.seedInputDmaAnalyses.size()) {
         dmaResult = npux::maybeSplitDmaOp(
             mvinOp, prepared.seedInputDmaAnalyses[inputIdx], rewriter);
@@ -399,18 +499,18 @@ static LogicalResult finalizePreparedConv(PreparedConvTiling &prepared,
       updatedInputs.push_back(*dmaResult);
     }
 
-    rewriter.modifyOpInPlace(genericOp, [&]() {
-      genericOp.getInputsMutable().assign(updatedInputs);
+    rewriter.modifyOpInPlace(op, [&]() {
+      setDpsInputs(op, updatedInputs);
     });
   }
 
   if (prepared.consumerOp && prepared.activeRoot && prepared.rootExternalDest) {
     rewriter.setInsertionPointAfter(prepared.activeRoot);
-    auto mvoutOp = npux::createDmaGenericOp(rewriter, prepared.activeRoot.getLoc(),
-        prepared.activeRoot.getResult(0), "npu_dma_mvout", 1,
+    auto mvoutOp = npux::createDmaGenericOp(rewriter, prepared.activeRoot->getLoc(),
+        prepared.activeRoot->getResult(0), "npu_dma_mvout", 1,
         prepared.rootExternalDest);
     rewriter.replaceAllUsesExcept(
-        prepared.activeRoot.getResult(0), mvoutOp.getResult(0),
+        prepared.activeRoot->getResult(0), mvoutOp.getResult(0),
         mvoutOp.getOperation());
     if (!prepared.rootOutputDmaAnalysis)
       return failure();
@@ -517,8 +617,9 @@ SmallVector<int64_t> npux::inferConvWeightTileShape(
 
 LogicalResult npux::tileConvWithRoot(
     const FusionCursor &cursor, PatternRewriter &rewriter) {
-  auto seed = cursor.seed;
+  auto seedBase = cursor.seed;
   auto root = cursor.tail;
+  auto seed = cast<linalg::GenericOp>(seedBase);
   if (!seed || !root)
     return failure();
 
@@ -534,7 +635,7 @@ LogicalResult npux::tileConvWithRoot(
     return failure();
 
   SmallVector<int64_t> spatialTileSizes;
-  if (root == seed) {
+  if (root == seed.getOperation()) {
     spatialTileSizes = seedTileSizes;
     spatialTileSizes[4] = 0;
   } else {
@@ -548,7 +649,7 @@ LogicalResult npux::tileConvWithRoot(
   SmallVector<int64_t> icTileSizes = {0, 0, 0, 0, seedTileSizes[4]};
 
   FailureOr<PreparedConvTiling> prepared =
-      (root == seed)
+      (root == seed.getOperation())
       ? prepareStandaloneConv(
             seed, spatialTileSizes, seedTileSizes, tailTileSizes,
             cursor.seedInputDmaAnalyses, rewriter)

@@ -66,7 +66,7 @@ struct NpuFusionMaterializePass : public PassWrapper<NpuFusionMaterializePass,
 
         rewriter.setInsertionPoint(cursor->seed);
         if (failed(npux::tileSeedOp(*cursor, rewriter))) {
-          cursor->seed.emitRemark()
+          cursor->seed->emitRemark()
               << "NpuFusionMaterialize skipped unsupported seed "
               << cursor->seed->getAttrOfType<StringAttr>("library_call");
         }
