@@ -1,4 +1,6 @@
 .idea/
+.agent/
+.codex/
 test/*
 cmake-*/
 docs/
