@@ -1,0 +1,50 @@
+{
+  "layers": [
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 294912,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8"
+      ],
+      "input_shapes": [
+        [
+          1,
+          128,
+          768
+        ],
+        [
+          1,
+          128,
+          768
+        ],
+        [
+          1,
+          128,
+          768
+        ]
+      ],
+      "layer_id": 0,
+      "macs": 98304,
+      "onnx_node_name": "node_add",
+      "origin_op_type": "Add",
+      "output_bytes": 98304,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          128,
+          768
+        ]
+      ],
+      "weight_bytes": null
+    }
+  ]
+}

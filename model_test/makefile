@@ -11,7 +11,8 @@ SHELL := /bin/bash
 #   9. 临时跳过部分模型：make SKIP_MODELS="gelu resize"
 #  10. 持久跳过某个模型：touch models/gelu/.disabled
 #  11. 消融实验隔离目录：make paper_models EXPERIMENT_NAME=costmodel
-PYTHON ?= python3
+#  12. 构建统一单算子集合：make unified_models / make unified_models_cpu
+PYTHON ?= /home/pc/miniconda3/envs/mlir/bin/python3
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 PROJECT_ROOT := $(abspath $(ROOT_DIR)/..)
 ONNX_MLIR ?= $(or $(shell command -v onnx-mlir 2>/dev/null),$(firstword $(wildcard $(PROJECT_ROOT)/build/Release/bin/onnx-mlir) $(wildcard $(PROJECT_ROOT)/build/Debug/bin/onnx-mlir) $(wildcard $(PROJECT_ROOT)/install/bin/onnx-mlir)),onnx-mlir)
@@ -51,7 +52,8 @@ NPU_OPS ?=
 
 # 仅收集模型目录，避免把 models 下的 md 文件当作 testcase
 MODEL_DIRS := $(wildcard $(MODELS_DIR)/*/)
-ALL_MODEL_NAMES := $(notdir $(patsubst %/,%,$(MODEL_DIRS)))
+ALL_MODEL_NAMES_RAW := $(notdir $(patsubst %/,%,$(MODEL_DIRS)))
+ALL_MODEL_NAMES := $(filter-out __pycache__,$(ALL_MODEL_NAMES_RAW))
 DISABLED_MODEL_MARKERS := $(wildcard $(MODELS_DIR)/*/.disabled)
 DISABLED_MODEL_NAMES_FROM_MARKERS := $(notdir $(patsubst %/,%,$(dir $(DISABLED_MODEL_MARKERS))))
 DISABLED_MODEL_NAMES := $(sort $(filter $(ALL_MODEL_NAMES),$(DISABLED_MODEL_NAMES_FROM_MARKERS) $(SKIP_MODELS)))
@@ -64,6 +66,8 @@ RESNET50_BLOCK_MODEL_NAMES := $(sort $(filter resnet50_block_%,$(ALL_MODEL_NAMES
 RESNET50_BLOCK_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(RESNET50_BLOCK_MODEL_NAMES))
 BERT_BASE_LAYER_MODEL_NAMES := $(sort $(filter bert_base_layer_%,$(ALL_MODEL_NAMES)))
 BERT_BASE_LAYER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(BERT_BASE_LAYER_MODEL_NAMES))
+UNIFIED_MODEL_NAMES := $(sort $(filter unified_%,$(ALL_MODEL_NAMES)))
+UNIFIED_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(UNIFIED_MODEL_NAMES))
 PAPER_MODEL_NAMES := bert_base resnet50 vgg16 mnist
 PAPER_ENABLED_MODEL_NAMES := $(filter-out $(DISABLED_MODEL_NAMES),$(PAPER_MODEL_NAMES))
 FUSION_MODEL_NAMES := lenet5 alexnet mobilenet squeezenet
@@ -82,7 +86,7 @@ VGG16_CONV_DIAG_MODELS := \
 .PHONY: all cpu init run_one clean clean_cache list check_model \
 	prepare tile mlir llvm zcu102 rebuild vgg16_layers vgg16_layers_all vgg16_conv_diag \
 	resnet50_layers resnet50_layers_all resnet50_blocks resnet50_blocks_all \
-	bert_base_layers bert_base_layers_all paper_models paper_models_all \
+	bert_base_layers bert_base_layers_all unified_models unified_models_all unified_models_cpu \
 	fusion_models fusion_models_all \
 	$(ALL_MODEL_NAMES)
 
@@ -123,6 +127,12 @@ resnet50_blocks_all: $(RESNET50_BLOCK_MODEL_NAMES)
 bert_base_layers: $(BERT_BASE_LAYER_ENABLED_MODEL_NAMES)
 
 bert_base_layers_all: $(BERT_BASE_LAYER_MODEL_NAMES)
+
+unified_models: $(UNIFIED_ENABLED_MODEL_NAMES)
+
+unified_models_all: $(UNIFIED_MODEL_NAMES)
+
+unified_models_cpu: $(addsuffix .cpu,$(UNIFIED_ENABLED_MODEL_NAMES))
 
 paper_models: $(PAPER_ENABLED_MODEL_NAMES)
 
@@ -184,12 +194,26 @@ $(BUILD_DIR)/NPU_%/.prepare.stamp: | init
 	@model="$*"; \
 	src_dir="$(MODELS_DIR)/$$model"; \
 	work_dir="$(BUILD_DIR)/NPU_$$model"; \
+	shared_py_src="$(MODELS_DIR)/unified_common.py"; \
+	shared_3d_cpp_src="$(MODELS_DIR)/unified_3d_main.cpp"; \
+	shared_4d_cpp_src="$(MODELS_DIR)/unified_4d_main.cpp"; \
 	if [[ ! -d "$$src_dir" ]]; then \
 		echo "[error] testcase '$$model' 不存在，可用: $(MODEL_NAMES)"; \
 		exit 2; \
 	fi; \
 	mkdir -p "$$work_dir"; \
 	echo "[mkdir] $$work_dir"; \
+	if [[ "$$model" == unified_* ]]; then \
+		if [[ -f "$$shared_py_src" ]]; then \
+			cp -f "$$shared_py_src" "$(BUILD_DIR)/unified_common.py"; \
+		fi; \
+		if [[ -f "$$shared_3d_cpp_src" ]]; then \
+			cp -f "$$shared_3d_cpp_src" "$(BUILD_DIR)/unified_3d_main.cpp"; \
+		fi; \
+		if [[ -f "$$shared_4d_cpp_src" ]]; then \
+			cp -f "$$shared_4d_cpp_src" "$(BUILD_DIR)/unified_4d_main.cpp"; \
+		fi; \
+	fi; \
 	shopt -s nullglob; \
 	onnx_files=("$$src_dir"/*.onnx); \
 	if (( $${#onnx_files[@]} > 0 )); then \
@@ -229,12 +253,26 @@ $(BUILD_DIR)/CPU_%/.prepare.stamp: | init
 	@model="$*"; \
 	src_dir="$(MODELS_DIR)/$$model"; \
 	work_dir="$(BUILD_DIR)/CPU_$$model"; \
+	shared_py_src="$(MODELS_DIR)/unified_common.py"; \
+	shared_3d_cpp_src="$(MODELS_DIR)/unified_3d_main.cpp"; \
+	shared_4d_cpp_src="$(MODELS_DIR)/unified_4d_main.cpp"; \
 	if [[ ! -d "$$src_dir" ]]; then \
 		echo "[error] testcase '$$model' 不存在，可用: $(MODEL_NAMES)"; \
 		exit 2; \
 	fi; \
 	mkdir -p "$$work_dir"; \
 	echo "[mkdir] $$work_dir"; \
+	if [[ "$$model" == unified_* ]]; then \
+		if [[ -f "$$shared_py_src" ]]; then \
+			cp -f "$$shared_py_src" "$(BUILD_DIR)/unified_common.py"; \
+		fi; \
+		if [[ -f "$$shared_3d_cpp_src" ]]; then \
+			cp -f "$$shared_3d_cpp_src" "$(BUILD_DIR)/unified_3d_main.cpp"; \
+		fi; \
+		if [[ -f "$$shared_4d_cpp_src" ]]; then \
+			cp -f "$$shared_4d_cpp_src" "$(BUILD_DIR)/unified_4d_main.cpp"; \
+		fi; \
+	fi; \
 	shopt -s nullglob; \
 	onnx_files=("$$src_dir"/*.onnx); \
 	if (( $${#onnx_files[@]} > 0 )); then \
@@ -591,6 +629,7 @@ list:
 	@echo "resnet50 layer debug set: make resnet50_layers (enabled only) | make resnet50_layers_all (include disabled)"
 	@echo "resnet50 block debug set: make resnet50_blocks (enabled only) | make resnet50_blocks_all (include disabled)"
 	@echo "bert_base layer debug set: make bert_base_layers (enabled only) | make bert_base_layers_all (include disabled)"
+	@echo "unified single-op set: make unified_models (enabled only) | make unified_models_all (include disabled) | make unified_models_cpu"
 	@echo "paper model set: make paper_models (bert_base resnet50 vgg16 mnist; enabled only)"
 	@echo "fusion ablation set: make fusion_models (lenet5 alexnet mobilenet squeezenet; enabled only)"
 	@echo "experiment output: make paper_models EXPERIMENT_NAME=costmodel -> build/costmodel and output/costmodel"

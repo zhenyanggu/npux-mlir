@@ -1,0 +1,138 @@
+{
+  "layers": [
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 393220,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ],
+        []
+      ],
+      "layer_id": 0,
+      "macs": 98304,
+      "onnx_node_name": "node_add",
+      "origin_op_type": "Add",
+      "output_bytes": 393216,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "npu",
+      "fallback_reason": null,
+      "fused_ops": [
+        "Conv"
+      ],
+      "input_bytes": 108800,
+      "input_dtypes": [
+        "i8",
+        "i8",
+        "i8",
+        "i32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          34,
+          50
+        ],
+        [
+          1,
+          2,
+          34,
+          50,
+          32
+        ],
+        [
+          2,
+          2,
+          3,
+          3,
+          32,
+          32
+        ],
+        [
+          2,
+          32
+        ]
+      ],
+      "layer_id": 1,
+      "macs": 56623104,
+      "onnx_node_name": "node_conv2d",
+      "origin_op_type": "Conv",
+      "output_bytes": 98304,
+      "output_dtypes": [
+        "i8"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ]
+      ],
+      "weight_bytes": 145920
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 393220,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ],
+        []
+      ],
+      "layer_id": 2,
+      "macs": 98304,
+      "onnx_node_name": "node_sub-Initializer_val_0_0",
+      "origin_op_type": "Add",
+      "output_bytes": 393216,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ]
+      ],
+      "weight_bytes": null
+    }
+  ]
+}

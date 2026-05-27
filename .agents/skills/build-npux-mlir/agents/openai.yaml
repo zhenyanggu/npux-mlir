@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build NPUX MLIR"
+  short_description: "Configure and build this npux-mlir repo"
+  default_prompt: "Use $build-npux-mlir to configure and build this repository from the current workspace."

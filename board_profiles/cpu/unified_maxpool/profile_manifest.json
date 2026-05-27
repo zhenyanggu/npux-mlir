@@ -1,0 +1,116 @@
+{
+  "layers": [
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 393220,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ],
+        []
+      ],
+      "layer_id": 0,
+      "macs": 98304,
+      "onnx_node_name": "node_add",
+      "origin_op_type": "Add",
+      "output_bytes": 393216,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "MaxPoolSingleOut"
+      ],
+      "input_bytes": 393216,
+      "input_dtypes": [
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          32,
+          48
+        ]
+      ],
+      "layer_id": 1,
+      "macs": null,
+      "onnx_node_name": "node_maxpool",
+      "origin_op_type": "MaxPoolSingleOut",
+      "output_bytes": 98304,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          16,
+          24
+        ]
+      ],
+      "weight_bytes": null
+    },
+    {
+      "device": "cpu",
+      "fallback_reason": "not_lowered_to_npu",
+      "fused_ops": [
+        "Add"
+      ],
+      "input_bytes": 98308,
+      "input_dtypes": [
+        "f32",
+        "f32"
+      ],
+      "input_shapes": [
+        [
+          1,
+          64,
+          16,
+          24
+        ],
+        []
+      ],
+      "layer_id": 2,
+      "macs": 24576,
+      "onnx_node_name": "node_sub",
+      "origin_op_type": "Add",
+      "output_bytes": 98304,
+      "output_dtypes": [
+        "f32"
+      ],
+      "output_shapes": [
+        [
+          1,
+          64,
+          16,
+          24
+        ]
+      ],
+      "weight_bytes": null
+    }
+  ]
+}

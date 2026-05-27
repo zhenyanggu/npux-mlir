@@ -1,0 +1,36 @@
+{
+  "summary": {
+    "total_ns": 282478,
+    "cpu_total_ns": 0,
+    "npu_total_ns": 282478,
+    "npu_latency_share": 1,
+    "npu_layer_share": 1,
+    "npu_macs_share": null,
+    "top_hot_layers": [{"layer_id": 0, "layer_name": "node_add", "origin_op_type": "Add", "total_ns": 282478}]
+  },
+  "layers": [
+    {
+      "layer_id": 0,
+      "layer_name": "node_add",
+      "onnx_node_name": "node_add",
+      "origin_op_type": "Add",
+      "device": "npu",
+      "fused_ops": ["Add"],
+      "fallback_reason": null,
+      "invocations": 1,
+      "total_ns": 282478,
+      "avg_ns": 282478,
+      "pct_total": 100,
+      "dma_in_ns": 158286,
+      "compute_ns": 37004,
+      "dma_out_ns": 69016,
+      "layout_ns": 0,
+      "wait_irq_ns": 229371,
+      "other_ns": 18172,
+      "mvin_calls": 6,
+      "compute_calls": 3,
+      "mvout_calls": 3,
+      "layout_calls": 0
+    }
+  ]
+}
