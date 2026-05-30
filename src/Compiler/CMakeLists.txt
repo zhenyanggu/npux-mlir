@@ -70,6 +70,7 @@ add_onnx_mlir_library(OMCompilerDialects
   OMCompilerOptions
   OMInitAccelerators
   OMKrnlOps
+  NpucoreOps
   OMONNXOps
   MLIRIR
   MLIROpenMPToLLVMIRTranslation
@@ -292,5 +293,4 @@ target_link_libraries(PyCompile
 install(TARGETS PyCompile
   DESTINATION lib
   )
-
 

@@ -2,18 +2,17 @@ add_onnx_mlir_library(NpuTiling
     ElemWise.cpp
     NpuTiling.cpp
     Conv.cpp
-    Gemm.cpp
+    MatMul.cpp
     Layout.cpp
     MaxPool.cpp
     NpuTilingHelper.cpp
     NpuInsertDma.cpp
     NpuOpSplitting.cpp
-    RestoreAllocSpace.cpp
     RemoveRedundantDma.cpp
 
     CostModel/NpuCostModel.cpp
     CostModel/Conv.cpp
-    CostModel/Gemm.cpp
+    CostModel/MatMul.cpp
     CostModel/Gelu.cpp
     CostModel/MatAdd.cpp
     CostModel/Layout.cpp
@@ -29,7 +28,6 @@ add_onnx_mlir_library(NpuTiling
 
     # === Dialect 定义库 (对应你的 #include "mlir/Dialect/xxx") ===
     MLIRFuncDialect         # func::FuncOp
-    MLIRLinalgDialect       # linalg::GenericOp
     MLIRSCFDialect          # scf::ForOp (Tiling 后生成的循环)
     MLIRTensorDialect       # tensor::ExtractSliceOp (Tiling 后生成的切片)
 
@@ -39,4 +37,5 @@ add_onnx_mlir_library(NpuTiling
     MLIRDialectUtils        # fix: getAsOpFoldResult
     #MLIRLinalgTransforms
     OMCompilerOptions
+    NpucoreOps
 )

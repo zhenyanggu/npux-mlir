@@ -288,10 +288,9 @@ void addKrnlToLLVMPasses(
   pm.addPass(mlir::memref::createFoldMemRefAliasOpsPass());
 
   if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
-      pm.addPass(npux::createConvertLinalgToNpuPass());
+      pm.addPass(npux::createConvertNpucoreToNpuPass());
       pm.addPass(mlir::createCanonicalizerPass());
       pm.addPass(npux::createNpuMemPlanPass());
-      pm.addPass(npux::createNpuInlinePass());
       pm.addPass(mlir::memref::createExpandStridedMetadataPass());
     }
 
@@ -344,9 +343,7 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
 
 
   if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
-      pm.addPass(npux::createONNXToLinalgNpuPass());
-      pm.addPass(npux::createNpuMergePass());
-      pm.addPass(npux::createNpuOutlinePass());
+      pm.addPass(npux::createONNXToNpucorePass());
       pm.addNestedPass<func::FuncOp>(npux::createNpuTilingPass());
   }
 
@@ -357,9 +354,9 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
     if (inputIRLevel <= MLIRLevel)
       addKrnlToAffinePasses(pm);
     if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
-      pm.addPass(npux::createNpuDPSConversionPass());
       pm.addPass(mlir::createCSEPass());
       pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(npux::createConvertNpucoreToNpuPass());
   }
   }
 

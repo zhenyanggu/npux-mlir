@@ -7,10 +7,9 @@
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/Pass.h"
-#include "mlir/Transforms/GreedyPatternRewriteDriver.h" 
-#include "src/Pass/Passes.hpp"
-#include "mlir/Dialect/Linalg/Transforms/Transforms.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
+#include "src/Pass/Passes.hpp"
 
 using namespace mlir;
 
@@ -21,25 +20,20 @@ struct NpuTilingPass
 
   StringRef getArgument() const override { return "npu-tiling"; }
   StringRef getDescription() const override {
-    return "Tile operations for NPU execution.";
+    return "Tile npucore Gelu operations for NPU execution.";
   }
 
   void runOnOperation() override {
-
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
 
-    // 添加 Tiling Patterns
     npux::populateNpuTilingPatterns(patterns, context);
-    //patterns.add<linalg::ExtractSliceOfPadTensorSwapPattern>(context);
 
-    // 修改：配置 GreedyRewriteConfig (参考你的例子)
     GreedyRewriteConfig config;
-    config.setUseTopDownTraversal(true)
-        .enableFolding(true);
+    config.setUseTopDownTraversal(true).enableFolding(true);
 
-    // 修改：使用 applyPatternsGreedily 替代 applyPartialConversion
-    if (failed(applyPatternsGreedily(getOperation().getBody(), std::move(patterns), config))) {
+    if (failed(applyPatternsGreedily(
+            getOperation().getBody(), std::move(patterns), config))) {
       signalPassFailure();
     }
   };

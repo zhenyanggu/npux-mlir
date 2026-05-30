@@ -1,6 +1,5 @@
 add_onnx_mlir_library(NpuToLLVM
-    NpuInline.cpp
-    ConvertLinalgToNpux.cpp
+    ConvertNpucoreToNpux.cpp
     NpuxConversionHelper.cpp
     Npux/SfuOpConvert.cpp
     Npux/ComputeOpConvert.cpp
@@ -27,7 +26,6 @@ add_onnx_mlir_library(NpuToLLVM
     # --- Dialect 定义 ---
     MLIRFuncDialect
     MLIRMemRefDialect
-    MLIRLinalgDialect
     MLIRArithDialect
     MLIRSCFDialect
     MLIRLLVMDialect
@@ -40,5 +38,6 @@ add_onnx_mlir_library(NpuToLLVM
     MLIRLLVMCommonConversion
 
     OMCompilerOptions
+    NpucoreOps
 
 )

@@ -85,9 +85,6 @@ add_onnx_mlir_library(OMONNXToKrnl
   Tensor/Unique.cpp
   Tensor/Unsqueeze.cpp
 
-
-  ../NpuBufferization/NpuBufferizationHelper.cpp
-
   LINK_LIBS PUBLIC
   OMAccelerator
   OMCompilerOptions
@@ -95,6 +92,7 @@ add_onnx_mlir_library(OMONNXToKrnl
   OMONNXOps
   OMSupport
   OMOptionUtils
+  NpuBufferization
   MLIRFuncDialect
   MLIRFuncTransforms
   MLIRBufferizationTransforms

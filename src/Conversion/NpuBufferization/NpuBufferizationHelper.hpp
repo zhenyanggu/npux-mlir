@@ -13,8 +13,3 @@ mlir::LogicalResult RunNpuBufferization(mlir::ModuleOp module);
 
 // 声明 Pattern 注册辅助函数
 void populateBufferizationCleanUpHelperPatterns(mlir::RewritePatternSet &patterns);
-
-// 声明 Pass 创建函数 (根据你的 namespace npux)
-namespace npux {
-    std::unique_ptr<mlir::Pass> createNpuDPSConversionPass();
-}

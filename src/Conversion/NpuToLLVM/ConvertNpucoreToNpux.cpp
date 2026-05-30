@@ -1,14 +1,14 @@
 //=====================================================
-// src/Conversion/NpuToLLVM/ConvertLinalgToNpux.cpp
-// this file implements convert linalg ops to custom npux ops
+// src/Conversion/NpuToLLVM/ConvertNpucoreToNpux.cpp
+// this file implements convert npucore ops to custom npux ops
 //=====================================================
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
 #include "src/Pass/Passes.hpp"
 
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
@@ -18,13 +18,13 @@ using namespace mlir;
 using namespace npux;
 
 namespace {
-struct ConvertLinalgToNpuPass
-    : public PassWrapper<ConvertLinalgToNpuPass, OperationPass<func::FuncOp>> {
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ConvertLinalgToNpuPass)
+struct ConvertNpucoreToNpuPass
+    : public PassWrapper<ConvertNpucoreToNpuPass, OperationPass<func::FuncOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ConvertNpucoreToNpuPass)
 
-  StringRef getArgument() const override { return "convert-linalg-to-npux"; }
+  StringRef getArgument() const override { return "convert-npucore-to-npux"; }
   StringRef getDescription() const override {
-    return "Lower npu-related linalgs op to npux ops";
+    return "Lower npu-related npucore ops to npux ops";
   }
 
   void runOnOperation() override {
@@ -36,16 +36,7 @@ struct ConvertLinalgToNpuPass
     // A. Npux Dialect 是合法的 (目标)
     target.addLegalDialect<NpuxDialect>();
     target.addLegalDialect<arith::ArithDialect, memref::MemRefDialect>();
-
-    // =========================================================
-    // B. Linalg Generic 限制 (修改点 1)
-    // =========================================================
-    target.addDynamicallyLegalOp<linalg::GenericOp>([](linalg::GenericOp op) {
-      // 如果 Op 标记为 npu.target (Conv/Elewise)，则非法，需转换
-      if (op->hasAttr("npu.target"))
-        return false;
-      return true;
-    });
+    target.addIllegalDialect<npucore::NpucoreDialect>();
 
     // C. FuncOp 限制 (保持不变)
     target.addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp op) {
@@ -99,7 +90,7 @@ struct ConvertLinalgToNpuPass
     // 2. 收集 Patterns
     RewritePatternSet patterns(context);
 
-    npux::populateLinalgToNpuxPatterns(patterns);
+    npux::populateNpucoreToNpuxPatterns(patterns);
 
     if (failed(applyPartialConversion(
             getOperation(), target, std::move(patterns)))) {
@@ -109,6 +100,6 @@ struct ConvertLinalgToNpuPass
 };
 } // namespace
 
-std::unique_ptr<Pass> npux::createConvertLinalgToNpuPass() {
-  return std::make_unique<ConvertLinalgToNpuPass>();
+std::unique_ptr<Pass> npux::createConvertNpucoreToNpuPass() {
+  return std::make_unique<ConvertNpucoreToNpuPass>();
 }

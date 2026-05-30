@@ -6,7 +6,7 @@
 // of MACs).
 // ========================================================================
 #pragma once
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
 #include "llvm/ADT/SmallVector.h"
 #include <cmath>
 #include <vector>
@@ -60,23 +60,37 @@ class NPUCostModel {
 private:
     HardwareConfig hw;
 
-    // 算子分发具体实现
-    llvm::SmallVector<int64_t> getConv2DTileSizes(mlir::linalg::GenericOp op);
+    llvm::SmallVector<int64_t> getConv2DTileSizes(npucore::ConvOp op);
+    llvm::SmallVector<int64_t> getGemmTileSizes(npucore::MatMulOp op);
+    llvm::SmallVector<int64_t> getGeluTileSizes(npucore::GeluOp op);
+    llvm::SmallVector<int64_t> getSoftmaxTileSizes(npucore::SoftmaxOp op);
+    llvm::SmallVector<int64_t> getLayerNormTileSizes(npucore::LayerNormOp op);
+    llvm::SmallVector<int64_t> getMatAddTileSizes(npucore::MatAddOp op);
+    llvm::SmallVector<int64_t> getTransposeTileSizes(npucore::TransposeOp op);
+    llvm::SmallVector<int64_t> getLayoutPackTileSizes(
+        npucore::LayoutNchwToNchwc32Op op);
+    llvm::SmallVector<int64_t> getLayoutUnpackTileSizes(
+        npucore::LayoutNchwc32ToNchwOp op);
     TileResult evaluateConvTile(const ConvParams& layer, int64_t t_oh, int64_t t_ow, int64_t t_oc, int64_t t_ic);
     std::vector<int64_t> getSafeRange(int64_t limit, int64_t step, int64_t maxVal = 64);
-
-    llvm::SmallVector<int64_t> getGemmTileSizes(mlir::linalg::GenericOp op);
-    llvm::SmallVector<int64_t> getGeluTileSizes(mlir::linalg::GenericOp op);
-    llvm::SmallVector<int64_t> getMatAddTileSizes(mlir::linalg::GenericOp op);
-    llvm::SmallVector<int64_t> getLayoutTileSizes(mlir::linalg::GenericOp op);
-    llvm::SmallVector<int64_t> getMaxPoolTileSizes(mlir::linalg::GenericOp op);
+    llvm::SmallVector<int64_t> getMaxPoolTileSizes(npucore::MaxPoolOp op);
 
 
 public:
     NPUCostModel(const HardwareConfig& config) : hw(config) {}
 
-    // 核心对外接口
-    llvm::SmallVector<int64_t> getOptimalTileSizes(mlir::linalg::LinalgOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::ConvOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::MatMulOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::GeluOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::SoftmaxOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::LayerNormOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::MatAddOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::MaxPoolOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(npucore::TransposeOp op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(
+        npucore::LayoutNchwToNchwc32Op op);
+    llvm::SmallVector<int64_t> getOptimalTileSizes(
+        npucore::LayoutNchwc32ToNchwOp op);
 };
 
 } // namespace npux

@@ -5,14 +5,16 @@
 //======================================================
 
 #include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 
 using namespace mlir;
 
 namespace npux {
 
-llvm::SmallVector<int64_t> NPUCostModel::getMatAddTileSizes(mlir::linalg::GenericOp op) {
-  auto loopRanges = op.getStaticLoopRanges();
+llvm::SmallVector<int64_t> NPUCostModel::getMatAddTileSizes(
+    npucore::MatAddOp op) {
+  auto outputType = cast<ShapedType>(op.getOutputs().front().getType());
+  SmallVector<int64_t> loopRanges(
+      outputType.getShape().begin(), outputType.getShape().end());
   int64_t rank = loopRanges.size();
   
   // 默认全部切分为 1 (最保守情况)

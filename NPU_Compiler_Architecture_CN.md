@@ -10,17 +10,17 @@
 
 ```text
 ONNX
-  -> convert-npu-onnx-to-linalg
-     (把可下沉算子变成带 library_call 的 linalg.generic)
+  -> convert-npu-onnx-to-npucore
+     (把可下沉算子变成 npucore 语义 op)
   -> npu-tiling
-     (第一阶段分块：容量导向，含 Gemm Tm/Tn/Tk 计算与 loop_stage)
+     (第一阶段分块：CostModel 计算 tile size，Tiling pass 执行变换并写 loop_stage)
   -> npu-insert-dma
-     (显式插入 npu_dma_mvin / npu_dma_mvout 逻辑节点)
+     (围绕 npucore 计算 op 显式插入 npu_dma_mvin / npu_dma_mvout)
   -> npu-op-splitting
      (第二阶段分块：硬件导向，Gemm N/M=32 + K<=2048 + split_stage)
   -> convert-onnx-to-krnl / bufferization / affine lowering
-  -> convert-linalg-to-npux
-     (linalg.generic -> npux.compute_run / npux.dma_*)
+  -> convert-npucore-to-npux
+     (npucore -> npux.compute_run / npux.dma_*)
   -> npux-compute-fusion (可选)
   -> npu-memory-plan
      (给 npux sram/acc alloc 写 npu.offset)
@@ -30,7 +30,7 @@ ONNX
 ```
 
 说明：
-- 默认 `CompilerPasses.cpp` 的 NPU 管线与 `model_test/scripts/onnx_to_llvm.sh` 不完全一致。
+- 当前应以 `model_test/scripts/onnx_to_llvm.sh` 和 `CompilerPasses.cpp` 的现行 NPU 管线为准。
 - 日常调试 NPU 常用的是 `model_test` 脚本链路（分阶段落盘，便于看中间 IR）。
 
 ---
@@ -38,15 +38,16 @@ ONNX
 ## 2. 关键目录与职责
 
 - `src/Conversion/NpuPartition/`
-  - ONNX -> Linalg(NPU) 的入口。
-  - 典型文件：`ConvertONNXToLinalgNpu.cpp`、`Linalg/Gemm.cpp`。
+  - ONNX -> Npucore 的入口。
+  - 典型文件：`NpuCore/Conv.cpp`、`NpuCore/MatMul.cpp`。
 - `src/Conversion/NpuTiling/`
   - 第一阶段 tiling、DMA 插入、第二阶段 splitting。
-  - 典型文件：`Gemm.cpp`、`NpuInsertDma.cpp`、`NpuOpSplitting.cpp`。
+  - `CostModel/` 只负责 tile size 计算。
+  - 根目录下 `*.cpp` 只负责 tiling / fuse / peeling / tail handling。
 - `src/Conversion/NpuBufferization/`
   - One-shot bufferization + DPS 结果外提。
 - `src/Conversion/NpuToLLVM/`
-  - linalg -> npux；npux -> LLVM；内存规划；地址空间收尾。
+  - npucore -> npux；npux -> LLVM；内存规划；地址空间收尾。
   - 典型文件：`ConvertLinalgToNpux.cpp`、`Npux/ComputeOpConvert.cpp`、`ConvertNpuxToLLVM.cpp`、`NpuMemPlan.cpp`。
 - `src/Dialect/Npux/`
   - NPU 自定义 Dialect（`npux.compute_run`, `npux.dma_mvin`, `npux.mvin_bias` 等）。
@@ -81,12 +82,12 @@ ONNX
 
 下面是你最关心的部分。
 
-### 4.1 ONNX -> linalg.generic 阶段
+### 4.1 ONNX -> npucore 阶段
 
-文件：`src/Conversion/NpuPartition/Linalg/Gemm.cpp`
+文件：`src/Conversion/NpuPartition/NpuCore/MatMul.cpp`
 
-- Gemm/MatMul 会生成 `library_call = "npu_gemm"` 或 `"npu_matmul"` 的 `linalg.generic`。
-- 结果通常再接一个 `library_call = "mv_acc_to_spm"` 的 `linalg.generic` 表达 ACC->SPM 语义。
+- Gemm/MatMul 会直接生成 `npucore.matmul`。
+- 结果若需要从 ACC 落回 SPM，会接 `npucore.mv_acc_to_spm`。
 
 ### 4.2 第一阶段分块（容量导向）
 
@@ -147,7 +148,7 @@ ONNX
 
 端到端路径：
 - `ONNXAdd`（严格 QDQ、同形状、rank<=2、对称量化）  
-  -> `linalg.generic {library_call="npu_matadd"}`  
+  -> `npucore.matadd`  
   -> `npu-tiling`（`ElemWise.cpp`）  
   -> `npu-insert-dma`（两路 `mvin->ACC` + 一路 `mvout`）  
   -> `npux.matadd_run`  
@@ -175,7 +176,7 @@ ACC 放不下时的分块策略（当前实现）：
 
 文件：`src/Conversion/NpuToLLVM/Npux/NpuMemoryManagement.cpp`
 
-- `ConvertMemrefCopyToNpuxPattern` 会把 memref shape 扁平到 `(rows, cols)`。
+- `npucore` DMA lowering 会把 memref shape 扁平到 `(rows, cols)`。
 - 然后生成 `npux.dma_mvin/mvout`，再在 LLVM lowering 中映射到 `npu_dma_mvin/mvout`。
 
 ---
@@ -185,12 +186,10 @@ ACC 放不下时的分块策略（当前实现）：
 ### 6.1 默认编译器管线（`CompilerPasses.cpp`）
 
 包含但不限于：
-- `createONNXToLinalgNpuPass`
-- `createNpuMergePass`
-- `createNpuOutlinePass`
-- nested `createNpuTilingPass`
+- `createONNXToNpucorePass`
+- `createNpuTilingPass`
 - `createNpuDPSConversionPass`
-- `createConvertLinalgToNpuPass`
+- `createConvertNpucoreToNpuPass`
 - `createNpuMemPlanPass`
 
 ### 6.2 `model_test/scripts/onnx_to_llvm.sh` 管线
@@ -199,7 +198,7 @@ ACC 放不下时的分块策略（当前实现）：
 - `--npu-tiling`
 - `--npu-insert-dma`
 - `--npu-op-splitting --npu-remove-redundant-dma`
-- `--convert-linalg-to-npux`
+- `--convert-npucore-to-npux`
 - `--npux-compute-fusion`
 - `--npu-memory-plan`
 
@@ -210,9 +209,9 @@ ACC 放不下时的分块策略（当前实现）：
 ## 7. 常见修改入口（按需求反查）
 
 - 改 ONNX 算子是否下沉 NPU：
-  - `src/Conversion/NpuPartition/ConvertONNXToLinalgNpu.cpp`
+  - `src/Conversion/NpuPartition/NpuCore/*.cpp`
 - 改 Gemm 第一阶段容量分块（Tm/Tn/Tk 公式）：
-  - `src/Conversion/NpuTiling/Gemm.cpp`
+  - `src/Conversion/NpuTiling/CostModel/Gemm.cpp`
 - 改 Gemm 第二阶段硬件分块（N/M/K、2048）：
   - `src/Conversion/NpuTiling/NpuOpSplitting.cpp`
 - 改 bias/psum/accumulate 判定：
@@ -239,4 +238,3 @@ ACC 放不下时的分块策略（当前实现）：
   - `npu.loop_stage`
   - `npu.split_stage`
   - `npu.split_dim`
-  - `library_call`

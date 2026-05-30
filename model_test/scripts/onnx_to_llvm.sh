@@ -101,35 +101,9 @@ echo ">>> Tiling Config: $TILING_CONFIG"
 # ------------------------------------------------
 enter_stage "NpuPartition"
 
-run_pass "Convert to Linalg" \
-         "--convert-npu-onnx-to-linalg --npu-ops=Conv,Add,MatMul,LayerNorm,Softmax,Gelu,Gemm,Transpose,MaxPool --npu-tiling-config=$TILING_CONFIG" \
-         "ConvertONNXToLinalgNpu.mlir"
-
-# run_pass "Modify Scf Region Encoding" \
-#         "--npu-modify-scf-encoding"\
-#         "ModifyScfRegionEncoding.mlir"
-
-# run_pass "Op Merge" \
-#          "--npu-clean-pack --npu-merge" \
-#          "NpuMerge.mlir"
-
-# run_pass "Region Extent" \
-#          "--npu-region-extension" \
-#          "NpuRegionExtension.mlir"
-
-# run_pass "Outline" \
-#          "--npu-outline" \
-#          "NpuOutline.mlir"
-
-# ------------------------------------------------
-# NpuFuse
-# ------------------------------------------------
-
-# enter_stage "NpuFuse"
-
-# run_pass "Fusing" \
-#          "--npu-fuse" \
-#          "NpuFuse.mlir"
+run_pass "Convert to Npucore" \
+         "--convert-npu-onnx-to-npucore --npu-ops=Conv,Add,MatMul,LayerNorm,Softmax,Gelu,Gemm,Transpose,MaxPool --npu-tiling-config=model_qdq.json --canonicalize" \
+         "ConvertONNXToNpucore.mlir"
 
 # # ------------------------------------------------
 # #  NpuTiling
@@ -138,7 +112,7 @@ enter_stage "NpuTiling"
 
 
 run_pass "Tiling " \
-         "--npu-tiling --canonicalize --npu-tiling-config=$TILING_CONFIG" \
+         "--npu-tiling --canonicalize --npu-tiling-config=model_qdq.json" \
          "NpuTiling.mlir"
 
 run_pass "Insert Dma " \
@@ -146,7 +120,7 @@ run_pass "Insert Dma " \
          "NpuInsertDma.mlir"
 
 run_pass "Op Splitting " \
-         "--npu-op-splitting --npu-remove-redundant-dma" \
+         "--npu-op-splitting --npu-remove-redundant-dma --canonicalize" \
          "NpuOpSplitting.mlir"
 
 # # # ------------------------------------------------
@@ -155,7 +129,7 @@ run_pass "Op Splitting " \
 enter_stage "NpuBufferization"
 
 run_pass "Bufferize" \
-         "--convert-onnx-to-krnl --target=npu --canonicalize --convert-krnl-to-affine --npu-dps-convert --cse --canonicalize" \
+         "--convert-onnx-to-krnl --target=npu --canonicalize --convert-krnl-to-affine" \
          "NpuBufferization.mlir"
 
 
@@ -197,8 +171,8 @@ run_pass "fold-memref-alias-ops" \
         "fold-memref-alias-ops.mlir"      
 
 run_pass "Npux Conversion" \
-         "--convert-linalg-to-npux --canonicalize" \
-         "ConvertLinalgToNpux.mlir"
+         "--convert-npucore-to-npux --canonicalize npu-remove-duplicate-mvin-bias" \
+         "ConvertNpucoreToNpux.mlir"
 
 run_pass "Lower Subview" \
          "--npu-lower-subview" \
@@ -213,12 +187,8 @@ run_pass "convert-linalg-to-loops" \
         "convert-linalg-to-loops.mlir"
         
 run_pass "Npu Memory Plan" \
-        "--npu-memory-plan --npu-tiling-config=$TILING_CONFIG" \
+        "--npu-memory-plan --npu-tiling-config=model_qdq.json" \
         "NpuMemoryPlan.mlir"
-
-# run_pass "Npu Inline" \
-#         "--npu-inline  " \
-#         "NpuInline.mlir"
 
 run_pass "Erase Memoryspace"\
          "--npu-erase-memory-space --expand-strided-metadata "\

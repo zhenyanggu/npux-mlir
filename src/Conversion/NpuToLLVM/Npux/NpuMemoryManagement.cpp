@@ -6,10 +6,10 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/PatternMatch.h"
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
 #include "src/Dialect/Npux/NpuxOps.hpp"
 #include "llvm/ADT/STLExtras.h"
 #include <limits>
@@ -20,207 +20,188 @@ using namespace npux;
 
 namespace {
 // =========================================================
-// Pattern 1: Convert ACC -> SPM Quantization Generic to NPU Move
-// Matches: linalg.generic { npu.pp_stage = "quant_acc2spm" }
+// Helper: lower a memref-form DMA op to the final npux DMA op.
 // =========================================================
-class ConvertAccToSpmPattern : public OpRewritePattern<linalg::GenericOp> {
+static LogicalResult lowerDmaToNpux(Operation *op, PatternRewriter &rewriter,
+    Value src, Value dst, bool isMvin) {
+  auto srcType = dyn_cast<MemRefType>(src.getType());
+  auto dstType = dyn_cast<MemRefType>(dst.getType());
+  if (!srcType || !dstType)
+    return failure();
+
+  int srcSpace = srcType.getMemorySpaceAsInt();
+  int dstSpace = dstType.getMemorySpaceAsInt();
+  if (isMvin) {
+    if (!(srcSpace == 1 && (dstSpace == 2 || dstSpace == 3)))
+      return failure();
+  } else {
+    if (!(srcSpace == 2 && dstSpace == 1))
+      return failure();
+  }
+
+  MemRefType dramType = isMvin ? srcType : dstType;
+  MemRefType sramType = isMvin ? dstType : srcType;
+  Location loc = op->getLoc();
+
+  auto shape = dramType.getShape();
+  int64_t rank = shape.size();
+  if (llvm::any_of(shape, [](int64_t d) { return d < 0; })) {
+    op->emitError()
+        << "Dynamic memref shape is unsupported for DMA parameter lowering: "
+        << dramType;
+    return failure();
+  }
+
+  int64_t splitIdx = 0;
+  if (auto colDimAttr = op->getAttrOfType<IntegerAttr>("npu.dma_col_dim")) {
+    splitIdx = colDimAttr.getInt();
+  } else if (auto colDimAttr = op->getAttrOfType<IntegerAttr>("dma_col_dim")) {
+    splitIdx = colDimAttr.getInt();
+  }
+  if (splitIdx < 0 || splitIdx > rank)
+    splitIdx = 0;
+
+  int64_t rows = 1;
+  int64_t cols = 1;
+  for (int i = 0; i < splitIdx; ++i)
+    rows *= shape[i];
+  for (int i = splitIdx; i < rank; ++i)
+    cols *= shape[i];
+
+  Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
+  Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
+
+  int64_t offset;
+  SmallVector<int64_t, 4> strides;
+  if (failed(dramType.getStridesAndOffset(strides, offset)))
+    return failure();
+
+  int64_t dramStrideVal = cols;
+  if (splitIdx > 0 && (splitIdx - 1) < (int64_t)strides.size())
+    dramStrideVal = strides[splitIdx - 1];
+  Value vDramStride =
+      rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 32);
+
+  int64_t sramOffset;
+  SmallVector<int64_t, 4> sramStrides;
+  if (failed(sramType.getStridesAndOffset(sramStrides, sramOffset)))
+    return failure();
+
+  int64_t sramStrideVal = cols;
+  if (splitIdx > 0 && (splitIdx - 1) < (int64_t)sramStrides.size())
+    sramStrideVal = sramStrides[splitIdx - 1];
+  Value vSramStride =
+      rewriter.create<arith::ConstantIntOp>(loc, sramStrideVal, 16);
+
+  Value vPrecision = rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
+  Value vInputType = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
+
+  auto getIntAttrOr = [&](StringRef name, int64_t defaultVal) -> int64_t {
+    if (auto attr = op->getAttrOfType<IntegerAttr>(name))
+      return attr.getInt();
+    return defaultVal;
+  };
+  auto getBoolAttrOr = [&](StringRef name, bool defaultVal) -> bool {
+    if (auto attr = op->getAttrOfType<BoolAttr>(name))
+      return attr.getValue();
+    return defaultVal;
+  };
+
+  bool mvinIsQuant =
+      getBoolAttrOr("npu.is_quant", getBoolAttrOr("is_quant", false));
+  int64_t mvinQuantZero =
+      getIntAttrOr("npu.quant_zero", getIntAttrOr("quant_zero", 0));
+  int64_t mvinQuantScale =
+      getIntAttrOr("npu.quant_scale", getIntAttrOr("quant_scale", 0));
+  int64_t mvinQuantShift =
+      getIntAttrOr("npu.quant_shift", getIntAttrOr("quant_shift", 0));
+
+  Value vZero32 = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+  Value vZero16 = rewriter.create<arith::ConstantIntOp>(loc, 0, 16);
+  Value vZero8 = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
+  Value vFalse = rewriter.create<arith::ConstantIntOp>(loc, 0, 1);
+  Value vMvinIsQuant =
+      rewriter.create<arith::ConstantIntOp>(loc, mvinIsQuant ? 1 : 0, 1);
+  Value vMvinQuantZero =
+      rewriter.create<arith::ConstantIntOp>(loc, mvinQuantZero, 32);
+  Value vMvinQuantScale =
+      rewriter.create<arith::ConstantIntOp>(loc, mvinQuantScale, 16);
+  Value vMvinQuantShift =
+      rewriter.create<arith::ConstantIntOp>(loc, mvinQuantShift, 16);
+
+  if (isMvin) {
+    int64_t destFlag = (dstSpace == 3) ? 1 : 0;
+    Value vDest = rewriter.create<arith::ConstantIntOp>(loc, destFlag, 8);
+    Value vIsBias = vFalse;
+    rewriter.create<DmaMvinOp>(loc, src, dst, vCol, vRow, vSramStride,
+        vDramStride, vPrecision, vInputType, vDest, vIsBias, vMvinIsQuant,
+        vMvinQuantZero, vMvinQuantScale, vMvinQuantShift);
+  } else {
+    rewriter.create<DmaMvoutOp>(loc, dst, src, vCol, vRow, vSramStride,
+        vDramStride, vPrecision, vInputType, vZero8, vFalse, vZero32, vZero16,
+        vZero16);
+  }
+
+  rewriter.eraseOp(op);
+  return success();
+}
+
+class ConvertNpucoreAccToSpmPattern
+    : public OpRewritePattern<npucore::MvAccToSpmOp> {
 public:
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+  using OpRewritePattern<npucore::MvAccToSpmOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
-    // 1. Check Library Call Name
-    auto libCallAttr = op.getLibraryCallAttr();
-    if (!libCallAttr || libCallAttr.getValue() != "mv_acc_to_spm") {
+      npucore::MvAccToSpmOp op, PatternRewriter &rewriter) const override {
+    if (op.hasTensorSemantics())
       return failure();
-    }
-
-    // 2. Get Operands
     if (op.getInputs().size() != 1 || op.getOutputs().size() != 1)
       return failure();
 
     Value src = op.getInputs()[0];
     Value dst = op.getOutputs()[0];
 
-    auto srcType = cast<MemRefType>(src.getType());
-    auto dstType = cast<MemRefType>(dst.getType());
-
-    if (srcType.getMemorySpaceAsInt() != 3 ||
-        dstType.getMemorySpaceAsInt() != 2)
+    auto srcType = dyn_cast<MemRefType>(src.getType());
+    auto dstType = dyn_cast<MemRefType>(dst.getType());
+    if (!srcType || !dstType)
+      return failure();
+    if (srcType.getMemorySpaceAsInt() != 3 || dstType.getMemorySpaceAsInt() != 2)
       return failure();
 
-    Location loc = op.getLoc();
-
-    // 3. Create Npux Op (No shape args needed now)
-    rewriter.create<npux::MvAccToSpmOp>(loc, src, dst);
-
-    // 4. Erase original
-    rewriter.eraseOp(op);
+    rewriter.replaceOpWithNewOp<npux::MvAccToSpmOp>(op, src, dst);
     return success();
   }
 };
 
-class ConvertMemrefCopyToNpuxPattern
-    : public OpRewritePattern<linalg::GenericOp> {
+class ConvertNpucoreDmaMvinPattern
+    : public OpRewritePattern<npucore::DmaMvinOp> {
 public:
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+  using OpRewritePattern<npucore::DmaMvinOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
-    auto libCallAttr = op.getLibraryCallAttr();
-    if (!libCallAttr)
+      npucore::DmaMvinOp op, PatternRewriter &rewriter) const override {
+    if (op.hasTensorSemantics())
       return failure();
-
-    StringRef libName = libCallAttr.getValue();
-
-    if (libName != "npu_dma_mvin" && libName != "npu_dma_mvout") {
+    if (op.getInputs().size() != 1 || op.getOutputs().size() != 1)
       return failure();
-    }
+    return lowerDmaToNpux(
+        op, rewriter, op.getInputs().front(), op.getOutputs().front(), true);
+  }
+};
 
-    if (op.getNumDpsInputs() != 1 || op.getNumDpsInits() != 1) {
+class ConvertNpucoreDmaMvoutPattern
+    : public OpRewritePattern<npucore::DmaMvoutOp> {
+public:
+  using OpRewritePattern<npucore::DmaMvoutOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::DmaMvoutOp op, PatternRewriter &rewriter) const override {
+    if (op.hasTensorSemantics())
       return failure();
-    }
-
-    Value src = op.getInputs()[0];
-    Value dst = op.getOutputs()[0];
-
-    auto srcType = cast<MemRefType>(src.getType());
-    auto dstType = cast<MemRefType>(dst.getType());
-
-    int srcSpace = srcType.getMemorySpaceAsInt();
-    int dstSpace = dstType.getMemorySpaceAsInt();
-    bool isMvin = (srcSpace == 1 && (dstSpace == 2 || dstSpace == 3));
-    bool isMvout = (srcSpace == 2 && dstSpace == 1);
-
-    if (!isMvin && !isMvout)
+    if (op.getInputs().size() != 1 || op.getOutputs().size() != 1)
       return failure();
-
-    // --- 核心修复：根据传输方向确定 DRAM 和 SRAM 的类型 ---
-    MemRefType dramType = isMvin ? srcType : dstType;
-    MemRefType sramType = isMvin ? dstType : srcType;
-    Location loc = op.getLoc();
-
-    auto shape = dramType.getShape();
-    int64_t rank = shape.size();
-    if (llvm::any_of(shape, [](int64_t d) { return d < 0; })) {
-      op->emitError()
-          << "Dynamic memref shape is unsupported for DMA parameter lowering: "
-          << dramType;
-      return failure();
-    }
-
-    // ========================================================================
-    // 1. 直接从上游 Pass 读取 col_dim_idx 属性，告别启发式猜测
-    // ========================================================================
-    int64_t splitIdx = 0; // 默认 0 表示完全连续的 1D DMA
-    if (auto colDimAttr = op->getAttrOfType<IntegerAttr>("npu.dma_col_dim")) {
-      splitIdx = colDimAttr.getInt();
-    }
-    
-    // 防御性保护，防止属性异常
-    if (splitIdx < 0 || splitIdx > rank) {
-      splitIdx = 0;
-    }
-
-    int64_t rows = 1;
-    int64_t cols = 1;
-
-    // splitIdx 左边的维度累乘为 Row
-    for (int i = 0; i < splitIdx; ++i) {
-      rows *= shape[i];
-    }
-    // splitIdx 及右边的维度累乘为 Col
-    for (int i = splitIdx; i < rank; ++i) {
-      cols *= shape[i];
-    }
-
-    Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols - 1, 32);
-    Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows - 1, 32);
-
-    // ========================================================================
-    // 2. 获取 DRAM Strides (复用你原本借助 MLIR 布局的稳健推导)
-    // ========================================================================
-    int64_t offset;
-    SmallVector<int64_t, 4> strides;
-    if (failed(dramType.getStridesAndOffset(strides, offset))) {
-      return failure();
-    }
-
-    int64_t dramStrideVal = cols;
-    // 使用 splitIdx - 1 精准获取跨越 Row 的步长
-    if (splitIdx > 0 && (splitIdx - 1) < (int64_t)strides.size()) {
-      dramStrideVal = strides[splitIdx - 1];
-    }
-
-    Value vDramStride =
-        rewriter.create<arith::ConstantIntOp>(loc, dramStrideVal, 32);
-
-    // ========================================================================
-    // 3. 获取 SRAM Stride
-    // ========================================================================
-    int64_t sramOffset;
-    SmallVector<int64_t, 4> sramStrides;
-    if (failed(sramType.getStridesAndOffset(sramStrides, sramOffset))) {
-      return failure();
-    }
-    
-    int64_t sramStrideVal = cols; // 默认值
-    if (splitIdx > 0 && (splitIdx - 1) < (int64_t)sramStrides.size()) {
-      sramStrideVal = sramStrides[splitIdx - 1];
-    }
-    
-    Value vSramStride =
-        rewriter.create<arith::ConstantIntOp>(loc, sramStrideVal, 16);
-
-    // ========================================================================
-    // 4. Precision & Hardware Logic (完全保持原样)
-    // ========================================================================
-    Value vPrecision = rewriter.create<arith::ConstantIntOp>(loc, 1, 8);
-    Value vInputType = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
-
-    auto getIntAttrOr = [&](StringRef name, int64_t defaultVal) -> int64_t {
-      if (auto attr = op->getAttrOfType<IntegerAttr>(name))
-        return attr.getInt();
-      return defaultVal;
-    };
-
-    bool mvinIsQuant = false;
-    if (auto attr = op->getAttrOfType<BoolAttr>("npu.is_quant")) {
-      mvinIsQuant = attr.getValue();
-    }
-    int64_t mvinQuantZero = getIntAttrOr("npu.quant_zero", 0);
-    int64_t mvinQuantScale = getIntAttrOr("npu.quant_scale", 0);
-    int64_t mvinQuantShift = getIntAttrOr("npu.quant_shift", 0);
-
-    Value vZero32 = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
-    Value vZero16 = rewriter.create<arith::ConstantIntOp>(loc, 0, 16);
-    Value vZero8 = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
-    Value vFalse = rewriter.create<arith::ConstantIntOp>(loc, 0, 1);
-    Value vMvinIsQuant =
-        rewriter.create<arith::ConstantIntOp>(loc, mvinIsQuant ? 1 : 0, 1);
-    Value vMvinQuantZero =
-        rewriter.create<arith::ConstantIntOp>(loc, mvinQuantZero, 32);
-    Value vMvinQuantScale =
-        rewriter.create<arith::ConstantIntOp>(loc, mvinQuantScale, 16);
-    Value vMvinQuantShift =
-        rewriter.create<arith::ConstantIntOp>(loc, mvinQuantShift, 16);
-
-    if (isMvin) {
-      int64_t destFlag = (dstSpace == 3) ? 1 : 0;
-      Value vDest = rewriter.create<arith::ConstantIntOp>(loc, destFlag, 8);
-      Value vIsBias = vFalse;
-
-      rewriter.create<DmaMvinOp>(loc, src, dst, vCol, vRow, vSramStride,
-          vDramStride, vPrecision, vInputType, vDest, vIsBias, vMvinIsQuant,
-          vMvinQuantZero, vMvinQuantScale, vMvinQuantShift);
-    } else {
-      rewriter.create<DmaMvoutOp>(loc, dst, src, vCol, vRow, vSramStride,
-          vDramStride, vPrecision, vInputType,
-          vZero8, vFalse, vZero32, vZero16, vZero16);
-    }
-
-    rewriter.eraseOp(op);
-    return success();
+    return lowerDmaToNpux(
+        op, rewriter, op.getInputs().front(), op.getOutputs().front(), false);
   }
 };
 
@@ -291,8 +272,9 @@ public:
 // =========================================================
 
 void npux::populateSramDataMovementPatterns(RewritePatternSet &patterns) {
-  patterns.add<ConvertMemrefCopyToNpuxPattern>(patterns.getContext());
-  patterns.add<ConvertAccToSpmPattern>(patterns.getContext());
+  patterns.add<ConvertNpucoreAccToSpmPattern>(patterns.getContext());
+  patterns.add<ConvertNpucoreDmaMvinPattern>(patterns.getContext());
+  patterns.add<ConvertNpucoreDmaMvoutPattern>(patterns.getContext());
 }
 
 void npux::populateHostAllocToNpuxPatterns(RewritePatternSet &patterns) {

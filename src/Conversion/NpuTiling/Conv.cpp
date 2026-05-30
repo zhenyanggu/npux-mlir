@@ -6,10 +6,10 @@
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/IR/PatternMatch.h"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 #include "src/Pass/Passes.hpp"
 #include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
@@ -55,64 +55,26 @@ static void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) {
     target->setAttr("npu.loop_dim", attr);
 }
 
-SmallVector<int64_t> getConvTileSizes(linalg::GenericOp op) {
-  unsigned rank = 0;
-  if (!op.getOutputs().empty()) {
-    if (auto type = dyn_cast<RankedTensorType>(op.getOutputs()[0].getType())) {
-      rank = type.getRank();
-    }
-  }
-  // Conv 在 NCHWc32 下通常是 5 维
-  if (rank < 5) return {};
-
-  auto &config = npux::NPUConfig::getInstance();
-  
-  // 1. 优先级最高：CLI/JSON 传入的强制手工配置
-  std::vector<int64_t> manualSizes = config.getConvTileSize();
-  if (!manualSizes.empty() && manualSizes.size() >= 4) {
-    SmallVector<int64_t> sizes(rank, 0);
-    int64_t t_oh = manualSizes[0];
-    int64_t t_ow = manualSizes[1];
-    int64_t t_ic = manualSizes[2];
-    int64_t t_oc = manualSizes[3];
-
-    // 映射到 NCHWc32: [N, OC_outer, OH, OW, IC_outer]
-    sizes[0] = 1;                                 
-    sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1;     
-    sizes[2] = t_oh;                              
-    sizes[3] = t_ow;                              
-    sizes[4] = (t_ic > 32) ? (t_ic / 32) : 1;     
-
-    llvm::errs() << "[Tiling] Conv (Manual): Tile=[OH:" << t_oh << ", OW:" << t_ow 
-                 << ", IC_blk:" << t_ic << ", OC_blk:" << t_oc << "]\n";
-    return sizes;
-  }
-
-  // 2. 使用内置 Cost-Model 动态计算
+SmallVector<int64_t> getConvTileSizes(npucore::ConvOp op) {
   npux::HardwareConfig hwConfig;
-
   npux::NPUCostModel costModel(hwConfig);
-  SmallVector<int64_t> optimalSizes = costModel.getOptimalTileSizes(op);
-  return optimalSizes;
+  return costModel.getOptimalTileSizes(op);
 }
 
-struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+struct NpuConvTilingPattern : public OpRewritePattern<npucore::MvAccToSpmOp> {
+  using OpRewritePattern<npucore::MvAccToSpmOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+      npucore::MvAccToSpmOp op, PatternRewriter &rewriter) const override {
 
-    auto libCall = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCall || libCall.getValue() != "mv_acc_to_spm")
-      return failure();
     if (op->hasAttr("npu.tiled"))
+      return failure();
+    if (op->getParentOfType<scf::ForOp>())
       return failure();
 
     Value input = op->getOperand(0);
-    auto convOp = input.getDefiningOp<linalg::GenericOp>();
-    if (!convOp || !convOp->hasAttr("library_call") ||
-        convOp->getAttrOfType<StringAttr>("library_call").getValue() !=
-            "npu_conv") {
+    auto convOp = input.getDefiningOp<npucore::ConvOp>();
+    if (!convOp) {
       return failure();
     }
 
@@ -123,9 +85,10 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
     // 3. 重新划分 Spatial (N, OC, OH, OW) 和 IC 维度
     SmallVector<int64_t> spatialTileSizes = {
-        tileSizes[0], tileSizes[1], tileSizes[2], tileSizes[3]};
+        tileSizes[0], tileSizes[1], tileSizes[2], tileSizes[3],
+        0, 0, 0, 0, 0};
     SmallVector<int64_t> icTileSizes = {
-        0, 0, 0, 0, tileSizes[4]}; // IC 维度在第 5 位
+        0, 0, 0, 0, tileSizes[4], 0, 0, 0, 0};
 
     // Phase 1: Spatial Tiling & Fusion
     auto consumerTilingInterface = cast<TilingInterface>(op.getOperation());
@@ -164,7 +127,7 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     tiledConsumer->setAttr("npu.tiled", rewriter.getUnitAttr());
 
     auto fusedConvOp =
-        tiledConsumer->getOperand(0).getDefiningOp<linalg::GenericOp>();
+        tiledConsumer->getOperand(0).getDefiningOp<npucore::ConvOp>();
     if (!fusedConvOp)
       return failure();
     fusedConvOp->setAttr("npu.tiled", rewriter.getUnitAttr());
@@ -192,14 +155,24 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     auto accAlloc = rewriter.create<bufferization::AllocTensorOp>(
         loc, accTensorType, dynamicSizes);
 
-    auto newConvOp = rewriter.create<linalg::GenericOp>(loc,
+    auto newConvOp = rewriter.create<npucore::ConvOp>(loc,
         TypeRange{accTensorType}, fusedConvOp.getInputs(), ValueRange{accAlloc},
-        fusedConvOp.getIndexingMapsArray(),
-        fusedConvOp.getIteratorTypesArray());
-
-    rewriter.inlineRegionBefore(fusedConvOp.getRegion(), newConvOp.getRegion(),
-        newConvOp.getRegion().begin());
-    newConvOp->setAttrs(fusedConvOp->getAttrs());
+        fusedConvOp.getInScaleAttr(), fusedConvOp.getInZpAttr(),
+        fusedConvOp.getWScaleAttr(), fusedConvOp.getWZpAttr(),
+        fusedConvOp.getOutScaleAttr(), fusedConvOp.getOutZpAttr(),
+        fusedConvOp.getPadsAttr(), fusedConvOp.getStridesAttr(),
+        fusedConvOp.getDilationsAttr(), fusedConvOp.getGroupAttr(),
+        fusedConvOp.getDoReluAttr(), fusedConvOp.getReluTypeAttr());
+    for (NamedAttribute attr : fusedConvOp->getAttrs()) {
+      StringRef name = attr.getName().strref();
+      if (name == "operandSegmentSizes" || name == "in_scale" ||
+          name == "in_zp" || name == "w_scale" || name == "w_zp" ||
+          name == "out_scale" || name == "out_zp" || name == "pads" ||
+          name == "strides" || name == "dilations" || name == "group" ||
+          name == "do_relu" || name == "relu_type")
+        continue;
+      newConvOp->setAttr(attr.getName(), attr.getValue());
+    }
     rewriter.replaceOp(fusedConvOp, newConvOp.getResults());
     fusedConvOp = newConvOp;
 
@@ -272,9 +245,10 @@ struct NpuConvTilingPattern : public OpRewritePattern<linalg::GenericOp> {
     // Phase 5: Final Replacement
     rewriter.replaceOp(fusedConvOp, finalIcResults);
     Value originalResult = op->getResult(0);
-    if (fuseResult->replacements.count(originalResult)) {
-      rewriter.replaceOp(op, fuseResult->replacements[originalResult]);
-    }
+    if (!fuseResult->replacements.count(originalResult))
+      return rewriter.notifyMatchFailure(
+          op, "missing replacement for tiled npucore.mv_acc_to_spm");
+    rewriter.replaceOp(op, fuseResult->replacements[originalResult]);
 
     // 对空间循环进行边界清理 (Peeling)
     for (int i = (int)spatialLoops.size() - 1; i >= 0; --i) {

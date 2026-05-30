@@ -1,0 +1,3 @@
+display_name: Build NPUX MLIR
+short_description: Build npux-mlir from VS Code CMake settings
+default_prompt: Use this skill to configure and build the current npux-mlir workspace with the checked-in VS Code CMake settings.

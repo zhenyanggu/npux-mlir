@@ -6,12 +6,11 @@
 
 #include "src/Conversion/NpuToLLVM/NpuxConversionHelper.hpp"
 
-
-void npux::populateLinalgToNpuxPatterns(mlir::RewritePatternSet &patterns)
+void npux::populateNpucoreToNpuxPatterns(mlir::RewritePatternSet &patterns)
 {
-    populateLinalgSfuToNpuxPattern(patterns);
+    populateNpucoreSfuToNpuxPattern(patterns);
+    populateNpucoreComputeToNpuxPattern(patterns);
     populateSramDataMovementPatterns(patterns);
     populateHostAllocToNpuxPatterns(patterns);
     populateNpuLifecyclePatterns(patterns);
-    populateLinalgConvToNpuxPattern(patterns);
 }

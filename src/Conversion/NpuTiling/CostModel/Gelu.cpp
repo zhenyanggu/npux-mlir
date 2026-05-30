@@ -5,28 +5,27 @@
 //======================================================
 
 #include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include <algorithm>
 
 using namespace mlir;
 
 namespace npux {
 
-llvm::SmallVector<int64_t> NPUCostModel::getGeluTileSizes(mlir::linalg::GenericOp op) {
-  auto loopRanges = op.getStaticLoopRanges();
-  int64_t rank = loopRanges.size();
-  
+template <typename OpTy>
+static llvm::SmallVector<int64_t> getElementwiseTileSizes(
+    OpTy op, int64_t spmSizeBytes) {
+  auto outputType = cast<ShapedType>(op.getOutputs().front().getType());
+  int64_t rank = outputType.getRank();
+  SmallVector<int64_t> loopRanges(
+      outputType.getShape().begin(), outputType.getShape().end());
   llvm::SmallVector<int64_t> tileSizes(rank, 1);
-  if (rank == 0) return tileSizes; 
+  if (rank == 0)
+    return tileSizes;
 
-  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
   int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
   int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
-
   int64_t numOperands = op.getNumDpsInputs() + op.getNumDpsInits();
-  
-  // 使用 NPUCostModel 内部的硬件配置
-  int64_t maxElems = this->hw.spmSizeBytes / (numOperands * bytesPerElem);
+  int64_t maxElems = spmSizeBytes / (numOperands * bytesPerElem);
 
   if (maxElems > 0) {
     int64_t remainingElems = maxElems;
@@ -48,19 +47,35 @@ llvm::SmallVector<int64_t> NPUCostModel::getGeluTileSizes(mlir::linalg::GenericO
       }
     }
   }
+  return tileSizes;
+}
 
-  // 打印日志
-  llvm::errs() << "[CostModel] Gelu: SPM=" << this->hw.spmSizeBytes 
-               << " Problem=[";
-  for (size_t i = 0; i < rank; ++i) {
-    llvm::errs() << loopRanges[i] << (i == rank - 1 ? "" : ", ");
-  }
-  llvm::errs() << "] -> Tile=[";
-  for (size_t i = 0; i < rank; ++i) {
-    llvm::errs() << tileSizes[i] << (i == rank - 1 ? "" : ", ");
-  }
+llvm::SmallVector<int64_t> NPUCostModel::getGeluTileSizes(npucore::GeluOp op) {
+  auto tileSizes = getElementwiseTileSizes(op, this->hw.spmSizeBytes);
+  llvm::errs() << "[CostModel] Gelu(npucore): Tile=[";
+  for (size_t i = 0; i < tileSizes.size(); ++i)
+    llvm::errs() << tileSizes[i] << (i + 1 == tileSizes.size() ? "" : ", ");
   llvm::errs() << "]\n";
+  return tileSizes;
+}
 
+llvm::SmallVector<int64_t> NPUCostModel::getSoftmaxTileSizes(
+    npucore::SoftmaxOp op) {
+  auto tileSizes = getElementwiseTileSizes(op, this->hw.spmSizeBytes);
+  llvm::errs() << "[CostModel] Softmax(npucore): Tile=[";
+  for (size_t i = 0; i < tileSizes.size(); ++i)
+    llvm::errs() << tileSizes[i] << (i + 1 == tileSizes.size() ? "" : ", ");
+  llvm::errs() << "]\n";
+  return tileSizes;
+}
+
+llvm::SmallVector<int64_t> NPUCostModel::getLayerNormTileSizes(
+    npucore::LayerNormOp op) {
+  auto tileSizes = getElementwiseTileSizes(op, this->hw.spmSizeBytes);
+  llvm::errs() << "[CostModel] LayerNorm(npucore): Tile=[";
+  for (size_t i = 0; i < tileSizes.size(); ++i)
+    llvm::errs() << tileSizes[i] << (i + 1 == tileSizes.size() ? "" : ", ");
+  llvm::errs() << "]\n";
   return tileSizes;
 }
 

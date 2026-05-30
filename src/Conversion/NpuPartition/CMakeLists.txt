@@ -1,17 +1,14 @@
 add_onnx_mlir_library(NpuPatition
-    ConvertONNXToLinalgNpu.cpp
-    NpuOutline.cpp
-    LinalgConversionHelper.cpp
-    NpuMerge.cpp
-    NpuCleanPack.cpp
-    NpuRegionExtension.cpp
+    ConvertONNXToNpucore.cpp
+    NpuCoreConversionHelper.cpp
     
-    Linalg/LayerNorm.cpp
-    Linalg/Conv.cpp
-    Linalg/Unary.cpp
-    Linalg/Binary.cpp
-    Linalg/Gemm.cpp
-    Linalg/UnaryUnquant.cpp
+    NpuCore/Gelu.cpp
+    NpuCore/LayerNorm.cpp
+    NpuCore/MatAdd.cpp
+    NpuCore/MatMul.cpp
+    NpuCore/MaxPool.cpp
+    NpuCore/Softmax.cpp
+    NpuCore/Conv.cpp
 
     LINK_LIBS PUBLIC
     OMONNXOps
@@ -21,10 +18,10 @@ add_onnx_mlir_library(NpuPatition
     MLIRTransforms
     MLIRTransformUtils
     MLIRFuncDialect
-    MLIRLinalgDialect
     MLIRArithDialect
     MLIRTensorDialect
     MLIRBufferizationDialect
     MLIRSCFDialect
+    NpucoreOps
     OMONNXDialectCore
 )

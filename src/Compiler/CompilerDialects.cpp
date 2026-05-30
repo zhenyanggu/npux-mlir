@@ -8,6 +8,7 @@
 
 #include "src/Compiler/CompilerOptions.hpp"
 #include "src/Dialect/Krnl/KrnlOps.hpp"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
 #include "src/Dialect/ONNX/ONNXDialect.hpp"
 
 #include "mlir/InitAllDialects.h"
@@ -71,6 +72,7 @@ DialectRegistry registerDialects(ArrayRef<accel::Accelerator::Kind> accels) {
   registry.insert<cf::ControlFlowDialect>();
   registry.insert<tensor::TensorDialect>();
   registry.insert<bufferization::BufferizationDialect>();
+  registry.insert<npucore::NpucoreDialect>();
   registry.insert<npux::NpuxDialect>();
 
   mlir::linalg::registerTilingInterfaceExternalModels(registry);

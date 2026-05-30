@@ -6,7 +6,7 @@
 //======================================================
 
 #include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "src/Compiler/NpuConfig.hpp"
 #include <algorithm>
 
 using namespace mlir;
@@ -74,19 +74,50 @@ static SmallVector<int64_t, 3> calculateAutoGemmTile(
   return {t_m, t_n, t_k};
 }
 
-llvm::SmallVector<int64_t> NPUCostModel::getGemmTileSizes(linalg::GenericOp op) {
-  SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
-  int64_t rank = loopRanges.size(); 
-
-  if (rank != 3 && rank != 4) {
+llvm::SmallVector<int64_t> NPUCostModel::getGemmTileSizes(
+    npucore::MatMulOp op) {
+  auto outputType =
+      dyn_cast<RankedTensorType>(op.getOutputs().front().getType());
+  if (!outputType)
+    return {};
+  int64_t outRank = outputType.getRank();
+  if (outRank != 2 && outRank != 3) {
     return {};
   }
 
-  int64_t K = loopRanges[rank - 1];
-  int64_t M = loopRanges[rank - 2];
-  int64_t N = loopRanges[rank - 3];
-  
-  // 使用 NPUCostModel 内部的 hw 变量，而不是全局 Config
+  auto lhsType = dyn_cast<RankedTensorType>(op.getInputs()[0].getType());
+  if (!lhsType)
+    return {};
+
+  int64_t rank = outRank == 2 ? 3 : 4;
+  auto &config = npux::NPUConfig::getInstance();
+  std::vector<int64_t> manualSizes = config.getMatMulTileSize();
+  if (!manualSizes.empty() && manualSizes.size() >= 3) {
+    SmallVector<int64_t> finalTileSizes(rank, 0);
+    int64_t tm = manualSizes[0];
+    int64_t tn = manualSizes[1];
+    int64_t tk = manualSizes[2];
+
+    if (rank == 4) {
+      finalTileSizes[0] = 1;
+      finalTileSizes[1] = tn;
+      finalTileSizes[2] = tm;
+      finalTileSizes[3] = tk;
+    } else {
+      finalTileSizes[0] = tn;
+      finalTileSizes[1] = tm;
+      finalTileSizes[2] = tk;
+    }
+    return finalTileSizes;
+  }
+
+  int64_t M = outputType.getShape()[outRank - 2];
+  int64_t N = outputType.getShape()[outRank - 1];
+  int64_t K = lhsType.getShape()[lhsType.getRank() - 1];
+  if (ShapedType::isDynamic(M) || ShapedType::isDynamic(N) ||
+      ShapedType::isDynamic(K))
+    return {};
+
   int64_t spmSize = this->hw.spmSizeBytes;
   int64_t accSize = this->hw.accSizeBytes;
 

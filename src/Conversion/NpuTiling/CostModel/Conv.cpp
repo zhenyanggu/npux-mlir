@@ -5,7 +5,7 @@
 // the NPU's hardware constraints (like SRAM size and number of MACs).
 //======================================================
 
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "src/Compiler/NpuConfig.hpp"
 #include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
 using namespace mlir;
 
@@ -116,40 +116,51 @@ TileResult NPUCostModel::evaluateConvTile(const ConvParams &layer, int64_t t_oh,
 }
 
 llvm::SmallVector<int64_t> NPUCostModel::getConv2DTileSizes(
-    linalg::GenericOp op) {
+    npucore::ConvOp op) {
   ConvParams params;
 
-  // 1. 提取 Blocked 格式的张量形状
   auto inType = dyn_cast<RankedTensorType>(op.getInputs()[0].getType());
   auto filterType = dyn_cast<RankedTensorType>(op.getInputs()[1].getType());
   auto outType = dyn_cast<RankedTensorType>(op.getOutputs()[0].getType());
 
   if (!inType || !filterType || !outType || outType.getRank() < 5) {
-    return {}; // 格式不符合预期
+    return {};
   }
 
   auto inShape = inType.getShape();
   auto filterShape = filterType.getShape();
 
-  // 根据 tensor<1x16x30x30x32xi8> 提取 [N, IC_outer, H, W, IC_inner]
   params.H = inShape[2];
   params.W = inShape[3];
-  params.IC = inShape[1] * inShape[4]; // IC = IC_outer * IC_inner
+  params.IC = inShape[1] * inShape[4];
 
-  // 根据 tensor<16x16x3x3x32x32xi8> 提取 [OC_outer, IC_outer, KH, KW, IC_inner,
-  // OC_inner]
   params.K_h = filterShape[2];
   params.K_w = filterShape[3];
-  params.OC = filterShape[0] * filterShape[5]; // OC = OC_outer * OC_inner
+  params.OC = filterShape[0] * filterShape[5];
 
-  // 提取步长和空洞 (strides, dilations)
-  extractIntArrayAttr(op, "strides", params.S_h, params.S_w);
-  extractIntArrayAttr(op, "dilations", params.D_h, params.D_w);
+  auto strides = op.getStrides();
+  auto dilations = op.getDilations();
+  params.S_h = strides.size() >= 2 ? cast<IntegerAttr>(strides[0]).getInt() : 1;
+  params.S_w = strides.size() >= 2 ? cast<IntegerAttr>(strides[1]).getInt() : 1;
+  params.D_h =
+      dilations.size() >= 2 ? cast<IntegerAttr>(dilations[0]).getInt() : 1;
+  params.D_w =
+      dilations.size() >= 2 ? cast<IntegerAttr>(dilations[1]).getInt() : 1;
 
-  // 2. 运行 Cost-Model 搜索逻辑 (复用之前写好的 getSafeRange 和
-  // evaluateConvTile)
   auto r_oh = getSafeRange(params.getOH(), 4, 64);
   auto r_ow = getSafeRange(params.getOW(), 4, 64);
+
+  auto &config = npux::NPUConfig::getInstance();
+  std::vector<int64_t> manualSizes = config.getConvTileSize();
+  if (!manualSizes.empty() && manualSizes.size() >= 4) {
+    llvm::SmallVector<int64_t> sizes(outType.getRank(), 0);
+    sizes[0] = 1;
+    sizes[1] = (manualSizes[3] > 32) ? (manualSizes[3] / 32) : 1;
+    sizes[2] = manualSizes[0];
+    sizes[3] = manualSizes[1];
+    sizes[4] = (manualSizes[2] > 32) ? (manualSizes[2] / 32) : 1;
+    return sizes;
+  }
 
   int64_t start_ic = (params.IC >= 32) ? 32 : params.IC;
   int64_t start_oc = (params.OC >= 32) ? 32 : params.OC;
@@ -171,7 +182,6 @@ llvm::SmallVector<int64_t> NPUCostModel::getConv2DTileSizes(
     }
   }
 
-  // 3. 按照你原有的业务逻辑组装输出 (映射到 NCHWc32)
   unsigned rank = outType.getRank();
   llvm::SmallVector<int64_t> sizes(rank, 0);
 
@@ -181,19 +191,17 @@ llvm::SmallVector<int64_t> NPUCostModel::getConv2DTileSizes(
     int64_t t_ic = bestRes.t_ic;
     int64_t t_oc = bestRes.t_oc;
 
-    // 完美还原你提供的映射规则：[N, OC_outer, OH, OW, IC_outer]
-    sizes[0] = 1;                             // N 维度不分块
-    sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1; // OC (对齐 32)
-    sizes[2] = t_oh;                          // OH
-    sizes[3] = t_ow;                          // OW
-    sizes[4] = (t_ic > 32) ? (t_ic / 32) : 1; // IC (对齐 32)
+    sizes[0] = 1;
+    sizes[1] = (t_oc > 32) ? (t_oc / 32) : 1;
+    sizes[2] = t_oh;
+    sizes[3] = t_ow;
+    sizes[4] = (t_ic > 32) ? (t_ic / 32) : 1;
 
-    llvm::errs() << "[CostModel] Conv: Best Tile=[OH:" << t_oh << ", OW:" << t_ow
-               << ", IC_blk:" << t_ic << ", OC_blk:" << t_oc
-               << "], Latency: " << bestRes.latencyMs << "ms\n";
+    llvm::errs() << "[CostModel] Conv(npucore): Best Tile=[OH:" << t_oh
+                 << ", OW:" << t_ow << ", IC_blk:" << t_ic
+                 << ", OC_blk:" << t_oc << "], Latency: "
+                 << bestRes.latencyMs << "ms\n";
   }
-
-  
 
   return sizes;
 }

@@ -135,58 +135,27 @@ std::unique_ptr<mlir::Pass> createConvertONNXToTOSAPass();
 
 
 namespace npux {
-std::unique_ptr<mlir::Pass> createONNXToLinalgNpuPass();
-
-std::unique_ptr<mlir::Pass> createNpuOutlinePass();
-
-std::unique_ptr<mlir::Pass> createNpuSramPromotionPass();
-
-
-std::unique_ptr<mlir::Pass> createNpuInlinePass();
-
-std::unique_ptr<mlir::Pass> createNpuDPSConversionPass();
-
-std::unique_ptr<mlir::Pass> createNpuMergePass();
+std::unique_ptr<mlir::Pass> createONNXToNpucorePass();
 
 std::unique_ptr<mlir::Pass> createNpuTilingPass();
 
-std::unique_ptr<mlir::Pass> createNpuInnerTilingPass();
-
-std::unique_ptr<mlir::Pass> createConvertLinalgToNpuPass();
+std::unique_ptr<mlir::Pass> createConvertNpucoreToNpuPass();
 
 std::unique_ptr<mlir::Pass> createNpuMemPlanPass();
 
-std::unique_ptr<mlir::Pass> createNpuCleanPackPass();
-
-std::unique_ptr<mlir::Pass> createNpuLowerPackPass();
-
-std::unique_ptr<mlir::Pass> createNpuRegionExtensionPass();
-
 std::unique_ptr<mlir::Pass> createNpuFusePass();
-
-std::unique_ptr<mlir::Pass> createWeightHoistingPass();
-
-std::unique_ptr<mlir::Pass> createNpuICLoopSplitPass();
-
-std::unique_ptr<mlir::Pass> createSplitConvIcPass();
 
 std::unique_ptr<mlir::Pass> createLowerNpuSubviewPass();
 
 std::unique_ptr<mlir::Pass> createNpuxComputeFusionPass();
 
-std::unique_ptr<mlir::Pass> createGemmPipelinePass();
-
 std::unique_ptr<mlir::Pass> createCustomBufferLoopHoistingPass();
-
-std::unique_ptr<mlir::Pass> createNpuxSfu5DShapePatchPass();
 
 std::unique_ptr<mlir::Pass> createNpuInsertDmaPass();
 
 std::unique_ptr<mlir::Pass> createNpuOpSplittingPass();
 
 std::unique_ptr<mlir::Pass> createNpuSpatialPeelingPass();
-
-std::unique_ptr<mlir::Pass> createRestoreAllocSpacePass();
 
 std::unique_ptr<mlir::Pass> createNpuRemoveRedundantDmaPass();
 

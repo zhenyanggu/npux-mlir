@@ -86,36 +86,3 @@ void populateBufferizationCleanUpHelperPatterns(RewritePatternSet &patterns) {
   patterns.insert<DowngradeToBufferPattern, DowngradeToTensorPattern>(
       patterns.getContext());
 }
-
-// 你的 Pass 定义保持不变
-namespace {
-struct NpuDPSConversionPass
-    : public PassWrapper<NpuDPSConversionPass, OperationPass<ModuleOp>> {
-
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(NpuDPSConversionPass)
-
-  StringRef getArgument() const override { return "npu-dps-convert"; }
-  StringRef getDescription() const override {
-    return "Promote buffer results to out params for NPU kernels";
-  }
-
-  void runOnOperation() override {
-    ModuleOp module = getOperation();
-    bufferization::BufferResultsToOutParamsOpts opts;
-
-    opts.hoistStaticAllocs = true;
-    opts.filterFn = [](func::FuncOp *func) {
-      return (*func)->hasAttr("npu.target");
-    };
-
-    if (failed(bufferization::promoteBufferResultsToOutParams(module, opts))) {
-      return signalPassFailure();
-    }
-  }
-};
-} // namespace
-
-// 注册 Pass
-std::unique_ptr<Pass> npux::createNpuDPSConversionPass() {
-  return std::make_unique<NpuDPSConversionPass>();
-}

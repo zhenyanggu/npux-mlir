@@ -4,6 +4,17 @@
 
 ## 使用步骤
 
+当前 NPU 主链路已经统一为：
+
+```text
+ONNX -> npucore -> npux
+```
+
+其中：
+- `convert-npu-onnx-to-npucore` 负责把可下沉算子改写成 `npucore`。
+- `npu-tiling` 的 `CostModel` 负责计算 tile size，`NpuTiling/*.cpp` 负责具体分块变换。
+- `convert-npucore-to-npux` 负责把 `npucore` lowering 到 `npux`。
+
 1. **生成配置文件**
    首先对模型运行 python 目录下脚本：
    ```bash
@@ -18,8 +29,8 @@
 
 | 选项 (Flag) | 适用阶段 (Pass) | 说明 (Description) |
 | :--- | :--- | :--- |
-| `--npu-ops` | `convert-npu-onnx-to-linalg` | **指定 NPU 算子**。<br>支持传入 `LayerNorm`, `Gelu`, `Conv`, `Softmax`。<br>只有传入的参数才会被识别成 NPU 的 op 并进行转换；如果不使用这个选项，则默认加入项目里注册的所有 op。 |
-| `--npu-tiling-config` | `convert-npu-onnx-to-linalg`<br>`npu-memory-plan` | **加载 Tiling 配置**。<br>传入 `conv_dse.py` 生成的 json 文件，负责配置卷积分块，提供内存分配需要的内存 size。 |
+| `--npu-ops` | `convert-npu-onnx-to-npucore` | **指定 NPU 算子**。<br>支持传入 `LayerNorm`, `Gelu`, `Conv`, `Softmax`。<br>只有传入的参数才会被识别成 NPU 的 op 并进行转换；如果不使用这个选项，则默认加入项目里注册的所有 op。 |
+| `--npu-tiling-config` | `convert-npu-onnx-to-npucore`<br>`npu-memory-plan` | **加载 Tiling 配置**。<br>传入 `conv_dse.py` 生成的 json 文件，负责配置卷积分块，提供内存分配需要的内存 size。 |
 | `--gelu-tile-size` | `npu-tiling` | **手动覆盖 Tile Size**。<br>覆盖编译器算出来的 tile size，以便测试。 |
 | `--npu-spm-size`<br>`--npu-acc-size`<br>`--npu-sram-size` | `npu-memory-plan` | **手动指定内存大小**。<br>优先级高于 `--npu-tiling-config`。 |
 

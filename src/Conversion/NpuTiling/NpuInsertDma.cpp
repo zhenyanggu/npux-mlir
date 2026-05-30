@@ -1,16 +1,16 @@
 //=============================================================================
 // src/Conversion/NpuPartition/NpuInsertDma.cpp
 // This file inserts explicit mvin/mvout operations
-// around NPU-executable linalg.generic operations.
+// around NPU-executable npucore operations.
 //=============================================================================
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
 #include "src/Pass/Passes.hpp"
 
 using namespace mlir;
@@ -60,7 +60,7 @@ static Value createNpuMediumTensor(PatternRewriter &rewriter, Location loc,
 }
 
 //=============================================================================
-// Helper: Create DMA Generic Op (mvin or mvout)
+// Helper: Create native npucore DMA op (mvin or mvout).
 //=============================================================================
 static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
     StringRef dmaName, int64_t encoding, StringRef dmaType = "",
@@ -79,49 +79,439 @@ static Value createDmaOp(PatternRewriter &rewriter, Location loc, Value input,
   // 获取输出 Tensor 的类型（包含了新的 encoding 信息）
   auto outType = cast<RankedTensorType>(finalDest.getType());
 
-  // 2. 准备并行迭代类型和恒等映射
-  SmallVector<utils::IteratorType> iteratorTypes(
-      outType.getRank(), utils::IteratorType::parallel);
+  StringAttr dmaTypeAttr = rewriter.getStringAttr(dmaType);
+  auto colDimAttr = rewriter.getI32IntegerAttr(0);
+  auto isQuantAttr = rewriter.getBoolAttr(false);
+  auto quantZeroAttr = rewriter.getI32IntegerAttr(0);
+  auto quantScaleAttr = rewriter.getI64IntegerAttr(0);
+  auto quantShiftAttr = rewriter.getI64IntegerAttr(0);
 
-  // 这种写法能兼容输入和输出 Rank 一致的情况
-  AffineMap indexingMaps = rewriter.getMultiDimIdentityMap(outType.getRank());
-  // 确保有两个 map (一个给 input, 一个给 output)
-  SmallVector<AffineMap> maps(2, indexingMaps);
-
-  // 3. 创建 Generic Op
-  auto dmaOp = rewriter.create<linalg::GenericOp>(loc, outType,
-      /*inputs=*/ValueRange{input},
-      /*outputs=*/ValueRange{finalDest},
-      /*indexingMaps=*/maps,
-      /*iteratorTypes=*/iteratorTypes,
-      /*bodyBuilder=*/
-      [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
-        b.create<linalg::YieldOp>(nestedLoc, args[0]);
-      });
-
-  // 4. 设置属性
-  dmaOp->setAttr("library_call", rewriter.getStringAttr(dmaName));
-  dmaOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-  if (!dmaType.empty()) {
-    dmaOp->setAttr("npu.dma_type", rewriter.getStringAttr(dmaType));
+  Operation *dmaOp = nullptr;
+  if (dmaName == "npu_dma_mvin") {
+    dmaOp = rewriter
+                .create<npucore::DmaMvinOp>(loc, TypeRange{outType},
+                    ValueRange{input}, ValueRange{finalDest}, dmaTypeAttr,
+                    colDimAttr, isQuantAttr, quantZeroAttr, quantScaleAttr,
+                    quantShiftAttr)
+                .getOperation();
+  } else {
+    dmaOp = rewriter
+                .create<npucore::DmaMvoutOp>(loc, TypeRange{outType},
+                    ValueRange{input}, ValueRange{finalDest}, dmaTypeAttr,
+                    colDimAttr, isQuantAttr, quantZeroAttr, quantScaleAttr,
+                    quantShiftAttr)
+                .getOperation();
   }
 
-  return dmaOp.getResult(0);
+  dmaOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+  if (!dmaType.empty())
+    dmaOp->setAttr("npu.dma_type", rewriter.getStringAttr(dmaType));
+
+  return dmaOp->getResult(0);
 }
 
 //=============================================================================
-// Pattern: NpuConvInsertDmaPattern
+// Helper: Copy npucore.gelu attributes onto the DMA-rewritten op.
 //=============================================================================
-struct NpuConvInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+static void cloneNpucoreGeluAttrs(
+    PatternRewriter &rewriter, npucore::GeluOp source, npucore::GeluOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "in_scale" ||
+        name == "in_zp" || name == "out_scale" || name == "out_zp")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.softmax attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreSoftmaxAttrs(PatternRewriter &rewriter,
+    npucore::SoftmaxOp source, npucore::SoftmaxOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "in_scale" ||
+        name == "in_zp" || name == "out_scale" || name == "out_zp" ||
+        name == "axis")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.layernorm attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreLayerNormAttrs(PatternRewriter &rewriter,
+    npucore::LayerNormOp source, npucore::LayerNormOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "in_scale" ||
+        name == "in_zp" || name == "out_scale" || name == "out_zp" ||
+        name == "axis" || name == "epsilon")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.matadd attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreMatAddAttrs(PatternRewriter &rewriter,
+    npucore::MatAddOp source, npucore::MatAddOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "in1_scale" ||
+        name == "in1_zp" || name == "in2_scale" || name == "in2_zp" ||
+        name == "out_scale" || name == "out_zp")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.matmul attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreMatMulAttrs(PatternRewriter &rewriter,
+    npucore::MatMulOp source, npucore::MatMulOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "lhs_scale" ||
+        name == "lhs_zp" || name == "rhs_scale" || name == "rhs_zp" ||
+        name == "out_scale" || name == "out_zp" || name == "with_bias" ||
+        name == "do_relu" || name == "relu_type")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.maxpool attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreMaxPoolAttrs(PatternRewriter &rewriter,
+    npucore::MaxPoolOp source, npucore::MaxPoolOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "in_scale" ||
+        name == "in_zp" || name == "out_scale" || name == "out_zp" ||
+        name == "kernel_shape" || name == "strides" ||
+        name == "dilations" || name == "pads")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.transpose attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreTransposeAttrs(PatternRewriter &rewriter,
+    npucore::TransposeOp source, npucore::TransposeOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    if (attr.getName().strref() == "operandSegmentSizes")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.layout_nchw_to_nchwc32 attributes onto the
+// DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreLayoutNchwToNchwc32Attrs(PatternRewriter &rewriter,
+    npucore::LayoutNchwToNchwc32Op source,
+    npucore::LayoutNchwToNchwc32Op target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "tile_factor")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.layout_nchwc32_to_nchw attributes onto the DMA-rewritten
+// op.
+//=============================================================================
+static void cloneNpucoreLayoutNchwc32ToNchwAttrs(PatternRewriter &rewriter,
+    npucore::LayoutNchwc32ToNchwOp source,
+    npucore::LayoutNchwc32ToNchwOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "tile_factor")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.conv attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreConvAttrs(
+    PatternRewriter &rewriter, npucore::ConvOp source, npucore::ConvOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    StringRef name = attr.getName().strref();
+    if (name == "operandSegmentSizes" || name == "in_scale" ||
+        name == "in_zp" || name == "w_scale" || name == "w_zp" ||
+        name == "out_scale" || name == "out_zp" || name == "pads" ||
+        name == "strides" || name == "dilations" || name == "group" ||
+        name == "do_relu" || name == "relu_type")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Helper: Copy npucore.mv_acc_to_spm attributes onto the DMA-rewritten op.
+//=============================================================================
+static void cloneNpucoreMvAccToSpmAttrs(PatternRewriter &rewriter,
+    npucore::MvAccToSpmOp source, npucore::MvAccToSpmOp target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    if (attr.getName().strref() == "operandSegmentSizes")
+      continue;
+    target->setAttr(attr.getName(), attr.getValue());
+  }
+  target->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+}
+
+//=============================================================================
+// Pattern: NpucoreGeluInsertDmaPattern
+// Insert mvin before npucore.gelu and mvout after it.
+//=============================================================================
+struct NpucoreGeluInsertDmaPattern : public OpRewritePattern<npucore::GeluOp> {
+  using OpRewritePattern<npucore::GeluOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+      npucore::GeluOp op, PatternRewriter &rewriter) const override {
     if (op->hasAttr("npu.dma_inserted"))
       return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
 
-    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCallAttr || !libCallAttr.getValue().contains("conv"))
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Value input = op.getInputs().front();
+    Value originalOutput = op.getOutputs().front();
+
+    Value sramInput =
+        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+    Value sramOutput = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+
+    auto newOp = rewriter.create<npucore::GeluOp>(loc,
+        TypeRange{sramOutput.getType()}, ValueRange{sramInput},
+        ValueRange{sramOutput}, op.getInScaleAttr(), op.getInZpAttr(),
+        op.getOutScaleAttr(), op.getOutZpAttr());
+    cloneNpucoreGeluAttrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", originalOutput);
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreSoftmaxInsertDmaPattern
+// Insert mvin before npucore.softmax and mvout after it.
+//=============================================================================
+struct NpucoreSoftmaxInsertDmaPattern
+    : public OpRewritePattern<npucore::SoftmaxOp> {
+  using OpRewritePattern<npucore::SoftmaxOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::SoftmaxOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Value input = op.getInputs().front();
+    Value originalOutput = op.getOutputs().front();
+
+    Value sramInput =
+        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+    Value sramOutput = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+
+    auto newOp = rewriter.create<npucore::SoftmaxOp>(loc,
+        TypeRange{sramOutput.getType()}, ValueRange{sramInput},
+        ValueRange{sramOutput}, op.getInScaleAttr(), op.getInZpAttr(),
+        op.getOutScaleAttr(), op.getOutZpAttr(), op.getAxisAttr());
+    cloneNpucoreSoftmaxAttrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", originalOutput);
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreLayerNormInsertDmaPattern
+// Insert mvin before npucore.layernorm and mvout after it.
+//=============================================================================
+struct NpucoreLayerNormInsertDmaPattern
+    : public OpRewritePattern<npucore::LayerNormOp> {
+  using OpRewritePattern<npucore::LayerNormOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::LayerNormOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Value input = op.getInputs().front();
+    Value originalOutput = op.getOutputs().front();
+
+    Value sramInput =
+        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+    Value sramOutput = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+
+    auto newOp = rewriter.create<npucore::LayerNormOp>(loc,
+        TypeRange{sramOutput.getType()}, ValueRange{sramInput},
+        ValueRange{sramOutput}, op.getInScaleAttr(), op.getInZpAttr(),
+        op.getOutScaleAttr(), op.getOutZpAttr(), op.getAxisAttr(),
+        op.getEpsilonAttr());
+    cloneNpucoreLayerNormAttrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", originalOutput);
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreMatAddInsertDmaPattern
+// Insert ACC mvin before npucore.matadd and mvout after it.
+//=============================================================================
+struct NpucoreMatAddInsertDmaPattern
+    : public OpRewritePattern<npucore::MatAddOp> {
+  using OpRewritePattern<npucore::MatAddOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::MatAddOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Type i32Type = rewriter.getI32Type();
+
+    double in1Scale = op.getIn1Scale().convertToDouble();
+    double in2Scale = op.getIn2Scale().convertToDouble();
+    double outScale = op.getOutScale().convertToDouble();
+    bool scalesSame = std::abs(in1Scale - in2Scale) < 1e-6;
+
+    SmallVector<Value> newInputs;
+    for (auto it : llvm::enumerate(op.getInputs())) {
+      int64_t operandIdx = it.index();
+      Value operand = it.value();
+      auto inputType = cast<RankedTensorType>(operand.getType());
+      auto mvinOutType = RankedTensorType::get(
+          inputType.getShape(), i32Type, rewriter.getI64IntegerAttr(3));
+
+      Value finalDest = rewriter.create<bufferization::AllocTensorOp>(
+          loc, mvinOutType, ValueRange{});
+
+      auto mvinOp = rewriter.create<npucore::DmaMvinOp>(loc,
+          TypeRange{mvinOutType}, ValueRange{operand}, ValueRange{finalDest},
+          rewriter.getStringAttr(""), rewriter.getI32IntegerAttr(0),
+          rewriter.getBoolAttr(false), rewriter.getI32IntegerAttr(0),
+          rewriter.getI64IntegerAttr(0), rewriter.getI64IntegerAttr(0));
+      mvinOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
+
+      int64_t zpVal = operandIdx == 0 ? op.getIn1Zp() : op.getIn2Zp();
+      double currentInScale = operandIdx == 0 ? in1Scale : in2Scale;
+      bool isQuant = false;
+      double mvinScaleVal = 1.0;
+
+      if (!scalesSame) {
+        mvinScaleVal = currentInScale / outScale;
+        isQuant = true;
+      } else if (zpVal != 0) {
+        isQuant = true;
+      }
+
+      if (isQuant) {
+        FixedPointParams qParams = getFixedPointParams(mvinScaleVal);
+        mvinOp->setAttr(
+            "quant_scale", rewriter.getI64IntegerAttr(qParams.multiplier));
+        mvinOp->setAttr(
+            "quant_shift", rewriter.getI64IntegerAttr(qParams.shift));
+        mvinOp->setAttr("quant_zero", rewriter.getI32IntegerAttr(zpVal));
+        mvinOp->setAttr("is_quant", rewriter.getBoolAttr(true));
+      }
+
+      newInputs.push_back(mvinOp.getResultTensors().front());
+    }
+
+    auto originalOutputType =
+        cast<RankedTensorType>(op.getOutputs().front().getType());
+    auto sramOutputType = RankedTensorType::get(originalOutputType.getShape(),
+        originalOutputType.getElementType(), rewriter.getI64IntegerAttr(2));
+    Value sramOutput = rewriter.create<bufferization::AllocTensorOp>(
+        loc, sramOutputType, ValueRange{});
+
+    auto newOp = rewriter.create<npucore::MatAddOp>(loc,
+        TypeRange{sramOutputType}, newInputs, ValueRange{sramOutput},
+        op.getIn1ScaleAttr(), op.getIn1ZpAttr(), op.getIn2ScaleAttr(),
+        op.getIn2ZpAttr(), op.getOutScaleAttr(), op.getOutZpAttr());
+
+    if (!scalesSame) {
+      newOp->setAttr("in1_scale", rewriter.getF32FloatAttr(1.0f));
+      newOp->setAttr("in2_scale", rewriter.getF32FloatAttr(1.0f));
+      newOp->setAttr("out_scale", rewriter.getF32FloatAttr(1.0f));
+    }
+    cloneNpucoreMatAddAttrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", op.getOutputs().front());
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreMatMulInsertDmaPattern
+// Insert mvin before npucore.matmul and mvout after npucore.mv_acc_to_spm.
+//=============================================================================
+struct NpucoreMatMulInsertDmaPattern
+    : public OpRewritePattern<npucore::MatMulOp> {
+  using OpRewritePattern<npucore::MatMulOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::MatMulOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
       return failure();
 
     auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
@@ -130,372 +520,293 @@ struct NpuConvInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
 
     Location loc = op.getLoc();
     StringRef stage = "single";
-    if (auto stageAttr = op->getAttrOfType<StringAttr>("npu.loop_stage")) {
+    if (auto stageAttr = op->getAttrOfType<StringAttr>("npu.loop_stage"))
       stage = stageAttr.getValue();
-    }
-
-    SmallVector<Value> newInputs;
-    int operandIdx = 0;
-    for (Value operand : op.getInputs()) {
-      Value processedInput = operand;
-      if (operandIdx == 0) {
-        processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "input");
-      } else if (operandIdx == 1) {
-        processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "weight");
-      }
-      newInputs.push_back(processedInput);
-      operandIdx++;
-    }
-
-    SmallVector<Value> newOutputs;
-    newOutputs.push_back(op.getOutputs()[0]);
-
-    auto newOp = cast<linalg::GenericOp>(rewriter.clone(*op.getOperation()));
-    newOp.getInputsMutable().assign(newInputs);
-    newOp.getOutputsMutable().assign(newOutputs);
-    newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
-
-    Value newConvResult = newOp.getResult(0);
-    rewriter.replaceOp(op, newConvResult);
-
-    if (stage == "tail" || stage == "single") {
-      for (Operation *user : newConvResult.getUsers()) {
-        auto genericUser = dyn_cast<linalg::GenericOp>(user);
-        if (!genericUser) continue;
-
-        auto libCallAttr = genericUser->getAttrOfType<StringAttr>("library_call");
-        if (libCallAttr && libCallAttr.getValue() == "mv_acc_to_spm") {
-          rewriter.setInsertionPoint(genericUser);
-          Location uLoc = genericUser.getLoc();
-          Value oldOutput = genericUser.getOutputs()[0];
-          Value mediumTensor = createNpuMediumTensor(rewriter, uLoc, oldOutput, 2);
-
-          auto newMvAcc = cast<linalg::GenericOp>(
-              rewriter.clone(*genericUser.getOperation()));
-          newMvAcc.getInputsMutable().assign(newConvResult);
-          newMvAcc.getOutputsMutable().assign(mediumTensor);
-          newMvAcc.getResult(0).setType(mediumTensor.getType());
-
-          Value mvoutResult = createDmaOp(rewriter, uLoc, newMvAcc.getResult(0),
-              "npu_dma_mvout", 0, "", oldOutput);
-          rewriter.replaceOp(genericUser, mvoutResult);
-          break;
-        }
-      }
-    }
-    return success();
-  }
-};
-
-//=============================================================================
-// Pattern: NpuGemmInsertDmaPattern
-//=============================================================================
-struct NpuGemmInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
-    if (op->hasAttr("npu.dma_inserted")) return failure();
-
-    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCallAttr) return failure();
-    StringRef opName = libCallAttr.getValue();
-    if (opName != "npu_gemm" && opName != "npu_matmul") return failure();
-
-    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
-    if (!targetAttr || targetAttr.getValue() != "npu") return failure();
-
-    Location loc = op.getLoc();
-    StringRef stage = "single";
-    if (auto stageAttr = op->getAttrOfType<StringAttr>("npu.loop_stage")) {
-      stage = stageAttr.getValue();
-    }
 
     SmallVector<Value> newInputs;
     for (auto it : llvm::enumerate(op.getInputs())) {
-      size_t index = it.index();
+      int64_t operandIdx = it.index();
       Value operand = it.value();
-      if (index < 2) {
-        Value processedInput =
-            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "");
-        newInputs.push_back(processedInput);
+      if (operandIdx < 2) {
+        newInputs.push_back(
+            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "input"));
       } else {
         newInputs.push_back(operand);
       }
     }
 
-    SmallVector<Value> newOutputs;
-    newOutputs.push_back(op.getOutputs()[0]);
+    Value originalOutput = op.getOutputs().front();
+    auto newOp = rewriter.create<npucore::MatMulOp>(loc,
+        TypeRange{originalOutput.getType()}, newInputs, ValueRange{originalOutput},
+        op.getLhsScaleAttr(), op.getLhsZpAttr(), op.getRhsScaleAttr(),
+        op.getRhsZpAttr(), op.getOutScaleAttr(), op.getOutZpAttr(),
+        op.getWithBiasAttr(), op.getDoReluAttr(), op.getReluTypeAttr());
+    cloneNpucoreMatMulAttrs(rewriter, op, newOp);
 
-    auto newOp = cast<linalg::GenericOp>(rewriter.clone(*op.getOperation()));
-    newOp.getInputsMutable().assign(newInputs);
-    newOp.getOutputsMutable().assign(newOutputs);
-    newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
+    Value newMatmulResult = newOp.getResultTensors().front();
+    rewriter.replaceOp(op, newMatmulResult);
 
-    Value newGemmResult = newOp.getResult(0);
-    rewriter.replaceOp(op, newGemmResult);
+    if (stage != "tail" && stage != "single")
+      return success();
 
-    if (stage == "tail" || stage == "single") {
-      for (Operation *user : newGemmResult.getUsers()) {
-        auto genericUser = dyn_cast<linalg::GenericOp>(user);
-        if (!genericUser) continue;
-
-        auto userLibCallAttr = genericUser->getAttrOfType<StringAttr>("library_call");
-        if (userLibCallAttr && userLibCallAttr.getValue() == "mv_acc_to_spm") {
-          rewriter.setInsertionPoint(genericUser);
-          Location uLoc = genericUser.getLoc();
-          Value oldOutput = genericUser.getOutputs()[0];
-          Value mediumTensor = createNpuMediumTensor(rewriter, uLoc, oldOutput, 2);
-
-          auto newMvAcc = cast<linalg::GenericOp>(
-              rewriter.clone(*genericUser.getOperation()));
-          newMvAcc.getInputsMutable().assign(newGemmResult);
-          newMvAcc.getOutputsMutable().assign(mediumTensor);
-          newMvAcc.getResult(0).setType(mediumTensor.getType());
-
-          Value mvoutResult = createDmaOp(rewriter, uLoc, newMvAcc.getResult(0),
-              "npu_dma_mvout", 0, "", oldOutput);
-          rewriter.replaceOp(genericUser, mvoutResult);
-          break;
-        }
-      }
-    }
-    return success();
-  }
-};
-
-//=============================================================================
-// Pattern: NpuMataddInsertDmaPattern
-// 专门处理 npu_matadd:
-// 1. 读取 in1_scale, in2_scale。若不同，在 mvin 阶段除以 out_scale 做提前对齐，并将后续 matadd scale 设为 1.0。
-// 2. 若相同，mvin 仅处理 Zero Point，缩放留给 matadd 单元执行以获得更高精度。
-//=============================================================================
-struct NpuMataddInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
-    if (op->hasAttr("npu.dma_inserted")) return failure();
-
-    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
-    if (!targetAttr || targetAttr.getValue() != "npu") return failure();
-
-    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCallAttr || libCallAttr.getValue() != "npu_matadd") return failure();
-
-    Location loc = op.getLoc();
-    Type i32Type = rewriter.getI32Type();
-
-    // 提前读取 Scale 属性，判断是否需要提前对齐
-    auto getFloatAttrOr = [&](StringRef name, double def) {
-      if (auto attr = op->getAttrOfType<FloatAttr>(name))
-        return attr.getValueAsDouble();
-      return def;
-    };
-    
-    double in1Scale = getFloatAttrOr("in1_scale", 1.0);
-    double in2Scale = getFloatAttrOr("in2_scale", 1.0);
-    double outScale = getFloatAttrOr("out_scale", 1.0);
-
-    // 判断两个输入 scale 是否相同（允许微小的浮点误差）
-    bool scalesSame = std::abs(in1Scale - in2Scale) < 1e-6;
-
-    // --- 步骤 1: 处理输入，插入提升至 i32 且 encoding=3 的 MVIN ---
-    SmallVector<Value> newInputs;
-    int operandIdx = 0;
-    for (Value operand : op.getInputs()) {
-      auto inputType = cast<RankedTensorType>(operand.getType());
-      auto mvinOutType = RankedTensorType::get(
-          inputType.getShape(), i32Type, rewriter.getI64IntegerAttr(3));
-          
-      Value finalDest = rewriter.create<bufferization::AllocTensorOp>(
-          loc, mvinOutType, ValueRange{});
-
-      SmallVector<utils::IteratorType> iteratorTypes(
-          inputType.getRank(), utils::IteratorType::parallel);
-      SmallVector<AffineMap> maps(2, rewriter.getMultiDimIdentityMap(inputType.getRank()));
-
-      auto mvinOp = rewriter.create<linalg::GenericOp>(loc, mvinOutType,
-          /*inputs=*/ValueRange{operand},
-          /*outputs=*/ValueRange{finalDest},
-          /*indexingMaps=*/maps,
-          /*iteratorTypes=*/iteratorTypes,
-          /*bodyBuilder=*/
-          [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
-            Value val = args[0];
-            if (val.getType() != i32Type && isa<IntegerType>(val.getType())) {
-              val = b.create<arith::ExtSIOp>(nestedLoc, i32Type, val);
-            }
-            b.create<linalg::YieldOp>(nestedLoc, val);
-          });
-
-      mvinOp->setAttr("library_call", rewriter.getStringAttr("npu_dma_mvin"));
-      mvinOp->setAttr("npu.target", rewriter.getStringAttr("npu"));
-      
-      // ==============================================================
-      // 核心量化逻辑：Zero Point 提取 + 动态 Scale 分配
-      // ==============================================================
-      StringRef zpAttrName = (operandIdx == 0) ? "in1_zp" : "in2_zp";
-      double currentInScale = (operandIdx == 0) ? in1Scale : in2Scale;
-
-      int64_t zpVal = 0;
-      if (auto zpAttr = op->getAttrOfType<IntegerAttr>(zpAttrName)) {
-        zpVal = zpAttr.getInt();
-      }
-      
-      bool isQuant = false;
-      double mvinScaleVal = 1.0;
-
-      if (!scalesSame) {
-        // 场景 A: scale 不同，必须在 Mvin 启用量化通路强行对齐
-        mvinScaleVal = currentInScale / outScale;
-        isQuant = true;
-      } else if (zpVal != 0) {
-        // 场景 B: scale 相同，但输入有 Zero Point 偏移。
-        // 必须通过 Mvin 的硬件扣除 ZP，此时顺带传一个等效 1.0 的 scale (16384, -14)
-        isQuant = true;
-      }
-
-      // 如果既没有 ZP 偏移，scale 也一样，这里就会完全跳过，生成干净的 mvin IR
-      if (isQuant) {
-        mvinOp->setAttr("npu.quant_zero", rewriter.getI32IntegerAttr(zpVal));
-        FixedPointParams qParams = getFixedPointParams(mvinScaleVal);
-        mvinOp->setAttr("npu.quant_scale", rewriter.getI64IntegerAttr(qParams.multiplier));
-        mvinOp->setAttr("npu.quant_shift", rewriter.getI64IntegerAttr(qParams.shift));
-        mvinOp->setAttr("npu.is_quant", rewriter.getBoolAttr(true));
-      }
-      // ==============================================================
-
-      newInputs.push_back(mvinOp.getResult(0));
-      operandIdx++;
-    }
-
-    // --- 步骤 2: 准备 Medium Tensor ---
-    SmallVector<Value> mediumTensors;
-    for (Value originalOutput : op.getOutputs()) {
-      Value mediumTensor = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
-      mediumTensors.push_back(mediumTensor);
-    }
-
-    // --- 步骤 3: 克隆 Matadd 算子并对接新输入/输出 ---
-    int64_t rank = cast<RankedTensorType>(newInputs[0].getType()).getRank();
-    SmallVector<AffineMap> maps(3, rewriter.getMultiDimIdentityMap(rank));
-    SmallVector<utils::IteratorType> iteratorTypes(rank, utils::IteratorType::parallel);
-
-    auto newOp = rewriter.create<linalg::GenericOp>(loc,
-        TypeRange{mediumTensors[0].getType()},
-        newInputs, mediumTensors, maps, iteratorTypes,
-        /*bodyBuilder=*/
-        [&](OpBuilder &b, Location nestedLoc, ValueRange args) {
-            Value lhs = args[0];
-            Value rhs = args[1];
-            Value addRes = b.create<arith::AddIOp>(nestedLoc, lhs, rhs);
-            Type outType = args[2].getType();
-            Value finalRes = addRes;
-            if (addRes.getType() != outType && isa<IntegerType>(outType)) {
-                finalRes = b.create<arith::TruncIOp>(nestedLoc, outType, addRes);
-            }
-            b.create<linalg::YieldOp>(nestedLoc, finalRes);
-        });
-
-    // 复制 Attribute 时，如果已经提前对齐了，就覆写 Matadd 自身的 scale 为 1.0
-    for (NamedAttribute attr : op->getAttrs()) {
-      StringRef name = attr.getName().strref();
-      if (!scalesSame && (name == "in1_scale" || name == "in2_scale" || name == "out_scale")) {
-        newOp->setAttr(name, rewriter.getF32FloatAttr(1.0f));
-      } else {
-        newOp->setAttr(name, attr.getValue());
-      }
-    }
-    newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
-
-    // --- 步骤 4: 插入 MVOUT ---
-    SmallVector<Value> finalResults;
-    for (auto [idx, mediumTensor] : llvm::enumerate(mediumTensors)) {
-      Value originalOutput = op.getOutputs()[idx];
-      Value computedResult = newOp.getResult(idx); 
-      Value mvoutResult = createDmaOp(rewriter, loc, computedResult,
-          "npu_dma_mvout", 0, "output", originalOutput);
-      finalResults.push_back(mvoutResult);
-    }
-
-    rewriter.replaceOp(op, finalResults);
-
-    return success();
-  }
-};
-
-//=============================================================================
-// Pattern: NpuGeneralInsertDmaPattern
-// For unary ops (1 input, 1 output), insert mvin before and mvout after.
-//=============================================================================
-struct NpuGeneralInsertDmaPattern : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
-    if (op->hasAttr("npu.dma_inserted")) return failure();
-
-    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
-    if (!targetAttr || targetAttr.getValue() != "npu") return failure();
-
-    auto libCallAttr = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCallAttr) return failure();
-    
-    StringRef opName = libCallAttr.getValue();
-    if (opName == "npu_dma_mvin" || opName == "npu_dma_mvout" || opName == "mv_acc_to_spm")
-      return failure();
-
-    // 排除被专用 Pattern 处理的算子，包含 npu_matadd
-    if (opName.contains("conv") || opName.contains("gemm") || 
-        opName.contains("matmul") || opName == "npu_matadd")
-      return failure();
-
-    Location loc = op.getLoc();
-
-    SmallVector<Value> newInputs;
-    for (auto [idx, input] : llvm::enumerate(op.getInputs())) {
-      if (opName == "npu_maxpool" && idx == 1) {
-        auto tensorType = cast<RankedTensorType>(input.getType());
-        auto newType = changeEncoding(tensorType, 2, rewriter);
-        Value dummySram = rewriter.create<bufferization::AllocTensorOp>(
-            loc, newType, ValueRange{});
-        newInputs.push_back(dummySram);
+    for (Operation *user :
+        llvm::make_early_inc_range(newMatmulResult.getUsers())) {
+      auto moveOp = dyn_cast<npucore::MvAccToSpmOp>(user);
+      if (!moveOp || !moveOp.hasTensorSemantics())
         continue;
-      }
-      Value mvinResult =
-          createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
-      newInputs.push_back(mvinResult);
-    }
 
-    SmallVector<Value> mediumTensors;
-    for (Value originalOutput : op.getOutputs()) {
+      rewriter.setInsertionPoint(moveOp);
+      Value moveOutput = moveOp.getOutputs().front();
       Value mediumTensor =
-          createNpuMediumTensor(rewriter, loc, originalOutput, 2);
-      mediumTensors.push_back(mediumTensor);
+          createNpuMediumTensor(rewriter, moveOp.getLoc(), moveOutput, 2);
+
+      auto newMoveOp = rewriter.create<npucore::MvAccToSpmOp>(moveOp.getLoc(),
+          TypeRange{mediumTensor.getType()}, ValueRange{newMatmulResult},
+          ValueRange{mediumTensor});
+      cloneNpucoreMvAccToSpmAttrs(rewriter, moveOp, newMoveOp);
+
+      Value finalResult = createDmaOp(rewriter, moveOp.getLoc(),
+          newMoveOp.getResultTensors().front(), "npu_dma_mvout", 0, "",
+          moveOutput);
+      rewriter.replaceOp(moveOp, finalResult);
+      break;
     }
 
-    auto newOp = cast<linalg::GenericOp>(rewriter.clone(*op.getOperation()));
-    newOp.getInputsMutable().assign(newInputs);
-    newOp.getOutputsMutable().assign(mediumTensors);
+    return success();
+  }
+};
 
-    for (auto [idx, medium] : llvm::enumerate(mediumTensors)) {
-      newOp.getResult(idx).setType(medium.getType());
+//=============================================================================
+// Pattern: NpucoreMaxPoolInsertDmaPattern
+// Insert mvin before npucore.maxpool and mvout after it.
+//=============================================================================
+struct NpucoreMaxPoolInsertDmaPattern
+    : public OpRewritePattern<npucore::MaxPoolOp> {
+  using OpRewritePattern<npucore::MaxPoolOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::MaxPoolOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Value input = op.getInputs().front();
+    Value originalOutput = op.getOutputs().front();
+
+    Value sramInput =
+        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+    Value sramOutput = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+
+    auto newOp = rewriter.create<npucore::MaxPoolOp>(loc,
+        TypeRange{sramOutput.getType()}, ValueRange{sramInput},
+        ValueRange{sramOutput}, op.getInScaleAttr(), op.getInZpAttr(),
+        op.getOutScaleAttr(), op.getOutZpAttr(), op.getKernelShapeAttr(),
+        op.getStridesAttr(), op.getDilationsAttr(), op.getPadsAttr());
+    cloneNpucoreMaxPoolAttrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", originalOutput);
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreTransposeInsertDmaPattern
+// Insert mvin before npucore.transpose and mvout after it.
+//=============================================================================
+struct NpucoreTransposeInsertDmaPattern
+    : public OpRewritePattern<npucore::TransposeOp> {
+  using OpRewritePattern<npucore::TransposeOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::TransposeOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Value input = op.getInputs().front();
+    Value originalOutput = op.getOutputs().front();
+
+    Value sramInput =
+        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+    Value sramOutput = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+
+    auto newOp = rewriter.create<npucore::TransposeOp>(loc,
+        TypeRange{sramOutput.getType()}, ValueRange{sramInput},
+        ValueRange{sramOutput});
+    cloneNpucoreTransposeAttrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", originalOutput);
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreLayoutNchwToNchwc32InsertDmaPattern
+// Insert mvin before npucore.layout_nchw_to_nchwc32 and mvout after it.
+//=============================================================================
+struct NpucoreLayoutNchwToNchwc32InsertDmaPattern
+    : public OpRewritePattern<npucore::LayoutNchwToNchwc32Op> {
+  using OpRewritePattern<npucore::LayoutNchwToNchwc32Op>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(npucore::LayoutNchwToNchwc32Op op,
+      PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Value input = op.getInputs().front();
+    Value originalOutput = op.getOutputs().front();
+
+    Value sramInput =
+        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+    Value sramOutput = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+
+    auto newOp = rewriter.create<npucore::LayoutNchwToNchwc32Op>(loc,
+        TypeRange{sramOutput.getType()}, ValueRange{sramInput},
+        ValueRange{sramOutput}, op.getTileFactorAttr());
+    cloneNpucoreLayoutNchwToNchwc32Attrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", originalOutput);
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreLayoutNchwc32ToNchwInsertDmaPattern
+// Insert mvin before npucore.layout_nchwc32_to_nchw and mvout after it.
+//=============================================================================
+struct NpucoreLayoutNchwc32ToNchwInsertDmaPattern
+    : public OpRewritePattern<npucore::LayoutNchwc32ToNchwOp> {
+  using OpRewritePattern<npucore::LayoutNchwc32ToNchwOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(npucore::LayoutNchwc32ToNchwOp op,
+      PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    Value input = op.getInputs().front();
+    Value originalOutput = op.getOutputs().front();
+
+    Value sramInput =
+        createDmaOp(rewriter, loc, input, "npu_dma_mvin", 2, "input");
+    Value sramOutput = createNpuMediumTensor(rewriter, loc, originalOutput, 2);
+
+    auto newOp = rewriter.create<npucore::LayoutNchwc32ToNchwOp>(loc,
+        TypeRange{sramOutput.getType()}, ValueRange{sramInput},
+        ValueRange{sramOutput}, op.getTileFactorAttr());
+    cloneNpucoreLayoutNchwc32ToNchwAttrs(rewriter, op, newOp);
+
+    Value finalResult = createDmaOp(rewriter, loc, newOp.getResultTensors()[0],
+        "npu_dma_mvout", 0, "output", originalOutput);
+    rewriter.replaceOp(op, finalResult);
+    return success();
+  }
+};
+
+//=============================================================================
+// Pattern: NpucoreConvInsertDmaPattern
+// Insert mvin before npucore.conv and mvout after npucore.mv_acc_to_spm.
+//=============================================================================
+struct NpucoreConvInsertDmaPattern : public OpRewritePattern<npucore::ConvOp> {
+  using OpRewritePattern<npucore::ConvOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::ConvOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.dma_inserted"))
+      return failure();
+    if (!op.hasTensorSemantics())
+      return failure();
+
+    auto targetAttr = op->getAttrOfType<StringAttr>("npu.target");
+    if (!targetAttr || targetAttr.getValue() != "npu")
+      return failure();
+
+    Location loc = op.getLoc();
+    StringRef stage = "single";
+    if (auto stageAttr = op->getAttrOfType<StringAttr>("npu.loop_stage"))
+      stage = stageAttr.getValue();
+
+    SmallVector<Value> newInputs;
+    for (auto it : llvm::enumerate(op.getInputs())) {
+      int64_t operandIdx = it.index();
+      Value operand = it.value();
+      if (operandIdx == 0) {
+        newInputs.push_back(
+            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "input"));
+      } else if (operandIdx == 1) {
+        newInputs.push_back(
+            createDmaOp(rewriter, loc, operand, "npu_dma_mvin", 2, "weight"));
+      } else {
+        newInputs.push_back(operand);
+      }
     }
-    newOp->setAttr("npu.dma_inserted", rewriter.getUnitAttr());
 
-    SmallVector<Value> finalResults;
-    for (auto [idx, mediumTensor] : llvm::enumerate(mediumTensors)) {
-      Value originalOutput = op.getOutputs()[idx];
-      Value computedResult = newOp.getResult(idx);
-      Value mvoutResult = createDmaOp(rewriter, loc, computedResult,
-          "npu_dma_mvout", 0, "output", originalOutput);
-      finalResults.push_back(mvoutResult);
+    Value originalOutput = op.getOutputs().front();
+    auto newOp = rewriter.create<npucore::ConvOp>(loc,
+        TypeRange{originalOutput.getType()}, newInputs, ValueRange{originalOutput},
+        op.getInScaleAttr(), op.getInZpAttr(), op.getWScaleAttr(),
+        op.getWZpAttr(), op.getOutScaleAttr(), op.getOutZpAttr(),
+        op.getPadsAttr(), op.getStridesAttr(), op.getDilationsAttr(),
+        op.getGroupAttr(), op.getDoReluAttr(), op.getReluTypeAttr());
+    cloneNpucoreConvAttrs(rewriter, op, newOp);
+
+    Value newConvResult = newOp.getResultTensors().front();
+    rewriter.replaceOp(op, newConvResult);
+
+    if (stage != "tail" && stage != "single")
+      return success();
+
+    for (Operation *user : llvm::make_early_inc_range(newConvResult.getUsers())) {
+      auto moveOp = dyn_cast<npucore::MvAccToSpmOp>(user);
+      if (!moveOp || !moveOp.hasTensorSemantics())
+        continue;
+
+      rewriter.setInsertionPoint(moveOp);
+      Value moveOutput = moveOp.getOutputs().front();
+      Value mediumTensor = createNpuMediumTensor(rewriter, moveOp.getLoc(), moveOutput, 2);
+
+      auto newMoveOp = rewriter.create<npucore::MvAccToSpmOp>(moveOp.getLoc(),
+          TypeRange{mediumTensor.getType()}, ValueRange{newConvResult},
+          ValueRange{mediumTensor});
+      cloneNpucoreMvAccToSpmAttrs(rewriter, moveOp, newMoveOp);
+
+      Value finalResult = createDmaOp(rewriter, moveOp.getLoc(),
+          newMoveOp.getResultTensors().front(), "npu_dma_mvout", 0, "",
+          moveOutput);
+      rewriter.replaceOp(moveOp, finalResult);
+      break;
     }
-
-    rewriter.replaceOp(op, finalResults);
 
     return success();
   }
@@ -509,18 +820,22 @@ struct NpuInsertDmaPass
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(NpuInsertDmaPass)
   llvm::StringRef getArgument() const override { return "npu-insert-dma"; }
   llvm::StringRef getDescription() const override {
-    return "Insert explicit mvin/mvout linalg.generic ops around NPU library "
-           "calls.";
+    return "Insert explicit mvin/mvout npucore ops around NPU compute ops.";
   }
   void runOnOperation() override {
     MLIRContext *context = &getContext();
     RewritePatternSet patterns(context);
 
-    // 加入新增的 Matadd 专用 Pattern
-    patterns.add<NpuConvInsertDmaPattern>(context);
-    patterns.add<NpuGemmInsertDmaPattern>(context);
-    patterns.add<NpuMataddInsertDmaPattern>(context);
-    patterns.add<NpuGeneralInsertDmaPattern>(context);
+    patterns.add<NpucoreGeluInsertDmaPattern>(context);
+    patterns.add<NpucoreSoftmaxInsertDmaPattern>(context);
+    patterns.add<NpucoreLayerNormInsertDmaPattern>(context);
+    patterns.add<NpucoreMatAddInsertDmaPattern>(context);
+    patterns.add<NpucoreMatMulInsertDmaPattern>(context);
+    patterns.add<NpucoreMaxPoolInsertDmaPattern>(context);
+    patterns.add<NpucoreTransposeInsertDmaPattern>(context);
+    patterns.add<NpucoreLayoutNchwToNchwc32InsertDmaPattern>(context);
+    patterns.add<NpucoreLayoutNchwc32ToNchwInsertDmaPattern>(context);
+    patterns.add<NpucoreConvInsertDmaPattern>(context);
 
     GreedyRewriteConfig config;
     config.setUseTopDownTraversal(true).enableFolding(true);

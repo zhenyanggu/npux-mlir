@@ -4,13 +4,13 @@
 //=============================================================
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h" // 核心 Tiling 工具
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/IR/PatternMatch.h"
 
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 #include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
 #include "src/Pass/Passes.hpp"
 
 #define DEBUG_TYPE "npu-tiling"
@@ -18,48 +18,55 @@ using namespace mlir;
 using namespace npux;
 
 namespace {
-SmallVector<int64_t> getElemWiseTileSizes(linalg::GenericOp op, StringRef opName) {
-  
-  // 1. 如果后续需要拦截 CLI 手动配置，可以在此处添加读取逻辑并直接 return
-
-  // 2. 调用内置 Cost-Model 动态计算
+// ============================================================================
+// Helper: calculate tile sizes for npucore.gelu directly.
+// ============================================================================
+static SmallVector<int64_t> getGeluTileSizes(npucore::GeluOp op) {
   npux::HardwareConfig hwConfig;
-  
-  // 如果需要从全局变量覆写默认 hwConfig 参数，可以在此处操作
-  // auto &config = npux::NPUConfig::getInstance();
-  // hwConfig.spmSizeBytes = config.getSpmSize();
-  // hwConfig.accSizeBytes = config.getAccSize();
-
   npux::NPUCostModel costModel(hwConfig);
-  
-  // NPUCostModel::getOptimalTileSizes 会根据 op 的 library_call 属性
-  // 自动派发给 getGeluTileSizes 或 getMatAddTileSizes
   return costModel.getOptimalTileSizes(op);
 }
 
-// === 2. Tiling Pattern ===
-struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+// ============================================================================
+// Helper: calculate tile sizes for npucore.softmax directly.
+// ============================================================================
+static SmallVector<int64_t> getSoftmaxTileSizes(npucore::SoftmaxOp op) {
+  npux::HardwareConfig hwConfig;
+  npux::NPUCostModel costModel(hwConfig);
+  return costModel.getOptimalTileSizes(op);
+}
+
+// ============================================================================
+// Helper: calculate tile sizes for npucore.layernorm directly.
+// ============================================================================
+static SmallVector<int64_t> getLayerNormTileSizes(npucore::LayerNormOp op) {
+  npux::HardwareConfig hwConfig;
+  npux::NPUCostModel costModel(hwConfig);
+  return costModel.getOptimalTileSizes(op);
+}
+
+// ============================================================================
+// Helper: calculate tile sizes for npucore.matadd directly.
+// ============================================================================
+static SmallVector<int64_t> getMatAddTileSizes(npucore::MatAddOp op) {
+  npux::HardwareConfig hwConfig;
+  npux::NPUCostModel costModel(hwConfig);
+  return costModel.getOptimalTileSizes(op);
+}
+
+// ============================================================================
+// Tiling Pattern: native npucore.gelu.
+// ============================================================================
+struct NpuElemWiseTilingPattern : public OpRewritePattern<npucore::GeluOp> {
+  using OpRewritePattern<npucore::GeluOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
+      npucore::GeluOp op, PatternRewriter &rewriter) const override {
 
     if (op->hasAttr("npu.tiled"))
       return failure();
 
-    auto libCall = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCall)
-      return failure();
-
-    StringRef opName = libCall.getValue();
-
-    // 【修改点】：允许 npu_gelu 和 npu_matadd 通过
-    if (opName != "npu_gelu" && opName != "npu_matadd") {
-      return failure(); // 把机会留给其他 Tiling Pattern (如 Conv)
-    }
-
-    SmallVector<int64_t> rawTileSizes = getElemWiseTileSizes(op, opName);
-    auto loopRanges = op.getStaticLoopRanges();
+    SmallVector<int64_t> rawTileSizes = getGeluTileSizes(op);
 
     auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
     SmallVector<OpFoldResult> tileSizes =
@@ -110,9 +117,187 @@ struct NpuElemWiseTilingPattern : public OpRewritePattern<linalg::GenericOp> {
   }
 };
 
+// ============================================================================
+// Tiling Pattern: native npucore.softmax.
+// ============================================================================
+struct NpuSoftmaxTilingPattern : public OpRewritePattern<npucore::SoftmaxOp> {
+  using OpRewritePattern<npucore::SoftmaxOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::SoftmaxOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.tiled"))
+      return failure();
+
+    SmallVector<int64_t> rawTileSizes = getSoftmaxTileSizes(op);
+
+    auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
+    SmallVector<OpFoldResult> tileSizes =
+        getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
+
+    scf::SCFTilingOptions options;
+    options.setTileSizes(tileSizes);
+
+    FailureOr<scf::SCFTilingResult> tilingResult =
+        scf::tileUsingSCF(rewriter, tilingInterfaceOp, options);
+
+    if (failed(tilingResult))
+      return failure();
+
+    for (auto loop : tilingResult->loops) {
+      loop->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    }
+
+    for (Operation *tiledOp : tilingResult->tiledOps) {
+      tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
+    }
+
+    auto loops = tilingResult->loops;
+    SmallVector<Value> finalResults = tilingResult->replacements;
+
+    for (int i = loops.size() - 1; i >= 0; --i) {
+      auto loopOp = dyn_cast<scf::ForOp>(loops[i].getOperation());
+      if (!loopOp)
+        continue;
+
+      scf::ForOp partialIteration;
+      LogicalResult status =
+          scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialIteration);
+
+      if (succeeded(status)) {
+        if (i == 0) {
+          finalResults = partialIteration->getResults();
+        }
+      }
+    }
+
+    rewriter.replaceOp(op, finalResults);
+    return success();
+  }
+};
+
+// ============================================================================
+// Tiling Pattern: native npucore.layernorm.
+// ============================================================================
+struct NpuLayerNormTilingPattern
+    : public OpRewritePattern<npucore::LayerNormOp> {
+  using OpRewritePattern<npucore::LayerNormOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::LayerNormOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.tiled"))
+      return failure();
+
+    SmallVector<int64_t> rawTileSizes = getLayerNormTileSizes(op);
+
+    auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
+    SmallVector<OpFoldResult> tileSizes =
+        getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
+
+    scf::SCFTilingOptions options;
+    options.setTileSizes(tileSizes);
+
+    FailureOr<scf::SCFTilingResult> tilingResult =
+        scf::tileUsingSCF(rewriter, tilingInterfaceOp, options);
+
+    if (failed(tilingResult))
+      return failure();
+
+    for (auto loop : tilingResult->loops) {
+      loop->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    }
+
+    for (Operation *tiledOp : tilingResult->tiledOps) {
+      tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
+    }
+
+    auto loops = tilingResult->loops;
+    SmallVector<Value> finalResults = tilingResult->replacements;
+
+    for (int i = loops.size() - 1; i >= 0; --i) {
+      auto loopOp = dyn_cast<scf::ForOp>(loops[i].getOperation());
+      if (!loopOp)
+        continue;
+
+      scf::ForOp partialIteration;
+      LogicalResult status =
+          scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialIteration);
+
+      if (succeeded(status)) {
+        if (i == 0) {
+          finalResults = partialIteration->getResults();
+        }
+      }
+    }
+
+    rewriter.replaceOp(op, finalResults);
+    return success();
+  }
+};
+
+// ============================================================================
+// Tiling Pattern: native npucore.matadd.
+// ============================================================================
+struct NpuMatAddTilingPattern : public OpRewritePattern<npucore::MatAddOp> {
+  using OpRewritePattern<npucore::MatAddOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(
+      npucore::MatAddOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.tiled"))
+      return failure();
+
+    SmallVector<int64_t> rawTileSizes = getMatAddTileSizes(op);
+
+    auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
+    SmallVector<OpFoldResult> tileSizes =
+        getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
+
+    scf::SCFTilingOptions options;
+    options.setTileSizes(tileSizes);
+
+    FailureOr<scf::SCFTilingResult> tilingResult =
+        scf::tileUsingSCF(rewriter, tilingInterfaceOp, options);
+
+    if (failed(tilingResult))
+      return failure();
+
+    for (auto loop : tilingResult->loops) {
+      loop->setAttr("npu.target", rewriter.getStringAttr("npu"));
+    }
+
+    for (Operation *tiledOp : tilingResult->tiledOps) {
+      tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
+    }
+
+    auto loops = tilingResult->loops;
+    SmallVector<Value> finalResults = tilingResult->replacements;
+
+    for (int i = loops.size() - 1; i >= 0; --i) {
+      auto loopOp = dyn_cast<scf::ForOp>(loops[i].getOperation());
+      if (!loopOp)
+        continue;
+
+      scf::ForOp partialIteration;
+      LogicalResult status =
+          scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialIteration);
+
+      if (succeeded(status)) {
+        if (i == 0) {
+          finalResults = partialIteration->getResults();
+        }
+      }
+    }
+
+    rewriter.replaceOp(op, finalResults);
+    return success();
+  }
+};
+
 } // namespace
 
 void npux::populateElemWiseTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
   patterns.add<NpuElemWiseTilingPattern>(context);
+  patterns.add<NpuSoftmaxTilingPattern>(context);
+  patterns.add<NpuLayerNormTilingPattern>(context);
+  patterns.add<NpuMatAddTilingPattern>(context);
 }

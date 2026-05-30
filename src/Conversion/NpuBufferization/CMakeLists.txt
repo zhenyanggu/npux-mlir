@@ -1,5 +1,5 @@
 add_onnx_mlir_library(NpuBufferization
-    NpuLowerPack.cpp
+    NpuBufferizationHelper.cpp
     
     LINK_LIBS PUBLIC
     OMONNXOps
@@ -9,5 +9,6 @@ add_onnx_mlir_library(NpuBufferization
     MLIRTransforms
     MLIRTransformUtils
     MLIRFuncDialect
-    MLIRLinalgDialect
+    MLIRBufferizationTransforms
+    MLIRBufferizationDialect
 )

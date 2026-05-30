@@ -1,100 +1,154 @@
 //=============================================================
 // src/Conversion/NpuTiling/Layout.cpp
+// This file implements tiling patterns for npucore layout ops.
 //=============================================================
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"
 #include "mlir/Dialect/SCF/Transforms/Transforms.h"
 #include "mlir/IR/PatternMatch.h"
 
-#include "src/Pass/Passes.hpp"
-#include "src/Conversion/NpuTiling/NpuTilingHelper.hpp" // 引入 Helper
-#include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp" 
+#include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
+#include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
+#include "src/Dialect/Npucore/NpucoreOps.hpp"
+#include <algorithm>
+#include <cmath>
 
-#define DEBUG_TYPE "npu-tiling"
 using namespace mlir;
-using namespace npux; 
+using namespace npux;
 
 namespace {
-SmallVector<int64_t> getLayoutTileSizes(linalg::GenericOp op) {
-  
-  // 1. 如果后续需要拦截 CLI 手动配置，可以在此处添加读取逻辑并直接 return
 
-  // 2. 调用内置 Cost-Model 动态计算
+// ============================================================================
+// Helper: preserve loop target labels on peeled tails.
+// ============================================================================
+static void inheritNpuAttributes(scf::ForOp source, scf::ForOp target) {
+  if (!source || !target)
+    return;
+  if (auto attr = source->getAttr("npu.target"))
+    target->setAttr("npu.target", attr);
+}
+
+// ============================================================================
+// Helper: tile the last two dimensions of transpose under SRAM constraints.
+// ============================================================================
+static SmallVector<int64_t> getTransposeTileSizes(npucore::TransposeOp op) {
   npux::HardwareConfig hwConfig;
   npux::NPUCostModel costModel(hwConfig);
-  
-  // NPUCostModel::getOptimalTileSizes 会根据 op 的 library_call 属性
-  // 自动派发给 getLayoutTileSizes
   return costModel.getOptimalTileSizes(op);
 }
 
-// === Layout Tiling Pattern ===
-struct NpuLayoutTilingPattern : public OpRewritePattern<linalg::GenericOp> {
-  using OpRewritePattern<linalg::GenericOp>::OpRewritePattern;
+// ============================================================================
+// Helper: tile NCHW -> NCHWc32 using the old H/W/Cblk cost rule.
+// ============================================================================
+static SmallVector<int64_t> getLayoutPackTileSizes(
+    npucore::LayoutNchwToNchwc32Op op) {
+  npux::HardwareConfig hwConfig;
+  npux::NPUCostModel costModel(hwConfig);
+  return costModel.getOptimalTileSizes(op);
+}
+
+// ============================================================================
+// Helper: tile NCHWc32 -> NCHW by reusing the old packed H/W/Cblk rule.
+// ============================================================================
+static SmallVector<int64_t> getLayoutUnpackTileSizes(
+    npucore::LayoutNchwc32ToNchwOp op) {
+  npux::HardwareConfig hwConfig;
+  npux::NPUCostModel costModel(hwConfig);
+  return costModel.getOptimalTileSizes(op);
+}
+
+// ============================================================================
+// Helper: common layout tiling and tail peeling implementation.
+// ============================================================================
+template <typename OpTy>
+static LogicalResult tileLayoutOp(
+    OpTy op, PatternRewriter &rewriter, ArrayRef<int64_t> tileShape) {
+  if (tileShape.empty())
+    return failure();
+
+  auto tilingInterfaceOp = cast<TilingInterface>(op.getOperation());
+  scf::SCFTilingOptions options;
+  options.setTileSizes(
+      getAsOpFoldResult(rewriter.getI64ArrayAttr(tileShape)));
+
+  FailureOr<scf::SCFTilingResult> tilingResult =
+      scf::tileUsingSCF(rewriter, tilingInterfaceOp, options);
+  if (failed(tilingResult))
+    return failure();
+
+  for (LoopLikeOpInterface loop : tilingResult->loops)
+    loop->setAttr("npu.target", rewriter.getStringAttr("npu"));
+
+  for (Operation *tiledOp : tilingResult->tiledOps)
+    tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
+
+  SmallVector<Value> finalResults = tilingResult->replacements;
+  auto loops = tilingResult->loops;
+  for (int i = (int)loops.size() - 1; i >= 0; --i) {
+    auto loopOp = dyn_cast<scf::ForOp>(loops[i].getOperation());
+    if (!loopOp)
+      continue;
+
+    scf::ForOp partialIteration;
+    if (succeeded(scf::peelForLoopAndSimplifyBounds(
+            rewriter, loopOp, partialIteration))) {
+      inheritNpuAttributes(loopOp, partialIteration);
+      partialIteration->setAttr("npu.peeled_tail", rewriter.getUnitAttr());
+      if (i == 0)
+        finalResults = partialIteration->getResults();
+    }
+  }
+
+  rewriter.replaceOp(op, finalResults);
+  return success();
+}
+
+// ============================================================================
+// Pattern: tile npucore.transpose.
+// ============================================================================
+struct NpuTransposeTilingPattern : public OpRewritePattern<npucore::TransposeOp> {
+  using OpRewritePattern<npucore::TransposeOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(
-      linalg::GenericOp op, PatternRewriter &rewriter) const override {
-    
-    if (op->hasAttr("npu.tiled")) return failure();
+      npucore::TransposeOp op, PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.tiled"))
+      return failure();
+    SmallVector<int64_t> tileSizes = getTransposeTileSizes(op);
+    return tileLayoutOp(op, rewriter, tileSizes);
+  }
+};
 
-    auto libCall = op->getAttrOfType<StringAttr>("library_call");
-    if (!libCall) return failure();
+// ============================================================================
+// Pattern: tile npucore.layout_nchw_to_nchwc32.
+// ============================================================================
+struct NpuLayoutNchwToNchwc32TilingPattern
+    : public OpRewritePattern<npucore::LayoutNchwToNchwc32Op> {
+  using OpRewritePattern<npucore::LayoutNchwToNchwc32Op>::OpRewritePattern;
 
-    StringRef opName = libCall.getValue();
-    if (opName != "npu_layout_nchw_to_nchwc32" &&
-        opName != "npu_layout_nchwc32_to_nchw" &&
-        opName != "npu_transpose") {
-        return failure();
-    }
+  LogicalResult matchAndRewrite(npucore::LayoutNchwToNchwc32Op op,
+      PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.tiled"))
+      return failure();
+    SmallVector<int64_t> tileSizes = getLayoutPackTileSizes(op);
+    return tileLayoutOp(op, rewriter, tileSizes);
+  }
+};
 
-    // 1. 调用 NpuTilingHelper.cpp 中的接口获取硬件感知的 TileSize
-    SmallVector<int64_t> rawTileSizes = getLayoutTileSizes(op);
-    auto loopRanges = op.getStaticLoopRanges();
+// ============================================================================
+// Pattern: tile npucore.layout_nchwc32_to_nchw.
+// ============================================================================
+struct NpuLayoutNchwc32ToNchwTilingPattern
+    : public OpRewritePattern<npucore::LayoutNchwc32ToNchwOp> {
+  using OpRewritePattern<npucore::LayoutNchwc32ToNchwOp>::OpRewritePattern;
 
-    auto tilingInterfaceOp = llvm::cast<TilingInterface>(op.getOperation());
-    SmallVector<OpFoldResult> tileSizes = getAsOpFoldResult(rewriter.getI64ArrayAttr(rawTileSizes));
-    
-    scf::SCFTilingOptions options;
-    options.setTileSizes(tileSizes);
-
-    // 2. Tiling
-    FailureOr<scf::SCFTilingResult> tilingResult =
-        scf::tileUsingSCF(rewriter, tilingInterfaceOp, options);
-
-    if (failed(tilingResult)) return failure();
-
-    for (auto loop : tilingResult->loops) {
-      loop->setAttr("npu.target", rewriter.getStringAttr("npu"));
-    }
-
-    for (Operation *tiledOp : tilingResult->tiledOps) {
-      tiledOp->setAttr("npu.tiled", rewriter.getUnitAttr());
-    }
-
-    // 3. Peeling 处理 Tail 边界情况
-    auto loops = tilingResult->loops;
-    SmallVector<Value> finalResults = tilingResult->replacements;
-
-    for (int i = loops.size() - 1; i >= 0; --i) {
-      auto loopOp = dyn_cast<scf::ForOp>(loops[i].getOperation());
-      if (!loopOp) continue;
-
-      scf::ForOp partialIteration;
-      LogicalResult status = scf::peelForLoopAndSimplifyBounds(rewriter, loopOp, partialIteration);
-
-      if (succeeded(status)) {
-        // 标记尾部，当下游 Pass 看到此属性时，可生成 NPU 片上 Padding/Memset 指令
-        partialIteration->setAttr("npu.peeled_tail", rewriter.getUnitAttr());
-        if (i == 0) {
-            finalResults = partialIteration->getResults();
-        }
-      }
-    }
-
-    rewriter.replaceOp(op, finalResults);
-    return success();
+  LogicalResult matchAndRewrite(npucore::LayoutNchwc32ToNchwOp op,
+      PatternRewriter &rewriter) const override {
+    if (op->hasAttr("npu.tiled"))
+      return failure();
+    SmallVector<int64_t> tileSizes = getLayoutUnpackTileSizes(op);
+    return tileLayoutOp(op, rewriter, tileSizes);
   }
 };
 
@@ -102,5 +156,7 @@ struct NpuLayoutTilingPattern : public OpRewritePattern<linalg::GenericOp> {
 
 void npux::populateLayoutTilingPatterns(
     RewritePatternSet &patterns, MLIRContext *context) {
-  patterns.add<NpuLayoutTilingPattern>(context);
+  patterns.add<NpuTransposeTilingPattern>(context);
+  patterns.add<NpuLayoutNchwToNchwc32TilingPattern>(context);
+  patterns.add<NpuLayoutNchwc32ToNchwTilingPattern>(context);
 }

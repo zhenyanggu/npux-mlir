@@ -6,7 +6,6 @@
 //======================================================
 
 #include "src/Conversion/NpuTiling/CostModel/NpuCostModel.hpp"
-#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include <cmath>
 #include <algorithm>
 
@@ -15,19 +14,15 @@ using namespace mlir;
 namespace npux {
 
 static std::pair<int64_t, int64_t> calculateAutoTransposeTile(
-    linalg::GenericOp op, int64_t spmSize) {
-  
-  // 1. 获取元素大小
-  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
+    RankedTensorType outputType, int64_t spmSize) {
   int64_t bitWidth = outputType.getElementType().getIntOrFloatBitWidth();
   int64_t bytesPerElem = std::max<int64_t>(1, bitWidth / 8);
 
-  // 2. 获取迭代空间大小 (M, N)
-  auto loopRanges = op.getStaticLoopRanges();
-  if (loopRanges.size() != 2) return {32, 32}; // 安全回退
-
-  int64_t M = loopRanges[0];
-  int64_t N = loopRanges[1];
+  ArrayRef<int64_t> shape = outputType.getShape();
+  if (shape.size() < 2)
+    return {32, 32};
+  int64_t M = shape[shape.size() - 2];
+  int64_t N = shape[shape.size() - 1];
 
   // 3. 计算 SPM 能放下的最大元素对 (Input + Output 都要放进 SPM)
   // 占用内存 = (Tm * Tn * bytesPerElem) * 2
@@ -58,17 +53,12 @@ static std::pair<int64_t, int64_t> calculateAutoTransposeTile(
 }
 
 static SmallVector<int64_t> calculateAutoLayoutTileNCHWc32(
-    linalg::GenericOp op, int64_t spmSize) {
-  
-  auto loopRanges = op.getStaticLoopRanges();
-  // Iteration Space: [N, C_blk, H, W, inner_c]
-  // int64_t N = loopRanges[0]; // N 维度不再参与 SPM 容量瓜分
+    RankedTensorType outputType, int64_t spmSize) {
+  ArrayRef<int64_t> loopRanges = outputType.getShape();
   int64_t C_blk = loopRanges[1];
   int64_t H = loopRanges[2];
   int64_t W = loopRanges[3];
-  int64_t inner_c = loopRanges[4]; 
-
-  auto outputType = cast<RankedTensorType>(op.getOutputs()[0].getType());
+  int64_t inner_c = loopRanges[4];
   int64_t bytesPerElem = std::max<int64_t>(1, outputType.getElementType().getIntOrFloatBitWidth() / 8);
 
   // 每个空间像素的内存占用 (Input + Output 各占 inner_c)
@@ -101,47 +91,67 @@ static SmallVector<int64_t> calculateAutoLayoutTileNCHWc32(
   return {1, t_c, t_h, t_w, 0};
 }
 
-llvm::SmallVector<int64_t> NPUCostModel::getLayoutTileSizes(mlir::linalg::GenericOp op) {
-  auto libCallAttr = op->getAttrOfType<mlir::StringAttr>("library_call");
-  if (!libCallAttr) {
+llvm::SmallVector<int64_t> NPUCostModel::getTransposeTileSizes(
+    npucore::TransposeOp op) {
+  auto outputType =
+      dyn_cast<RankedTensorType>(op.getOutputs().front().getType());
+  if (!outputType) {
     return {};
   }
-  llvm::StringRef opName = libCallAttr.getValue();
-
   int64_t spmSize = this->hw.spmSizeBytes;
-  SmallVector<int64_t> loopRanges = op.getStaticLoopRanges();
+  SmallVector<int64_t> loopRanges(
+      outputType.getShape().begin(), outputType.getShape().end());
   int64_t rank = loopRanges.size();
   SmallVector<int64_t> tileSizes(rank, 0);
-
-  std::string msg;
-  llvm::raw_string_ostream os(msg);
-
-  if (opName == "npu_transpose" && rank == 2) {
-    auto tileHW = calculateAutoTransposeTile(op, spmSize);
-    tileSizes[0] = tileHW.first;
-    tileSizes[1] = tileHW.second;
-
-    os << "[CostModel] Layout [Transpose]: SPM=" << spmSize 
-       << " Problem=[" << loopRanges[0] << ", " << loopRanges[1] << "] "
-       << "-> Tile=[" << tileSizes[0] << ", " << tileSizes[1] << "]\n";
-    llvm::errs() << os.str();
-
-  } else if ((opName == "npu_layout_nchw_to_nchwc32" || 
-              opName == "npu_layout_nchwc32_to_nchw") && rank == 5) {
-    
-    tileSizes = calculateAutoLayoutTileNCHWc32(op, spmSize);
-    
-    // 增加 LOG 打印，方便调试是否进入了 C<32 的特殊分支
-    bool isSmallChannel = (loopRanges[4] < 32);
-    os << "[CostModel] Layout [NCHW<->" << (isSmallChannel ? "Nx1xHxWxC" : "NCHWc32") << "]: SPM=" << spmSize 
-       << " Problem=[" << loopRanges[0] << ", " << loopRanges[1] << ", " 
-       << loopRanges[2] << ", " << loopRanges[3] << ", " << loopRanges[4] << "] "
-       << "-> Tile=[N:" << tileSizes[0] << ", C_blk:" << tileSizes[1]
-       << ", H:" << tileSizes[2] << ", W:" << tileSizes[3] << ", inner_c:" << tileSizes[4] << "]\n";
-    llvm::errs() << os.str();
-  }
-
+  auto tileHW = calculateAutoTransposeTile(outputType, spmSize);
+  tileSizes[rank - 2] = tileHW.first;
+  tileSizes[rank - 1] = tileHW.second;
   return tileSizes;
+}
+
+llvm::SmallVector<int64_t> NPUCostModel::getLayoutPackTileSizes(
+    npucore::LayoutNchwToNchwc32Op op) {
+  auto outputType =
+      dyn_cast<RankedTensorType>(op.getOutputs().front().getType());
+  if (!outputType || outputType.getRank() != 5)
+    return {};
+  return calculateAutoLayoutTileNCHWc32(outputType, this->hw.spmSizeBytes);
+}
+
+llvm::SmallVector<int64_t> NPUCostModel::getLayoutUnpackTileSizes(
+    npucore::LayoutNchwc32ToNchwOp op) {
+  auto inputType = dyn_cast<RankedTensorType>(op.getInputs().front().getType());
+  if (!inputType || inputType.getRank() != 5)
+    return {};
+
+  ArrayRef<int64_t> inputShape = inputType.getShape();
+  int64_t cBlk = inputShape[1];
+  int64_t h = inputShape[2];
+  int64_t w = inputShape[3];
+  int64_t inner = inputShape[4];
+  int64_t bytesPerElem =
+      std::max<int64_t>(1, inputType.getElementType().getIntOrFloatBitWidth() / 8);
+  int64_t maxPixels = this->hw.spmSizeBytes / ((inner * 2) * bytesPerElem);
+  if (maxPixels <= 0)
+    return {};
+
+  int64_t tileCBlk = 1;
+  int64_t tileH = 1;
+  int64_t tileW = std::min<int64_t>(w, maxPixels);
+  int64_t remainingPixels = maxPixels / std::max<int64_t>(tileW, 1);
+  if (remainingPixels > 0) {
+    tileH = std::min<int64_t>(h, remainingPixels);
+    remainingPixels /= std::max<int64_t>(tileH, 1);
+  }
+  if (remainingPixels > 0)
+    tileCBlk = std::min<int64_t>(cBlk, remainingPixels);
+
+  auto outputType =
+      dyn_cast<RankedTensorType>(op.getOutputs().front().getType());
+  if (!outputType || outputType.getRank() != 4)
+    return {};
+  return {1, std::min<int64_t>(outputType.getShape()[1], tileCBlk * inner),
+      tileH, tileW};
 }
 
 } // namespace npux

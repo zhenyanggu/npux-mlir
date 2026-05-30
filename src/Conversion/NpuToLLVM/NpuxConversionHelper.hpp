@@ -9,18 +9,13 @@
 #include "mlir/IR/PatternMatch.h"
 
 namespace npux {
-
-
-
-    void populateLinalgToNpuxPatterns(mlir::RewritePatternSet &patterns);
-
-    void populateLinalgSfuToNpuxPattern(mlir::RewritePatternSet &patterns);
+    void populateNpucoreToNpuxPatterns(mlir::RewritePatternSet &patterns);
+    void populateNpucoreSfuToNpuxPattern(mlir::RewritePatternSet &patterns);
 
     void populateSramDataMovementPatterns(mlir::RewritePatternSet &patterns);
 
     void populateHostAllocToNpuxPatterns(mlir::RewritePatternSet &patterns);
 
     void populateNpuLifecyclePatterns(mlir::RewritePatternSet &patterns);
-
-    void populateLinalgConvToNpuxPattern(mlir::RewritePatternSet &patterns);
+    void populateNpucoreComputeToNpuxPattern(mlir::RewritePatternSet &patterns);
 }
