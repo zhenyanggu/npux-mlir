@@ -1,0 +1,8640 @@
+{
+  "analyzed_model": "/tmp/qwen25_prefill_inferred_fnn4ad0f.onnx",
+  "model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "rows": [
+    {
+      "a": "/model/model/rotary_emb/Cast_1_output_0",
+      "a_dtype": "FLOAT",
+      "a_shape": [
+        "unk__16",
+        32,
+        "unk__17"
+      ],
+      "b": "/model/model/rotary_emb/Cast_2_output_0",
+      "b_dtype": "FLOAT",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        1,
+        128
+      ],
+      "batch": [
+        "unk__16"
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 114,
+      "k": "unk__17",
+      "m": 32,
+      "macs_per_batch": null,
+      "n": 128,
+      "name": "/model/model/rotary_emb/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/rotary_emb/MatMul_output_0",
+      "output_dtype": "FLOAT",
+      "output_shape": [
+        "unk__16",
+        32,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6060",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 137,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.0/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6076",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 144,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.0/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6077",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 148,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.0/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.0/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 211,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.0/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__22",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.0/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__22",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 223,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.0/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__22",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__23"
+      ],
+      "b": "onnx::MatMul_6128",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 227,
+      "k": "unk__23",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.0/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6129",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 241,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.0/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6130",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 244,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.0/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.0/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6131",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 246,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.0/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.0/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6132",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 260,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.1/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6148",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 267,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.1/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6149",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 271,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.1/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.1/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 330,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.1/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__28",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.1/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__28",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 342,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.1/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__28",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__29"
+      ],
+      "b": "onnx::MatMul_6200",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 346,
+      "k": "unk__29",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.1/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6201",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 360,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.1/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6202",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 363,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.1/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.1/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6203",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 365,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.1/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.1/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6204",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 379,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.2/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6220",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 386,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.2/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6221",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 390,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.2/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.2/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 449,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.2/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__34",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.2/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__34",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 461,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.2/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__34",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__35"
+      ],
+      "b": "onnx::MatMul_6272",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 465,
+      "k": "unk__35",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.2/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6273",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 479,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.2/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6274",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 482,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.2/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.2/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6275",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 484,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.2/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.2/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6276",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 498,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.3/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6292",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 505,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.3/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6293",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 509,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.3/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.3/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 568,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.3/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__40",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.3/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__40",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 580,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.3/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__40",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__41"
+      ],
+      "b": "onnx::MatMul_6344",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 584,
+      "k": "unk__41",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.3/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6345",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 598,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.3/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6346",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 601,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.3/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.3/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6347",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 603,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.3/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.3/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6348",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 617,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.4/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6364",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 624,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.4/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6365",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 628,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.4/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.4/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 687,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.4/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__46",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.4/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__46",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 699,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.4/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__46",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__47"
+      ],
+      "b": "onnx::MatMul_6416",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 703,
+      "k": "unk__47",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.4/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6417",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 717,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.4/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6418",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 720,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.4/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.4/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6419",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 722,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.4/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.4/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6420",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 736,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.5/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6436",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 743,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.5/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6437",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 747,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.5/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.5/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 806,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.5/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__52",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.5/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__52",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 818,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.5/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__52",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__53"
+      ],
+      "b": "onnx::MatMul_6488",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 822,
+      "k": "unk__53",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.5/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6489",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 836,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.5/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6490",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 839,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.5/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.5/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6491",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 841,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.5/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.5/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6492",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 855,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.6/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6508",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 862,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.6/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6509",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 866,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.6/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.6/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 925,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.6/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__58",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.6/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__58",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 937,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.6/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__58",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__59"
+      ],
+      "b": "onnx::MatMul_6560",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 941,
+      "k": "unk__59",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.6/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6561",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 955,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.6/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6562",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 958,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.6/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.6/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6563",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 960,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.6/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.6/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6564",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 974,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.7/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6580",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 981,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.7/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6581",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 985,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.7/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.7/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1044,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.7/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__64",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.7/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__64",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1056,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.7/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__64",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__65"
+      ],
+      "b": "onnx::MatMul_6632",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1060,
+      "k": "unk__65",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.7/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6633",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1074,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.7/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6634",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1077,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.7/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.7/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6635",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1079,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.7/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.7/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6636",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1093,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.8/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6652",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1100,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.8/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6653",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1104,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.8/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.8/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1163,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.8/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__70",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.8/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__70",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1175,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.8/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__70",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__71"
+      ],
+      "b": "onnx::MatMul_6704",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1179,
+      "k": "unk__71",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.8/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6705",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1193,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.8/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6706",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1196,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.8/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.8/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6707",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1198,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.8/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.8/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6708",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1212,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.9/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6724",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1219,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.9/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6725",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1223,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.9/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.9/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1282,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.9/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__76",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.9/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__76",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1294,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.9/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__76",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__77"
+      ],
+      "b": "onnx::MatMul_6776",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1298,
+      "k": "unk__77",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.9/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6777",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1312,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.9/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6778",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1315,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.9/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.9/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6779",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1317,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.9/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.9/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6780",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1331,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.10/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6796",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1338,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.10/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6797",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1342,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.10/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.10/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1401,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.10/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__82",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.10/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__82",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1413,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.10/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__82",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__83"
+      ],
+      "b": "onnx::MatMul_6848",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1417,
+      "k": "unk__83",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.10/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6849",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1431,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.10/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6850",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1434,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.10/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.10/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6851",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1436,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.10/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.10/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6852",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1450,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.11/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6868",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1457,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.11/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6869",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1461,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.11/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.11/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1520,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.11/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__88",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.11/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__88",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1532,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.11/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__88",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__89"
+      ],
+      "b": "onnx::MatMul_6920",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1536,
+      "k": "unk__89",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.11/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6921",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1550,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.11/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6922",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1553,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.11/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.11/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6923",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1555,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.11/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.11/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6924",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1569,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.12/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6940",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1576,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.12/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6941",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1580,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.12/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.12/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1639,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.12/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__94",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.12/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__94",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1651,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.12/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__94",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__95"
+      ],
+      "b": "onnx::MatMul_6992",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1655,
+      "k": "unk__95",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.12/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6993",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1669,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.12/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6994",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1672,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.12/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.12/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_6995",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1674,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.12/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.12/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_6996",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1688,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.13/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7012",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1695,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.13/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7013",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1699,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.13/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.13/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1758,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.13/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__100",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.13/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__100",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1770,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.13/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__100",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__101"
+      ],
+      "b": "onnx::MatMul_7064",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1774,
+      "k": "unk__101",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.13/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7065",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1788,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.13/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7066",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1791,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.13/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.13/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7067",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1793,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.13/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.13/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7068",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1807,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.14/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7084",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1814,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.14/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7085",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1818,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.14/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.14/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1877,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.14/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__106",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.14/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__106",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1889,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.14/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__106",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__107"
+      ],
+      "b": "onnx::MatMul_7136",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1893,
+      "k": "unk__107",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.14/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7137",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1907,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.14/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7138",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1910,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.14/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.14/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7139",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1912,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.14/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.14/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7140",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1926,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.15/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7156",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1933,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.15/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7157",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 1937,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.15/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.15/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 1996,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.15/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__112",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.15/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__112",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2008,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.15/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__112",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__113"
+      ],
+      "b": "onnx::MatMul_7208",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2012,
+      "k": "unk__113",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.15/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7209",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2026,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.15/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7210",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2029,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.15/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.15/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7211",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2031,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.15/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.15/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7212",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2045,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.16/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7228",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2052,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.16/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7229",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2056,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.16/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.16/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2115,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.16/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__118",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.16/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__118",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2127,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.16/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__118",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__119"
+      ],
+      "b": "onnx::MatMul_7280",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2131,
+      "k": "unk__119",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.16/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7281",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2145,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.16/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7282",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2148,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.16/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.16/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7283",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2150,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.16/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.16/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7284",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2164,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.17/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7300",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2171,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.17/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7301",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2175,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.17/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.17/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2234,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.17/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__124",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.17/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__124",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2246,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.17/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__124",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__125"
+      ],
+      "b": "onnx::MatMul_7352",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2250,
+      "k": "unk__125",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.17/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7353",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2264,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.17/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7354",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2267,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.17/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.17/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7355",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2269,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.17/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.17/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7356",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2283,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.18/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7372",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2290,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.18/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7373",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2294,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.18/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.18/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2353,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.18/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__130",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.18/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__130",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2365,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.18/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__130",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__131"
+      ],
+      "b": "onnx::MatMul_7424",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2369,
+      "k": "unk__131",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.18/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7425",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2383,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.18/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7426",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2386,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.18/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.18/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7427",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2388,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.18/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.18/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7428",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2402,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.19/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7444",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2409,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.19/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7445",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2413,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.19/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.19/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2472,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.19/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__136",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.19/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__136",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2484,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.19/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__136",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__137"
+      ],
+      "b": "onnx::MatMul_7496",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2488,
+      "k": "unk__137",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.19/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7497",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2502,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.19/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7498",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2505,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.19/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.19/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7499",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2507,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.19/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.19/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7500",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2521,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.20/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7516",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2528,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.20/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7517",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2532,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.20/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.20/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2591,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.20/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__142",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.20/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__142",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2603,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.20/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__142",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__143"
+      ],
+      "b": "onnx::MatMul_7568",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2607,
+      "k": "unk__143",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.20/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7569",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2621,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.20/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7570",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2624,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.20/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.20/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7571",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2626,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.20/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.20/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7572",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2640,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.21/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7588",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2647,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.21/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7589",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2651,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.21/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.21/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2710,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.21/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__148",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.21/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__148",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2722,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.21/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__148",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__149"
+      ],
+      "b": "onnx::MatMul_7640",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2726,
+      "k": "unk__149",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.21/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7641",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2740,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.21/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7642",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2743,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.21/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.21/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7643",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2745,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.21/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.21/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7644",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2759,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.22/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7660",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2766,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.22/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7661",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2770,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.22/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.22/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2829,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.22/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__154",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.22/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__154",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2841,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.22/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__154",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__155"
+      ],
+      "b": "onnx::MatMul_7712",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2845,
+      "k": "unk__155",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.22/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7713",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2859,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.22/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7714",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2862,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.22/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.22/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7715",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2864,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.22/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.22/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7716",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2878,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 102760448,
+      "n": 896,
+      "name": "/model/model/layers.23/self_attn/q_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/self_attn/q_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7732",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2885,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.23/self_attn/k_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/self_attn/k_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/input_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7733",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        128
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2889,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 14680064,
+      "n": 128,
+      "name": "/model/model/layers.23/self_attn/v_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/self_attn/v_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/self_attn/Add_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__16",
+        14,
+        128,
+        64
+      ],
+      "b": "/model/model/layers.23/self_attn/Transpose_3_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        64,
+        128
+      ],
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2948,
+      "k": 64,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 128,
+      "name": "/model/model/layers.23/self_attn/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/self_attn/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__16",
+        14,
+        128,
+        128
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/self_attn/Cast_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        "unk__160",
+        14,
+        128,
+        128
+      ],
+      "b": "/model/model/layers.23/self_attn/Reshape_4_output_0",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": false,
+      "b_shape": [
+        1,
+        14,
+        128,
+        64
+      ],
+      "batch": [
+        "unk__160",
+        14
+      ],
+      "batch_elements": null,
+      "domain": "",
+      "index": 2960,
+      "k": 128,
+      "m": 128,
+      "macs_per_batch": 1048576,
+      "n": 64,
+      "name": "/model/model/layers.23/self_attn/MatMul_1",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/self_attn/MatMul_1_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        "unk__160",
+        14,
+        128,
+        64
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/self_attn/Reshape_5_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        "unk__161"
+      ],
+      "b": "onnx::MatMul_7784",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2964,
+      "k": "unk__161",
+      "m": 128,
+      "macs_per_batch": null,
+      "n": 896,
+      "name": "/model/model/layers.23/self_attn/o_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/self_attn/o_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7785",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2978,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.23/mlp/gate_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/mlp/gate_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/post_attention_layernorm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7786",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        4864
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2981,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 4864,
+      "name": "/model/model/layers.23/mlp/up_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/mlp/up_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        4864
+      ]
+    },
+    {
+      "a": "/model/model/layers.23/mlp/Mul_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        4864
+      ],
+      "b": "onnx::MatMul_7787",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        4864,
+        896
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2983,
+      "k": 4864,
+      "m": 128,
+      "macs_per_batch": 557842432,
+      "n": 896,
+      "name": "/model/model/layers.23/mlp/down_proj/MatMul",
+      "op_type": "MatMul",
+      "output": "/model/model/layers.23/mlp/down_proj/MatMul_output_0",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        896
+      ]
+    },
+    {
+      "a": "/model/model/norm/Mul_1_output_0",
+      "a_dtype": "FLOAT16",
+      "a_shape": [
+        1,
+        128,
+        896
+      ],
+      "b": "onnx::MatMul_7788",
+      "b_dtype": "FLOAT16",
+      "b_is_initializer": true,
+      "b_shape": [
+        896,
+        151936
+      ],
+      "batch": [
+        1
+      ],
+      "batch_elements": 1,
+      "domain": "",
+      "index": 2997,
+      "k": 896,
+      "m": 128,
+      "macs_per_batch": 17425235968,
+      "n": 151936,
+      "name": "/model/lm_head/MatMul",
+      "op_type": "MatMul",
+      "output": "logits",
+      "output_dtype": "FLOAT16",
+      "output_shape": [
+        1,
+        128,
+        151936
+      ]
+    }
+  ],
+  "shape_groups": [
+    {
+      "b_initializer_count": 48,
+      "batch": [
+        1
+      ],
+      "count": 48,
+      "example_names": [
+        "/model/model/layers.0/self_attn/k_proj/MatMul",
+        "/model/model/layers.0/self_attn/v_proj/MatMul",
+        "/model/model/layers.1/self_attn/k_proj/MatMul",
+        "/model/model/layers.1/self_attn/v_proj/MatMul",
+        "/model/model/layers.2/self_attn/k_proj/MatMul"
+      ],
+      "k": 896,
+      "m": 128,
+      "n": 128
+    },
+    {
+      "b_initializer_count": 48,
+      "batch": [
+        1
+      ],
+      "count": 48,
+      "example_names": [
+        "/model/model/layers.0/mlp/gate_proj/MatMul",
+        "/model/model/layers.0/mlp/up_proj/MatMul",
+        "/model/model/layers.1/mlp/gate_proj/MatMul",
+        "/model/model/layers.1/mlp/up_proj/MatMul",
+        "/model/model/layers.2/mlp/gate_proj/MatMul"
+      ],
+      "k": 896,
+      "m": 128,
+      "n": 4864
+    },
+    {
+      "b_initializer_count": 24,
+      "batch": [
+        1
+      ],
+      "count": 24,
+      "example_names": [
+        "/model/model/layers.0/mlp/down_proj/MatMul",
+        "/model/model/layers.1/mlp/down_proj/MatMul",
+        "/model/model/layers.2/mlp/down_proj/MatMul",
+        "/model/model/layers.3/mlp/down_proj/MatMul",
+        "/model/model/layers.4/mlp/down_proj/MatMul"
+      ],
+      "k": 4864,
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__16",
+        14
+      ],
+      "count": 24,
+      "example_names": [
+        "/model/model/layers.0/self_attn/MatMul",
+        "/model/model/layers.1/self_attn/MatMul",
+        "/model/model/layers.2/self_attn/MatMul",
+        "/model/model/layers.3/self_attn/MatMul",
+        "/model/model/layers.4/self_attn/MatMul"
+      ],
+      "k": 64,
+      "m": 128,
+      "n": 128
+    },
+    {
+      "b_initializer_count": 24,
+      "batch": [
+        1
+      ],
+      "count": 24,
+      "example_names": [
+        "/model/model/layers.0/self_attn/q_proj/MatMul",
+        "/model/model/layers.1/self_attn/q_proj/MatMul",
+        "/model/model/layers.2/self_attn/q_proj/MatMul",
+        "/model/model/layers.3/self_attn/q_proj/MatMul",
+        "/model/model/layers.4/self_attn/q_proj/MatMul"
+      ],
+      "k": 896,
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__22",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.0/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__28",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.1/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__34",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.2/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__40",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.3/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__46",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.4/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__52",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.5/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__58",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.6/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__64",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.7/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__70",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.8/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__76",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.9/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__82",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.10/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__88",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.11/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__94",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.12/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__100",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.13/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__106",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.14/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__112",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.15/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__118",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.16/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__124",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.17/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__130",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.18/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__136",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.19/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__142",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.20/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__148",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.21/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__154",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.22/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__160",
+        14
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.23/self_attn/MatMul_1"
+      ],
+      "k": 128,
+      "m": 128,
+      "n": 64
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/lm_head/MatMul"
+      ],
+      "k": 896,
+      "m": 128,
+      "n": 151936
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.13/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__101",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.14/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__107",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.15/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__113",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.16/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__119",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.17/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__125",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.18/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__131",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.19/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__137",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.20/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__143",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.21/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__149",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.22/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__155",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.23/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__161",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.0/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__23",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.1/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__29",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.2/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__35",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.3/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__41",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.4/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__47",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.5/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__53",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.6/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__59",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.7/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__65",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.8/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__71",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.9/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__77",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.10/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__83",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.11/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__89",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 1,
+      "batch": [
+        1
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/layers.12/self_attn/o_proj/MatMul"
+      ],
+      "k": "unk__95",
+      "m": 128,
+      "n": 896
+    },
+    {
+      "b_initializer_count": 0,
+      "batch": [
+        "unk__16"
+      ],
+      "count": 1,
+      "example_names": [
+        "/model/model/rotary_emb/MatMul"
+      ],
+      "k": "unk__17",
+      "m": 32,
+      "n": 128
+    }
+  ],
+  "shape_inference_enabled": true
+}

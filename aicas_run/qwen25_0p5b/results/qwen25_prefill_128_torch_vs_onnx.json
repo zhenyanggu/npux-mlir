@@ -1,0 +1,176 @@
+{
+  "device": "cuda",
+  "dtype": "fp16",
+  "hf_model": "/home/lqma/models/Qwen2.5-0.5B",
+  "onnx_model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "providers_requested": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "providers_selected": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "records": [
+    {
+      "last_token_index": 0,
+      "max_abs_diff": 0.119140625,
+      "mean_abs_diff": 0.020284529775381088,
+      "onnx_elapsed_ms": 18.04502704180777,
+      "onnx_top_ids": [
+        11,
+        0,
+        3837,
+        358,
+        5019
+      ],
+      "onnx_top_tokens": [
+        ",",
+        "!",
+        "\uff0c",
+        " I",
+        " everyone"
+      ],
+      "prompt": "Hello",
+      "real_len": 1,
+      "top1_match": true,
+      "topk_overlap": 5,
+      "torch_top_ids": [
+        11,
+        0,
+        3837,
+        358,
+        5019
+      ],
+      "torch_top_tokens": [
+        ",",
+        "!",
+        "\uff0c",
+        " I",
+        " everyone"
+      ]
+    },
+    {
+      "last_token_index": 5,
+      "max_abs_diff": 0.0625,
+      "mean_abs_diff": 0.008758043870329857,
+      "onnx_elapsed_ms": 17.637627897784114,
+      "onnx_top_ids": [
+        264,
+        458,
+        279,
+        825,
+        1431
+      ],
+      "onnx_top_tokens": [
+        " a",
+        " an",
+        " the",
+        " one",
+        " now"
+      ],
+      "prompt": "Qwen2.5 is",
+      "real_len": 6,
+      "top1_match": true,
+      "topk_overlap": 5,
+      "torch_top_ids": [
+        264,
+        458,
+        279,
+        825,
+        1431
+      ],
+      "torch_top_tokens": [
+        " a",
+        " an",
+        " the",
+        " one",
+        " now"
+      ]
+    },
+    {
+      "last_token_index": 4,
+      "max_abs_diff": 0.052490234375,
+      "mean_abs_diff": 0.008663649670779705,
+      "onnx_elapsed_ms": 17.59374514222145,
+      "onnx_top_ids": [
+        12095,
+        32671,
+        30743,
+        1304,
+        510
+      ],
+      "onnx_top_tokens": [
+        " Paris",
+        " ______",
+        " ____",
+        " __",
+        ":\n"
+      ],
+      "prompt": "The capital of France is",
+      "real_len": 5,
+      "top1_match": true,
+      "topk_overlap": 5,
+      "torch_top_ids": [
+        12095,
+        32671,
+        30743,
+        1304,
+        510
+      ],
+      "torch_top_tokens": [
+        " Paris",
+        " ______",
+        " ____",
+        " __",
+        ":\n"
+      ]
+    },
+    {
+      "last_token_index": 8,
+      "max_abs_diff": 0.060546875,
+      "mean_abs_diff": 0.011372674256563187,
+      "onnx_elapsed_ms": 17.621062928810716,
+      "onnx_top_ids": [
+        1527,
+        451,
+        576,
+        3555,
+        362
+      ],
+      "onnx_top_tokens": [
+        " An",
+        " N",
+        " The",
+        " What",
+        " A"
+      ],
+      "prompt": "Explain what an NPU compiler does.",
+      "real_len": 9,
+      "top1_match": true,
+      "topk_overlap": 5,
+      "torch_top_ids": [
+        1527,
+        451,
+        576,
+        3555,
+        362
+      ],
+      "torch_top_tokens": [
+        " An",
+        " N",
+        " The",
+        " What",
+        " A"
+      ]
+    }
+  ],
+  "seq_len": 128,
+  "summary": {
+    "max_abs_diff": 0.119140625,
+    "mean_abs_diff_avg": 0.01226972439326346,
+    "top1_matches": 4,
+    "topk_overlap_avg": 5.0,
+    "total": 4
+  }
+}

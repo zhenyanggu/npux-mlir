@@ -1,0 +1,265 @@
+{
+  "analyzed_model": "/tmp/qwen25_prefill_inferred_fnn4ad0f.onnx",
+  "custom_domains": {},
+  "domain_counts": {
+    "ai.onnx": 2998
+  },
+  "gemm_total": 0,
+  "inferred_model": "/tmp/qwen25_prefill_inferred_fnn4ad0f.onnx",
+  "initializer_count": 291,
+  "ir_version": 8,
+  "matmul_or_gemm_total": 218,
+  "matmul_or_gemm_with_static_b": 169,
+  "matmul_total": 218,
+  "model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "node_count": 2998,
+  "npu_interest_ops": {
+    "Add": 242,
+    "Div": 49,
+    "MatMul": 218,
+    "Mul": 323,
+    "Pow": 49,
+    "ReduceMean": 49,
+    "Sigmoid": 24,
+    "Softmax": 24,
+    "Sqrt": 49
+  },
+  "op_counts": {
+    "Add": 242,
+    "Cast": 155,
+    "Concat": 51,
+    "Constant": 1041,
+    "ConstantOfShape": 54,
+    "Cos": 1,
+    "Div": 49,
+    "Equal": 55,
+    "Expand": 55,
+    "Gather": 1,
+    "LessOrEqual": 1,
+    "MatMul": 218,
+    "Mul": 323,
+    "Neg": 48,
+    "Or": 1,
+    "Pow": 49,
+    "ReduceMean": 49,
+    "Reshape": 145,
+    "ScatterND": 1,
+    "Shape": 2,
+    "Sigmoid": 24,
+    "Sin": 1,
+    "Slice": 124,
+    "Softmax": 24,
+    "Sqrt": 49,
+    "Transpose": 121,
+    "Unsqueeze": 59,
+    "Where": 55
+  },
+  "opset_import": [
+    {
+      "domain": "",
+      "version": 17
+    }
+  ],
+  "risk_ops": {
+    "Equal": 55,
+    "ScatterND": 1,
+    "Where": 55
+  },
+  "shape_inference_enabled": true,
+  "shape_layout_ops": {
+    "Cast": 155,
+    "Concat": 51,
+    "Constant": 1041,
+    "ConstantOfShape": 54,
+    "Expand": 55,
+    "Gather": 1,
+    "Reshape": 145,
+    "Shape": 2,
+    "Slice": 124,
+    "Transpose": 121,
+    "Unsqueeze": 59
+  },
+  "top_initializers": [
+    {
+      "dtype": "FLOAT16",
+      "name": "model.model.embed_tokens.weight",
+      "raw_bytes": 272269312,
+      "shape": [
+        151936,
+        896
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_7788",
+      "raw_bytes": 272269312,
+      "shape": [
+        896,
+        151936
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6129",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6130",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6131",
+      "raw_bytes": 8716288,
+      "shape": [
+        4864,
+        896
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6201",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6202",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6203",
+      "raw_bytes": 8716288,
+      "shape": [
+        4864,
+        896
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6273",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6274",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6275",
+      "raw_bytes": 8716288,
+      "shape": [
+        4864,
+        896
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6345",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6346",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6347",
+      "raw_bytes": 8716288,
+      "shape": [
+        4864,
+        896
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6417",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6418",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6419",
+      "raw_bytes": 8716288,
+      "shape": [
+        4864,
+        896
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6489",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6490",
+      "raw_bytes": 8716288,
+      "shape": [
+        896,
+        4864
+      ]
+    },
+    {
+      "dtype": "FLOAT16",
+      "name": "onnx::MatMul_6491",
+      "raw_bytes": 8716288,
+      "shape": [
+        4864,
+        896
+      ]
+    }
+  ],
+  "value_info_count": 2997
+}

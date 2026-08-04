@@ -1,0 +1,49 @@
+{
+  "initializer_count": 291,
+  "inputs": [
+    {
+      "elem_type": "INT64",
+      "name": "input_ids",
+      "shape": [
+        1,
+        128
+      ]
+    },
+    {
+      "elem_type": "INT64",
+      "name": "attention_mask",
+      "shape": [
+        1,
+        128
+      ]
+    },
+    {
+      "elem_type": "INT64",
+      "name": "position_ids",
+      "shape": [
+        1,
+        128
+      ]
+    }
+  ],
+  "ir_version": 8,
+  "model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "node_count": 2998,
+  "opset_import": [
+    {
+      "domain": "",
+      "version": 17
+    }
+  ],
+  "outputs": [
+    {
+      "elem_type": "FLOAT16",
+      "name": "logits",
+      "shape": [
+        1,
+        128,
+        151936
+      ]
+    }
+  ]
+}

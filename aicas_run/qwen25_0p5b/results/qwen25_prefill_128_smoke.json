@@ -1,0 +1,227 @@
+{
+  "hf_model": "/home/lqma/models/Qwen2.5-0.5B",
+  "onnx_model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "providers_requested": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "providers_selected": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "records": [
+    {
+      "elapsed_ms": 99.6234209742397,
+      "has_inf": false,
+      "has_nan": false,
+      "last_token_index": 0,
+      "logits_dtype": "float16",
+      "logits_shape": [
+        1,
+        128,
+        151936
+      ],
+      "pad_token_id": 151643,
+      "prompt": "Hello",
+      "providers_requested": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "providers_selected": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "real_len": 1,
+      "token_ids": [
+        9707
+      ],
+      "top_ids": [
+        11,
+        0,
+        3837,
+        358,
+        5019
+      ],
+      "top_scores": [
+        15.015625,
+        14.1015625,
+        13.859375,
+        13.75,
+        13.46875
+      ],
+      "top_tokens": [
+        ",",
+        "!",
+        "\uff0c",
+        " I",
+        " everyone"
+      ]
+    },
+    {
+      "elapsed_ms": 18.147682072594762,
+      "has_inf": false,
+      "has_nan": false,
+      "last_token_index": 5,
+      "logits_dtype": "float16",
+      "logits_shape": [
+        1,
+        128,
+        151936
+      ],
+      "pad_token_id": 151643,
+      "prompt": "Qwen2.5 is",
+      "providers_requested": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "providers_selected": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "real_len": 6,
+      "token_ids": [
+        48,
+        16948,
+        17,
+        13,
+        20,
+        374
+      ],
+      "top_ids": [
+        264,
+        458,
+        279,
+        825,
+        1431
+      ],
+      "top_scores": [
+        18.671875,
+        17.3125,
+        17.234375,
+        15.5625,
+        14.7421875
+      ],
+      "top_tokens": [
+        " a",
+        " an",
+        " the",
+        " one",
+        " now"
+      ]
+    },
+    {
+      "elapsed_ms": 18.059758935123682,
+      "has_inf": false,
+      "has_nan": false,
+      "last_token_index": 4,
+      "logits_dtype": "float16",
+      "logits_shape": [
+        1,
+        128,
+        151936
+      ],
+      "pad_token_id": 151643,
+      "prompt": "The capital of France is",
+      "providers_requested": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "providers_selected": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "real_len": 5,
+      "token_ids": [
+        785,
+        6722,
+        315,
+        9625,
+        374
+      ],
+      "top_ids": [
+        12095,
+        32671,
+        30743,
+        1304,
+        510
+      ],
+      "top_scores": [
+        17.859375,
+        16.84375,
+        16.25,
+        16.09375,
+        16.03125
+      ],
+      "top_tokens": [
+        " Paris",
+        " ______",
+        " ____",
+        " __",
+        ":\n"
+      ]
+    },
+    {
+      "elapsed_ms": 17.942294012755156,
+      "has_inf": false,
+      "has_nan": false,
+      "last_token_index": 8,
+      "logits_dtype": "float16",
+      "logits_shape": [
+        1,
+        128,
+        151936
+      ],
+      "pad_token_id": 151643,
+      "prompt": "Explain what an NPU compiler does.",
+      "providers_requested": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "providers_selected": [
+        "CUDAExecutionProvider",
+        "CPUExecutionProvider"
+      ],
+      "real_len": 9,
+      "token_ids": [
+        840,
+        20772,
+        1128,
+        458,
+        451,
+        6325,
+        19415,
+        1558,
+        13
+      ],
+      "top_ids": [
+        1527,
+        451,
+        576,
+        3555,
+        362
+      ],
+      "top_scores": [
+        19.3125,
+        17.890625,
+        17.5625,
+        16.875,
+        16.734375
+      ],
+      "top_tokens": [
+        " An",
+        " N",
+        " The",
+        " What",
+        " A"
+      ]
+    }
+  ],
+  "seq_len": 128,
+  "summary": {
+    "avg_elapsed_ms": 38.44328899867833,
+    "inf_records": 0,
+    "nan_records": 0,
+    "total": 4
+  },
+  "top_k": 5
+}

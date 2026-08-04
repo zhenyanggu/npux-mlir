@@ -1,0 +1,15 @@
+{
+  "device": "cuda",
+  "dtype": "fp16",
+  "hf_model": "/home/lqma/models/Qwen2.5-0.5B",
+  "hidden_size": 896,
+  "intermediate_size": 4864,
+  "model_type": "qwen2",
+  "num_attention_heads": 14,
+  "num_hidden_layers": 24,
+  "num_key_value_heads": 2,
+  "opset": 17,
+  "output": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "seq_len": 128,
+  "vocab_size": 151936
+}

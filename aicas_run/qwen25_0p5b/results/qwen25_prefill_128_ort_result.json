@@ -1,0 +1,27 @@
+{
+  "elapsed_ms": 381.9623130839318,
+  "has_inf": false,
+  "has_nan": false,
+  "hf_model": "/home/lqma/models/Qwen2.5-0.5B",
+  "last_token_argmax": 11,
+  "last_token_argmax_text": ",",
+  "last_token_index": 0,
+  "logits_dtype": "float16",
+  "logits_shape": [
+    1,
+    128,
+    151936
+  ],
+  "onnx_model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "prompt": "Hello",
+  "providers_requested": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "providers_selected": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "real_len": 1,
+  "seq_len": 128
+}
