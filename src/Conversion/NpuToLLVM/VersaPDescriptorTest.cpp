@@ -13,6 +13,7 @@ namespace {
 using npux::versap::AuxMvinConfig;
 using npux::versap::EncodedDescriptor;
 using npux::versap::GemmConfig;
+using npux::versap::GemvConfig;
 using npux::versap::MvinAConfig;
 using npux::versap::MvinWConfig;
 using npux::versap::MvoutConfig;
@@ -20,9 +21,13 @@ using npux::versap::OutputMode;
 using npux::versap::ScaleMode;
 using npux::versap::encodeAuxMvin;
 using npux::versap::encodeGemm;
+using npux::versap::encodeGemv;
 using npux::versap::encodeMvinA;
 using npux::versap::encodeMvinW;
 using npux::versap::encodeMvout;
+using npux::versap::encodeVpu;
+using npux::versap::VpuConfig;
+using npux::versap::VpuSpecialFunction;
 
 bool fail(const std::string &message) {
   std::cerr << "VersaPDescriptorTest: " << message << '\n';
@@ -127,6 +132,21 @@ bool testGemm() {
           0xE140200000000020ULL))
     return false;
 
+  GemmConfig partial = config;
+  partial.outputMode = OutputMode::RawInt32;
+  partial.scaleMode = ScaleMode::None;
+  partial.writePartial = true;
+  auto partialDescriptor = encodeGemm(partial);
+  if (!partialDescriptor ||
+      (partialDescriptor->desc2 & (uint64_t{1} << 60)) == 0)
+    return fail("partial GEMM must encode SA_COMPUTE_DESC2.write_partial");
+
+  GemmConfig sharedIndex = partial;
+  sharedIndex.accumulate = true;
+  sharedIndex.accBank = sharedIndex.oBank;
+  if (!encodeGemm(sharedIndex))
+    return fail("ACC and O use independent physical bank resources in RTL");
+
   GemmConfig invalid = config;
   invalid.outputMode = OutputMode::Bf16;
   invalid.scaleMode = ScaleMode::None;
@@ -142,11 +162,53 @@ bool testGemm() {
   return expectError(encodeGemm(invalid), "physical Res bank");
 }
 
+bool testConvGemvAndVpu() {
+  GemmConfig conv{8, 8, 16, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, OutputMode::TensorInt8, ScaleMode::PerTensor};
+  conv.operation = npux::versap::SaOperation::Conv;
+  conv.d3 = 32;
+  conv.kernelShapeM1 = 2;
+  conv.strideM1 = 1;
+  conv.paddingLeft = 1;
+  conv.paddingRight = 1;
+  conv.paddingTop = 1;
+  conv.paddingBottom = 1;
+  auto convDescriptor = encodeGemm(conv);
+  if (!convDescriptor || ((convDescriptor->desc0 >> 48) & 0xffff) != 32 ||
+      ((convDescriptor->desc2 >> 7) & 0xf) != 2 ||
+      ((convDescriptor->desc2 >> 36) & 0xff) != 0x55)
+    return fail("CONV descriptor fields differ from the SA ABI");
+
+  GemvConfig gemv{32, 64, 64, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0};
+  auto gemvDescriptor = encodeGemv(gemv);
+  if (!gemvDescriptor || (gemvDescriptor->desc2 & (uint64_t{1} << 63)) == 0)
+    return fail("GEMV descriptor must encode its start bit");
+
+  VpuConfig vpu{VpuSpecialFunction::Softmax, 4, 17, 0, 1,
+      npux::versap::VpuPrecision::Bf16,
+      npux::versap::VpuPrecision::Int8, 0, 0, 0x01000000};
+  auto vpuDescriptor = encodeVpu(vpu);
+  if (!vpuDescriptor || (vpuDescriptor->desc2 & (uint64_t{1} << 63)) == 0 ||
+      ((vpuDescriptor->desc0 >> 32) & 0xffff) != 16 ||
+      ((vpuDescriptor->desc0 >> 48) & 0xffff) != 3 ||
+      (vpuDescriptor->desc1 >> 32) != 0x01000000)
+    return fail("VPU BF16 descriptor fields differ from the ABI");
+  vpu.function = VpuSpecialFunction::Transpose;
+  vpu.sourcePrecision = npux::versap::VpuPrecision::Int8;
+  vpu.destinationPrecision = npux::versap::VpuPrecision::Int8;
+  vpu.outputInverseScaleQ8_24 = 0;
+  if (!encodeVpu(vpu))
+    return fail("VPU INT8 transpose descriptor was rejected");
+  vpu.destinationSelect = 0;
+  return expectError(encodeVpu(vpu), "distinct source and destination");
+}
+
 } // namespace
 
 int main() {
   return testMvinW() && testMvinA() && testAuxMvin() && testMvout() &&
-                 testGemm()
+                 testGemm() && testConvGemvAndVpu()
              ? 0
              : 1;
 }

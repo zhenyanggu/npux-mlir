@@ -131,7 +131,8 @@ static bool isNpuComputeGenericOp(linalg::GenericOp op) {
     return false;
   StringRef libName = libCall.getValue();
   return libName == "npu_conv" || libName == "npu_gemm" ||
-         libName == "npu_matmul" || libName == "npu_matmul_integer";
+         libName == "npu_matmul" || libName == "npu_matmul_integer" ||
+         libName == "npu_gemv";
 }
 
 static bool opOrNestedWritesOutput(Operation *candidate, Value outputMemRef) {
@@ -176,17 +177,68 @@ public:
       return failure();
 
     StringRef libName = libCallAttr.getValue();
+    Location loc = op.getLoc();
     ComputeOpType opType;
 
     if (libName == "npu_conv") {
       opType = ComputeOpType::conv;
     } else if (libName == "npu_matmul" || libName == "npu_gemm"|| libName == "npu_matmul_integer") {
       opType = ComputeOpType::gemm;
+    } else if (libName == "npu_gemv") {
+      if (op.getInputs().size() != 3 || op.getOutputs().size() != 1)
+        return failure();
+      Value inputA = op.getInputs()[0];
+      Value inputW = op.getInputs()[1];
+      Value metadata = op.getInputs()[2];
+      Value output = op.getOutputs()[0];
+      auto aType = dyn_cast<MemRefType>(inputA.getType());
+      auto wType = dyn_cast<MemRefType>(inputW.getType());
+      auto metadataType = dyn_cast<MemRefType>(metadata.getType());
+      auto outputType = dyn_cast<MemRefType>(output.getType());
+      if (!aType || !wType || !metadataType || !outputType ||
+          aType.getMemorySpaceAsInt() != 2 ||
+          wType.getMemorySpaceAsInt() != 2 ||
+          metadataType.getMemorySpaceAsInt() != 2 ||
+          outputType.getMemorySpaceAsInt() != 2 || aType.getRank() < 1 ||
+          wType.getRank() < 2 || outputType.getRank() < 1 ||
+          aType.isDynamicDim(aType.getRank() - 1) ||
+          wType.isDynamicDim(wType.getRank() - 2) ||
+          wType.isDynamicDim(wType.getRank() - 1))
+        return failure();
+      const int64_t m = wType.getDimSize(wType.getRank() - 2);
+      const int64_t k = aType.getDimSize(aType.getRank() - 1);
+      if (m <= 0 || k <= 0 || wType.getDimSize(wType.getRank() - 1) != k ||
+          m > UINT16_MAX || k > UINT16_MAX)
+        return failure();
+      auto c16 = [&](int64_t value) {
+        return rewriter.create<arith::ConstantIntOp>(loc, value, 16);
+      };
+      auto c8 = [&](int64_t value) {
+        return rewriter.create<arith::ConstantIntOp>(loc, value, 8);
+      };
+      auto c1 = [&](bool value) {
+        return rewriter.create<arith::ConstantIntOp>(loc, value, 1);
+      };
+      rewriter.replaceOpWithNewOp<GemvRunOp>(op, inputA, inputW, metadata,
+          output, c16(m), c16(k),
+          c16(getIntAttr(op, "activation_group_stride_bytes", 0)),
+          c16(getIntAttr(op, "activation_scale_base", 0)),
+          c16(getIntAttr(op, "activation_scale2_base", 0)),
+          c16(getIntAttr(op, "cache_cell_index", 0)),
+          c16(getIntAttr(op, "scale_metadata_word", 0)),
+          c16(getIntAttr(op, "resadd_base", 0)),
+          c8(getIntAttr(op, "mode", 0)),
+          c8(getIntAttr(op, "group_count_m1", 0)),
+          c1(getIntAttr(op, "kv_column_scale", 0) != 0),
+          c1(getIntAttr(op, "pv_probability_q24", 0) != 0),
+          c1(getIntAttr(op, "unit_weight_scale", 0) != 0),
+          c1(getIntAttr(op, "activation_scale", 0) != 0),
+          c1(getIntAttr(op, "activation_scale2", 0) != 0),
+          c1(getIntAttr(op, "resadd", 0) != 0));
+      return success();
     } else {
       return failure();
     }
-
-    Location loc = op.getLoc();
 
     // 2. Get Operands & Logic Selection
     if (op.getInputs().size() < 2 || op.getOutputs().size() != 1) {
@@ -228,7 +280,127 @@ public:
     bool doRelu = originalDoRelu && isLastCalculation;
     bool forceAccumulateByPriorWrite = hasPriorWriteOnSameOutput;
 
-    if (op.getInputs().size() >= 3) {
+    const bool hasResidual = getIntAttr(op, "npu.resadd", 0) != 0;
+    const bool hasPerChannelScale =
+        getIntAttr(op, "npu.versa_p_per_channel_scale", 0) != 0;
+    const bool hasPackedMetadata =
+        getIntAttr(op, "npu.versa_p_packed_metadata", 0) != 0;
+    const bool materializePackedMetadata =
+        getIntAttr(op, "npu.versa_p_pack_metadata", 0) != 0;
+    auto qkGamma = op->getAttrOfType<IntegerAttr>(
+        "npu.versa_p_qk_gamma_q8_24");
+    const bool hasQkGamma = qkGamma && qkGamma.getInt() > 0 &&
+        qkGamma.getInt() < (int64_t{1} << 25);
+    if (qkGamma && !hasQkGamma)
+      return failure();
+    if (hasQkGamma) {
+      // The third input is a host metadata buffer whose first little-endian
+      // i32 is the Q8.24 QK gamma consumed through SA scale_addr=0.
+      if (hasPackedMetadata || materializePackedMetadata || hasResidual ||
+          hasPerChannelScale || opType != ComputeOpType::gemm ||
+          op.getInputs().size() != 3)
+        return failure();
+      auto gammaType = dyn_cast<MemRefType>(op.getInputs()[2].getType());
+      if (!gammaType || !gammaType.hasStaticShape() ||
+          !gammaType.getElementType().isInteger(32))
+        return failure();
+      uint64_t gammaBytes = 1;
+      for (int64_t dimension : gammaType.getShape()) {
+        if (dimension <= 0)
+          return failure();
+        gammaBytes *= static_cast<uint64_t>(dimension);
+      }
+      gammaBytes *= 4;
+      constexpr uint64_t kMaxMetadataBytes = 2 * 512 * 32;
+      if (gammaBytes < 4 || gammaBytes > kMaxMetadataBytes)
+        return failure();
+      rewriter.create<MvinMetadataOp>(loc, op.getInputs()[2]);
+    } else if (materializePackedMetadata) {
+      // Inputs are A, W, Bias, Scale. Materialize the 256-bit metadata-word
+      // layout locally so the following AUX_MVIN has one source buffer.
+      if (hasPackedMetadata || hasResidual || !hasPerChannelScale ||
+          opType != ComputeOpType::gemm || op.getInputs().size() != 4)
+        return failure();
+      auto biasType = dyn_cast<MemRefType>(op.getInputs()[2].getType());
+      auto scaleType = dyn_cast<MemRefType>(op.getInputs()[3].getType());
+      if (!biasType || !scaleType ||
+          !biasType.getElementType().isInteger(32) ||
+          !scaleType.getElementType().isInteger(32))
+        return failure();
+      auto outputType = dyn_cast<MemRefType>(outputMemRef.getType());
+      if (!outputType || outputType.getRank() == 0)
+        return failure();
+      const int64_t channelCount =
+          outputType.getDimSize(outputType.getRank() - 1);
+      if (channelCount <= 0 || ShapedType::isDynamic(channelCount))
+        return failure();
+      const int64_t metadataWords = (channelCount + 7) / 8;
+      auto packedType = MemRefType::get({2 * metadataWords * 8},
+          rewriter.getI32Type());
+      auto packed = rewriter.create<memref::AllocOp>(loc, packedType);
+      auto count = rewriter.create<arith::ConstantIntOp>(
+          loc, channelCount, 32);
+      rewriter.create<PackMetadataOp>(loc, op.getInputs()[2], op.getInputs()[3],
+          packed, count);
+      rewriter.create<MvinMetadataOp>(loc, packed);
+      // Descriptor submission is synchronous, so the temporary host buffer is
+      // no longer needed before SA_COMPUTE is issued.
+      rewriter.create<memref::DeallocOp>(loc, packed);
+      if (isFirstCalculation) {
+        flagAccBias = true;
+        flagDoAccum = true;
+      } else if (forceAccumulateByPriorWrite || loopStage == "body" ||
+                 loopStage == "tail" || splitStage == "body" ||
+                 splitStage == "tail") {
+        psumMemRefForOp = outputMemRef;
+        flagAccBias = false;
+        flagDoAccum = true;
+      } else {
+        return failure();
+      }
+    } else if (hasPackedMetadata) {
+      // The fourth input is a host buffer laid out as metadata-bank words:
+      // bias words first, then one Q8.24 scale word per eight output lanes.
+      // It is intentionally explicit; the compiler cannot safely synthesize
+      // a host-side packed buffer from two unrelated memrefs.
+      if (hasResidual || !hasPerChannelScale || op.getInputs().size() != 4)
+        return failure();
+      rewriter.create<MvinMetadataOp>(loc, op.getInputs()[3]);
+      if (isFirstCalculation) {
+        flagAccBias = true;
+        flagDoAccum = true;
+      } else if (forceAccumulateByPriorWrite || loopStage == "body" ||
+                 loopStage == "tail" || splitStage == "body" ||
+                 splitStage == "tail") {
+        psumMemRefForOp = outputMemRef;
+        flagAccBias = false;
+        flagDoAccum = true;
+      } else {
+        return failure();
+      }
+    } else if (hasResidual) {
+      if (op.getInputs().size() != 3)
+        return failure();
+      rewriter.create<ResaddLoadOp>(loc, op.getInputs()[2]);
+      flagAccBias = false;
+      flagDoAccum = false;
+    } else if (hasPerChannelScale) {
+      if (op.getInputs().size() != 3)
+        return failure();
+      rewriter.create<MvinScaleOp>(loc, op.getInputs()[2]);
+      flagAccBias = false;
+      if (isFirstCalculation) {
+        psumMemRefForOp = nullptr;
+        flagDoAccum = false;
+      } else if (forceAccumulateByPriorWrite || loopStage == "body" ||
+                 loopStage == "tail" || splitStage == "body" ||
+                 splitStage == "tail") {
+        psumMemRefForOp = outputMemRef;
+        flagDoAccum = true;
+      } else {
+        return failure();
+      }
+    } else if (op.getInputs().size() >= 3) {
       // ==========================================
       // 场景 A：带有 Bias 的情况
       // ==========================================
@@ -434,6 +606,13 @@ public:
       kernel_sz = inBShape[2];
       stride_val = getArrayAttr(op, "strides", 0, 1);
       dilation_val = getArrayAttr(op, "dilations", 0, 1);
+      // ONNX Conv stores pads as [top, left, bottom, right]. Keep that
+      // directionality through ComputeRunOp so the Versa-P SA descriptor can
+      // program its independent four padding fields.
+      pad_t = getArrayAttr(op, "pads", 0, 0);
+      pad_l = getArrayAttr(op, "pads", 1, 0);
+      pad_b = getArrayAttr(op, "pads", 2, 0);
+      pad_r = getArrayAttr(op, "pads", 3, 0);
 
       pad_mode_val = getIntAttr(op, "pad_mode", 0);
       is_group = (getIntAttr(op, "group", 1) > 1);
@@ -546,7 +725,7 @@ public:
     auto reluTypeAttr = ActivationTypeAttr::get(rewriter.getContext(), actType);
 
     // 9. Create ComputeRunOp
-    rewriter.replaceOpWithNewOp<ComputeRunOp>(op, opTypeAttr, dataflowModeAttr,
+    auto computeRun = rewriter.replaceOpWithNewOp<ComputeRunOp>(op, opTypeAttr, dataflowModeAttr,
         accoutDestAttr, vIntType,
 
         inputAMemRef, inputBMemRef, psumMemRefForOp, outputMemRef,
@@ -564,6 +743,30 @@ public:
         vDoAccum, vReluEnable, reluTypeAttr, vAccBias,
 
         vOutZp, vQuantScale, vQuantShift, vInAZp, vInBZp);
+    if (hasResidual)
+      computeRun->setAttr("npux.versa_p_resadd", UnitAttr::get(&getContext()));
+    if (hasPerChannelScale)
+      computeRun->setAttr("npux.versa_p_per_channel_scale",
+          UnitAttr::get(&getContext()));
+    if (hasPackedMetadata || materializePackedMetadata)
+      computeRun->setAttr("npux.versa_p_packed_metadata",
+          UnitAttr::get(&getContext()));
+    if (hasQkGamma)
+      computeRun->setAttr("npux.versa_p_qk_gamma_q8_24",
+          rewriter.getI64IntegerAttr(qkGamma.getInt()));
+    const StringRef accStage = isFirstCalculation && isLastCalculation
+        ? "single"
+        : isFirstCalculation ? "first"
+        : isLastCalculation ? "final" : "body";
+    computeRun->setAttr("npux.versa_p_acc_stage",
+        rewriter.getStringAttr(accStage));
+    constexpr double kQ8_24 = 16777216.0;
+    const double tensorScaleQ8_24 = realMultiplier * kQ8_24;
+    if (std::isfinite(tensorScaleQ8_24) && tensorScaleQ8_24 >= 0.0 &&
+        tensorScaleQ8_24 <= static_cast<double>(UINT32_MAX)) {
+      computeRun->setAttr("npux.versa_p_tensor_scale_q8_24",
+          rewriter.getI64IntegerAttr(std::llround(tensorScaleQ8_24)));
+    }
 
     return success();
   }

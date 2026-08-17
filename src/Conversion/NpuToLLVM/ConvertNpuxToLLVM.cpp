@@ -8,6 +8,8 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 
+#include <array>
+
 using namespace mlir;
 using namespace npux;
 
@@ -76,6 +78,9 @@ struct VersaPDescriptorAttrs {
   uint64_t desc0;
   uint64_t desc1;
   uint64_t desc2;
+  uint32_t commandId;
+  std::array<uint32_t, 5> dependencies{};
+  uint8_t dependencyCount = 0;
 };
 
 static std::optional<VersaPDescriptorAttrs> getVersaPDescriptorAttrs(
@@ -86,19 +91,47 @@ static std::optional<VersaPDescriptorAttrs> getVersaPDescriptorAttrs(
   auto desc0 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc0");
   auto desc1 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc1");
   auto desc2 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc2");
+  auto commandId =
+      operation->getAttrOfType<IntegerAttr>("npux.versa_p_command_id");
   if (!api || !desc0 || !desc1 || !desc2 || api.getInt() < 0 ||
-      api.getInt() > UINT8_MAX)
+      api.getInt() > UINT8_MAX || !commandId || commandId.getInt() <= 0 ||
+      commandId.getInt() > UINT32_MAX)
     return std::nullopt;
+  std::array<uint32_t, 5> dependencies{};
+  uint8_t dependencyCount = 0;
+  if (auto dependencyAttrs = operation->getAttrOfType<ArrayAttr>(
+          "npux.versa_p_dependencies")) {
+    if (dependencyAttrs.size() > dependencies.size())
+      return std::nullopt;
+    for (Attribute dependency : dependencyAttrs) {
+      auto value = dyn_cast<IntegerAttr>(dependency);
+      if (!value || value.getInt() <= 0 || value.getInt() > UINT32_MAX)
+        return std::nullopt;
+      dependencies[dependencyCount++] = static_cast<uint32_t>(value.getInt());
+    }
+  }
   return VersaPDescriptorAttrs{static_cast<uint8_t>(api.getInt()),
       static_cast<uint64_t>(desc0.getInt()),
-      static_cast<uint64_t>(desc1.getInt()),
-      static_cast<uint64_t>(desc2.getInt())};
+      static_cast<uint64_t>(desc1.getInt()), static_cast<uint64_t>(desc2.getInt()),
+      static_cast<uint32_t>(commandId.getInt()), dependencies, dependencyCount};
 }
 
 static Value versaPDescriptorConstant(Location loc, uint64_t value,
     ConversionPatternRewriter &rewriter) {
   return rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI64Type(),
       rewriter.getI64IntegerAttr(static_cast<int64_t>(value)));
+}
+
+static void appendVersaPScheduleArgs(Location loc,
+    const VersaPDescriptorAttrs &descriptor,
+    SmallVectorImpl<Value> &args, ConversionPatternRewriter &rewriter) {
+  args.push_back(rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(),
+      rewriter.getI32IntegerAttr(descriptor.commandId)));
+  args.push_back(rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+      rewriter.getI8IntegerAttr(descriptor.dependencyCount)));
+  for (uint32_t dependency : descriptor.dependencies)
+    args.push_back(rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI32Type(),
+        rewriter.getI32IntegerAttr(dependency)));
 }
 
 Value getFlatPtrFromMemRef(Location loc, Value memrefDescVal, Type elemType,
@@ -421,13 +454,14 @@ public:
           versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
           versaPDescriptorConstant(loc, descriptor->desc2, rewriter),
           hostPtr};
+      appendVersaPScheduleArgs(loc, *descriptor, descriptorArgs, rewriter);
       SmallVector<Type> descriptorArgTypes;
       for (Value value : descriptorArgs)
         descriptorArgTypes.push_back(value.getType());
       auto module = op->getParentOfType<ModuleOp>();
       auto voidType = LLVM::LLVMVoidType::get(getContext());
       FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
-          "npu_versa_p_submit_wait_host_or_abort", voidType,
+          "npu_versa_p_submit_host_after_or_abort", voidType,
           descriptorArgTypes);
       rewriter.replaceOpWithNewOp<LLVM::CallOp>(
           op, TypeRange{}, fnRef, descriptorArgs);
@@ -492,6 +526,26 @@ public:
     auto memRefType = cast<MemRefType>(op.getSource().getType());
     Value hostPtr = getFlatPtrFromMemRef(
         loc, adaptor.getSource(), memRefType.getElementType(), rewriter);
+    if (auto descriptor = getVersaPDescriptorAttrs(op)) {
+      SmallVector<Value> descriptorArgs = {
+          rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+              rewriter.getI8IntegerAttr(descriptor->api)),
+          versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc2, rewriter),
+          hostPtr};
+      appendVersaPScheduleArgs(loc, *descriptor, descriptorArgs, rewriter);
+      SmallVector<Type> descriptorArgTypes;
+      for (Value value : descriptorArgs)
+        descriptorArgTypes.push_back(value.getType());
+      auto voidType = LLVM::LLVMVoidType::get(getContext());
+      FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+          "npu_versa_p_submit_host_after_or_abort", voidType,
+          descriptorArgTypes);
+      rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+          op, TypeRange{}, fnRef, descriptorArgs);
+      return success();
+    }
 
     auto shape = op.getSource().getType().getShape();
     auto col = shape[shape.size() - 1];
@@ -550,6 +604,108 @@ public:
   }
 };
 
+class NpuxMvinScaleLowering : public ConvertOpToLLVMPattern<MvinScaleOp> {
+public:
+  using ConvertOpToLLVMPattern<MvinScaleOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(MvinScaleOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    auto descriptor = getVersaPDescriptorAttrs(op);
+    if (!descriptor)
+      return rewriter.notifyMatchFailure(op,
+          "per-channel scale metadata requires the Versa-P descriptor ABI");
+    Location loc = op.getLoc();
+    auto module = op->getParentOfType<ModuleOp>();
+    auto memRefType = cast<MemRefType>(op.getSource().getType());
+    Value hostPtr = getFlatPtrFromMemRef(
+        loc, adaptor.getSource(), memRefType.getElementType(), rewriter);
+    SmallVector<Value> descriptorArgs = {
+        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+            rewriter.getI8IntegerAttr(descriptor->api)),
+        versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc2, rewriter), hostPtr};
+    appendVersaPScheduleArgs(loc, *descriptor, descriptorArgs, rewriter);
+    SmallVector<Type> descriptorArgTypes;
+    for (Value value : descriptorArgs)
+      descriptorArgTypes.push_back(value.getType());
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+        "npu_versa_p_submit_host_after_or_abort", voidType,
+        descriptorArgTypes);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+        op, TypeRange{}, fnRef, descriptorArgs);
+    return success();
+  }
+};
+
+class NpuxMvinMetadataLowering
+    : public ConvertOpToLLVMPattern<MvinMetadataOp> {
+public:
+  using ConvertOpToLLVMPattern<MvinMetadataOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(MvinMetadataOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    auto descriptor = getVersaPDescriptorAttrs(op);
+    if (!descriptor)
+      return rewriter.notifyMatchFailure(op,
+          "packed metadata requires the Versa-P descriptor ABI");
+    Location loc = op.getLoc();
+    auto module = op->getParentOfType<ModuleOp>();
+    auto memRefType = cast<MemRefType>(op.getSource().getType());
+    Value hostPtr = getFlatPtrFromMemRef(
+        loc, adaptor.getSource(), memRefType.getElementType(), rewriter);
+    SmallVector<Value> descriptorArgs = {
+        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+            rewriter.getI8IntegerAttr(descriptor->api)),
+        versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc2, rewriter), hostPtr};
+    appendVersaPScheduleArgs(loc, *descriptor, descriptorArgs, rewriter);
+    SmallVector<Type> descriptorArgTypes;
+    for (Value value : descriptorArgs)
+      descriptorArgTypes.push_back(value.getType());
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+        "npu_versa_p_submit_host_after_or_abort", voidType,
+        descriptorArgTypes);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+        op, TypeRange{}, fnRef, descriptorArgs);
+    return success();
+  }
+};
+
+class NpuxPackMetadataLowering
+    : public ConvertOpToLLVMPattern<PackMetadataOp> {
+public:
+  using ConvertOpToLLVMPattern<PackMetadataOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(PackMetadataOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    Location loc = op.getLoc();
+    auto biasType = cast<MemRefType>(op.getBias().getType());
+    auto scaleType = cast<MemRefType>(op.getScales().getType());
+    auto destinationType = cast<MemRefType>(op.getDestination().getType());
+    SmallVector<Value> args = {
+        getFlatPtrFromMemRef(loc, adaptor.getBias(), biasType.getElementType(),
+            rewriter),
+        getFlatPtrFromMemRef(loc, adaptor.getScales(),
+            scaleType.getElementType(), rewriter),
+        getFlatPtrFromMemRef(loc, adaptor.getDestination(),
+            destinationType.getElementType(), rewriter),
+        adaptor.getChannelCount()};
+    SmallVector<Type> argTypes;
+    for (Value value : args)
+      argTypes.push_back(value.getType());
+    auto module = op->getParentOfType<ModuleOp>();
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+        "npu_versa_p_pack_metadata_i32", voidType, argTypes);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+    return success();
+  }
+};
+
 class NpuxDmaMvoutLowering : public ConvertOpToLLVMPattern<DmaMvoutOp> {
 public:
   using ConvertOpToLLVMPattern<DmaMvoutOp>::ConvertOpToLLVMPattern;
@@ -567,13 +723,14 @@ public:
           versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
           versaPDescriptorConstant(loc, descriptor->desc2, rewriter),
           hostPtr};
+      appendVersaPScheduleArgs(loc, *descriptor, descriptorArgs, rewriter);
       SmallVector<Type> descriptorArgTypes;
       for (Value value : descriptorArgs)
         descriptorArgTypes.push_back(value.getType());
       auto module = op->getParentOfType<ModuleOp>();
       auto voidType = LLVM::LLVMVoidType::get(getContext());
       FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
-          "npu_versa_p_submit_wait_host_or_abort", voidType,
+          "npu_versa_p_submit_wait_host_after_or_abort", voidType,
           descriptorArgTypes);
       rewriter.replaceOpWithNewOp<LLVM::CallOp>(
           op, TypeRange{}, fnRef, descriptorArgs);
@@ -697,6 +854,103 @@ public:
   }
 };
 
+class NpuxResaddLoadLowering : public ConvertOpToLLVMPattern<ResaddLoadOp> {
+public:
+  using ConvertOpToLLVMPattern<ResaddLoadOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(ResaddLoadOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    auto descriptor = getVersaPDescriptorAttrs(op);
+    if (!descriptor) {
+      op.emitError("ResAdd load requires a static Versa-P descriptor region");
+      return failure();
+    }
+    Location loc = op.getLoc();
+    auto memRefType = cast<MemRefType>(op.getSource().getType());
+    Value hostPtr = getFlatPtrFromMemRef(
+        loc, adaptor.getSource(), memRefType.getElementType(), rewriter);
+    SmallVector<Value> args = {
+        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+            rewriter.getI8IntegerAttr(descriptor->api)),
+        versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc2, rewriter), hostPtr};
+    appendVersaPScheduleArgs(loc, *descriptor, args, rewriter);
+    SmallVector<Type> argTypes;
+    for (Value value : args)
+      argTypes.push_back(value.getType());
+    auto module = op->getParentOfType<ModuleOp>();
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+        "npu_versa_p_submit_host_after_or_abort", voidType, argTypes);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+    return success();
+  }
+};
+
+class NpuxGemvRunLowering : public ConvertOpToLLVMPattern<GemvRunOp> {
+public:
+  using ConvertOpToLLVMPattern<GemvRunOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(GemvRunOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    auto descriptor = getVersaPDescriptorAttrs(op);
+    if (!descriptor) {
+      op.emitError("GEMV requires the static Versa-P descriptor region; "
+                   "dynamic GEMV must be lowered by a non-Versa-P backend");
+      return failure();
+    }
+    Location loc = op.getLoc();
+    SmallVector<Value> args = {
+        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+            rewriter.getI8IntegerAttr(descriptor->api)),
+        versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc2, rewriter)};
+    appendVersaPScheduleArgs(loc, *descriptor, args, rewriter);
+    SmallVector<Type> argTypes;
+    for (Value value : args)
+      argTypes.push_back(value.getType());
+    auto module = op->getParentOfType<ModuleOp>();
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+        "npu_versa_p_submit_static_after_or_abort", voidType, argTypes);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+    return success();
+  }
+};
+
+class NpuxVpuRunLowering : public ConvertOpToLLVMPattern<VpuRunOp> {
+public:
+  using ConvertOpToLLVMPattern<VpuRunOp>::ConvertOpToLLVMPattern;
+
+  LogicalResult matchAndRewrite(VpuRunOp op, OpAdaptor adaptor,
+      ConversionPatternRewriter &rewriter) const override {
+    auto descriptor = getVersaPDescriptorAttrs(op);
+    if (!descriptor) {
+      op.emitError("VPU requires an O-bank descriptor producer and final MVOUT");
+      return failure();
+    }
+    Location loc = op.getLoc();
+    SmallVector<Value> args = {
+        rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+            rewriter.getI8IntegerAttr(descriptor->api)),
+        versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+        versaPDescriptorConstant(loc, descriptor->desc2, rewriter)};
+    appendVersaPScheduleArgs(loc, *descriptor, args, rewriter);
+    SmallVector<Type> argTypes;
+    for (Value value : args)
+      argTypes.push_back(value.getType());
+    auto module = op->getParentOfType<ModuleOp>();
+    auto voidType = LLVM::LLVMVoidType::get(getContext());
+    FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+        "npu_versa_p_submit_static_after_or_abort", voidType, argTypes);
+    rewriter.replaceOpWithNewOp<LLVM::CallOp>(op, TypeRange{}, fnRef, args);
+    return success();
+  }
+};
+
 class NpuxComputeRunLowering : public ConvertOpToLLVMPattern<ComputeRunOp> {
 public:
   using ConvertOpToLLVMPattern<ComputeRunOp>::ConvertOpToLLVMPattern;
@@ -711,13 +965,14 @@ public:
           versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
           versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
           versaPDescriptorConstant(loc, descriptor->desc2, rewriter)};
+      appendVersaPScheduleArgs(loc, *descriptor, descriptorArgs, rewriter);
       SmallVector<Type> descriptorArgTypes;
       for (Value value : descriptorArgs)
         descriptorArgTypes.push_back(value.getType());
       auto module = op->getParentOfType<ModuleOp>();
       auto voidType = LLVM::LLVMVoidType::get(getContext());
       FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
-          "npu_versa_p_submit_wait_static_or_abort", voidType,
+          "npu_versa_p_submit_static_after_or_abort", voidType,
           descriptorArgTypes);
       rewriter.replaceOpWithNewOp<LLVM::CallOp>(
           op, TypeRange{}, fnRef, descriptorArgs);
@@ -1292,10 +1547,16 @@ public:
 void npux::populateNpuxToLLVMConversionPatterns(
     RewritePatternSet &patterns, LLVMTypeConverter &typeConverter) {
   patterns.add<NpuxInitLowering, NpuxDestroyLowering, NpuxAllocLowering,
-      NpuxFreeLowering, NpuxMvinBiasLowering, NpuxDmaMvinLowering,
+      NpuxFreeLowering, NpuxMvinBiasLowering, NpuxMvinScaleLowering,
+      NpuxMvinMetadataLowering,
+      NpuxPackMetadataLowering,
+      NpuxResaddLoadLowering,
+      NpuxDmaMvinLowering,
       NpuxSramAllocLowering, NpuxSramFreeLowering, NpuxAccAllocLowering,
       NpuxAccFreeLowering, NpuxSubviewLowering, NpuxSfuRunLowering,
-      NpuxComputeRunLowering, NpuxMataddRunLowering, NpuxDmaMvoutLowering,
+      NpuxGemvRunLowering, NpuxVpuRunLowering, NpuxComputeRunLowering,
+      NpuxMataddRunLowering,
+      NpuxDmaMvoutLowering,
       NpuxTransposeRunLowering, NpuxResampleRunLowering,
       NpuxLayoutNchwToNchwc32Lowering,
       NpuxLayoutNchwc32ToNchwLowering>(typeConverter);

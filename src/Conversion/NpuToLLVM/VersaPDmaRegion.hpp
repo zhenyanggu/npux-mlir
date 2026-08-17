@@ -13,10 +13,30 @@ namespace npux::versap {
 struct GemmDmaRegion {
   DmaMvinOp loadA;
   DmaMvinOp loadW;
+  MvinBiasOp loadBias;
+  MvinScaleOp loadScale;
+  MvinMetadataOp loadMetadata;
+  ResaddLoadOp loadResidual;
   ComputeRunOp compute;
   DmaMvoutOp storeO;
 };
 
-llvm::Expected<GemmDmaRegion> extractGemmDmaRegion(ComputeRunOp compute);
+struct GemvDmaRegion {
+  DmaMvinOp loadA;
+  DmaMvinOp loadW;
+  DmaMvinOp loadMetadata;
+  GemvRunOp compute;
+  DmaMvoutOp storeO;
+};
+
+struct VpuDmaRegion {
+  VpuRunOp compute;
+  DmaMvoutOp storeO;
+};
+
+llvm::Expected<GemmDmaRegion> extractGemmDmaRegion(ComputeRunOp compute,
+    bool requireOutputDma = true);
+llvm::Expected<GemvDmaRegion> extractGemvDmaRegion(GemvRunOp compute);
+llvm::Expected<VpuDmaRegion> extractVpuDmaRegion(VpuRunOp compute);
 
 } // namespace npux::versap

@@ -109,8 +109,89 @@ struct GemmConfig {
   bool accIsChange = false;
   bool resaddIsChange = false;
   bool metadataIsChange = false;
+  // DESC2[60]: retain the INT32 postprocess result in the opposite ACC bank
+  // for a following accumulation slice.
+  bool writePartial = false;
   bool relu = false;
   SaOperation operation = SaOperation::Gemm;
+  // CONV reuses SA_COMPUTE. Its dimensions are IFM H/W/C and OFM C.
+  uint16_t d3 = 0;
+  uint8_t kernelShapeM1 = 0;
+  uint8_t strideM1 = 0;
+  uint8_t dilationM1 = 0;
+  uint8_t paddingLeft = 0;
+  uint8_t paddingRight = 0;
+  uint8_t paddingTop = 0;
+  uint8_t paddingBottom = 0;
+};
+
+struct GemvConfig {
+  // GEMV writes 16-bit BF16 elements to the selected O bank in the current
+  // npu_top configuration. m is the output-vector length and k is the
+  // matrix-vector reduction width.
+  uint16_t m;
+  uint16_t k;
+  uint16_t activationGroupStrideBytes;
+  uint16_t activationScaleBase;
+  uint16_t aBase;
+  uint16_t wBase;
+  uint16_t oBase;
+  uint16_t activationScale2Base;
+  uint16_t cacheCellIndex;
+  uint16_t scaleMetadataWord;
+  uint16_t resaddBase;
+  uint8_t metadataBank;
+  uint8_t aBank;
+  uint8_t wBank;
+  uint8_t oBank;
+  uint8_t mode = 0;
+  uint8_t groupCountM1 = 0;
+  bool kvColumnScale = false;
+  bool pvProbabilityQ24 = false;
+  bool unitWeightScale = false;
+  bool activationScale = false;
+  bool activationScale2 = false;
+  bool preloadAccumulator = false;
+  uint8_t preloadAccumulatorId = 0;
+  uint8_t preloadAccumulatorRow = 0;
+  uint16_t preloadAccumulatorData = 0;
+  bool resadd = false;
+};
+
+enum class VpuOpcode : uint8_t {
+  Load = 0x00, Store = 0x01, Alu = 0x02, Shift = 0x03, Mac = 0x05,
+  FpAlu = 0x06, FpMac = 0x07, Sfu = 0x09, ReduceInt = 0x0a,
+  ReduceFp = 0x0b, Conv = 0x0c, Move = 0x0d, Mask = 0x0e,
+  Special = 0x10,
+};
+
+enum class VpuPrecision : uint8_t { Int8 = 0, Bf16 = 1, Fp32 = 2, Fp16 = 3 };
+
+// VPU SPECIAL functions implemented by the current VersaEdge RTL. All VPU
+// tensor traffic is between the two physical O banks.
+enum class VpuSpecialFunction : uint8_t {
+  RmsNorm = 0,
+  LayerNorm = 1,
+  Softmax = 2,
+  Gelu = 3,
+  Transpose = 4,
+  PoolMax = 5,
+  Sigmoid = 6,
+};
+
+struct VpuConfig {
+  VpuSpecialFunction function;
+  // Logical tensor dimensions. RTL encodes both as minus one in DESC0.
+  uint16_t rows;
+  uint16_t columns;
+  uint8_t sourceSelect = 0;
+  uint8_t destinationSelect = 0;
+  VpuPrecision sourcePrecision = VpuPrecision::Bf16;
+  VpuPrecision destinationPrecision = VpuPrecision::Bf16;
+  uint16_t sourceAddress = 0;
+  uint16_t destinationAddress = 0;
+  // Used only when a BF16 SPECIAL function quantizes its output to INT8.
+  uint32_t outputInverseScaleQ8_24 = 0;
 };
 
 llvm::Expected<EncodedDescriptor> encodeMvinA(const MvinAConfig &config);
@@ -118,5 +199,7 @@ llvm::Expected<EncodedDescriptor> encodeMvinW(const MvinWConfig &config);
 llvm::Expected<EncodedDescriptor> encodeAuxMvin(const AuxMvinConfig &config);
 llvm::Expected<EncodedDescriptor> encodeMvout(const MvoutConfig &config);
 llvm::Expected<EncodedDescriptor> encodeGemm(const GemmConfig &config);
+llvm::Expected<EncodedDescriptor> encodeGemv(const GemvConfig &config);
+llvm::Expected<EncodedDescriptor> encodeVpu(const VpuConfig &config);
 
 } // namespace npux::versap

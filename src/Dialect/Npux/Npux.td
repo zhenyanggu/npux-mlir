@@ -272,6 +272,106 @@ def COMPUTE_OpTypeAttr
   let cppNamespace = "::npux";
 }
 
+def Npux_MvinScaleOp : Npux_Op<"mvin_scale"> {
+  let summary = "Move per-channel Q8.24 scales to metadata memory";
+  let description = [{
+    Loads host-side Q8.24 scale metadata for Versa-P SA per-channel output
+    quantization. The source is laid out as one 32-byte metadata word per
+    eight output channels. This is distinct from mvin_bias: metadata source
+    ownership must remain explicit so descriptor lowering cannot treat bias
+    data as scale words.
+  }];
+
+  let arguments = (ins AnyMemRef:$source);
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $source attr-dict `:` type($source)
+  }];
+}
+
+def Npux_MvinMetadataOp : Npux_Op<"mvin_metadata"> {
+  let summary = "Move packed Versa-P SA metadata to metadata memory";
+  let description = [{
+    Loads a pre-packed Versa-P SA metadata buffer. For an INT8 GEMM with bias
+    and per-channel scales, the buffer contains ceil(N / 8) 32-byte bias words
+    followed by ceil(N / 8) 32-byte Q8.24 scale words. RegionMark emits one
+    AUX_MVIN and programs bias_addr=0 and scale_addr=ceil(N / 8). For QK,
+    the buffer instead contains one little-endian i32 Q8.24 gamma at word
+    zero; its source linalg.generic carries npu.versa_p_qk_gamma_q8_24 and
+    has this buffer as its third input. The matching compute_run carries
+    npux.versa_p_qk_gamma_q8_24 and RegionMark programs scale_addr=0.
+  }];
+
+  let arguments = (ins AnyMemRef:$source);
+  let results = (outs);
+
+  let assemblyFormat = [{
+    $source attr-dict `:` type($source)
+  }];
+}
+
+def Npux_PackMetadataOp : Npux_Op<"pack_metadata"> {
+  let summary = "Pack Bias and per-channel scales into Versa-P metadata words";
+  let description = [{
+    Materializes the host buffer consumed by mvin_metadata. Bias and scale
+    values are contiguous i32 arrays; destination contains groups of eight
+    bias values followed by groups of eight Q8.24 scale values, with zero
+    padding in each final partial group.
+  }];
+
+  let arguments = (ins AnyMemRef:$bias, AnyMemRef:$scales,
+      AnyMemRef:$destination, I32:$channel_count);
+  let results = (outs);
+}
+
+def Npux_ResaddLoadOp : Npux_Op<"resadd_load"> {
+  let summary = "Load a Versa-P SA residual tensor";
+  let description = [{
+    Identifies the host residual input of an SA region. Versa-P RegionMark
+    converts it to an AUX_MVIN transfer into the physical ResAdd bank.
+  }];
+  let arguments = (ins AnyMemRef:$source);
+  let results = (outs);
+  let assemblyFormat = "$source attr-dict `:` type($source)";
+}
+
+def Npux_GemvRunOp : Npux_Op<"gemv_run"> {
+  let summary = "Low-level mapped Versa-P GEMV operation";
+  let description = [{
+    GEMV has an explicit metadata operand because the Versa-P descriptor
+    consumes activation/weight scale metadata from a separate local bank.
+    The output SRAM value is an O-bank scratch value when this operation is
+    replaced by a descriptor region.
+  }];
+  let arguments = (ins
+      NpuSramMemRef:$input_a, NpuSramMemRef:$input_w,
+      NpuSramMemRef:$metadata, NpuSramMemRef:$output,
+      I16:$m, I16:$k, I16:$activation_group_stride_bytes,
+      I16:$activation_scale_base, I16:$activation_scale2_base,
+      I16:$cache_cell_index, I16:$scale_metadata_word, I16:$resadd_base,
+      I8:$mode, I8:$group_count_m1,
+      I1:$kv_column_scale, I1:$pv_probability_q24, I1:$unit_weight_scale,
+      I1:$activation_scale, I1:$activation_scale2, I1:$resadd);
+  let results = (outs);
+}
+
+def Npux_VpuRunOp : Npux_Op<"vpu_run"> {
+  let summary = "Versa-P VPU SPECIAL operation on O-bank tensors";
+  let description = [{
+    The input and output values denote O-bank scratch tensors for descriptor
+    scheduling. They must be connected to a compatible descriptor producer
+    and a final MVOUT; arbitrary SRAM VPU traffic remains on the legacy SFU
+    path.
+  }];
+  let arguments = (ins
+      NpuSramMemRef:$input, NpuSramMemRef:$output,
+      I8:$function, I16:$rows, I16:$columns,
+      I8:$source_precision, I8:$destination_precision,
+      I32:$output_inverse_scale_q8_24);
+  let results = (outs);
+}
+
 def ACT_Op_RELU        : I32EnumAttrCase<"relu", 0>;
 def ACT_Op_RELU6       : I32EnumAttrCase<"relu6", 1>;
 def ACT_Op_LEAKY_0_1   : I32EnumAttrCase<"leaky_0_1", 2>;

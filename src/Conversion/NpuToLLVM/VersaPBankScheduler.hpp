@@ -13,14 +13,17 @@
 
 namespace npux::versap {
 
-enum class BankResource : uint8_t { A, W, O, Resadd, Metadata };
+// O and ACC are physically separate ping-pong banks in the RTL. They may use
+// the same bank index in one SA descriptor without a resource conflict.
+enum class BankResource : uint8_t { A, W, O, Accumulator, Resadd, Metadata };
 enum class EngineKind : uint8_t {
   MvinA,
   MvinW,
   AuxMvin,
   Sa,
-  Vpu,
   OutputDma,
+  Gemv,
+  Vpu,
   Count
 };
 
@@ -32,6 +35,8 @@ enum class ScheduledCommandKind : uint8_t {
   LoadMetadata,
   LoadResidual,
   Gemm,
+  Conv,
+  Gemv,
   Vpu,
   StoreO,
 };
@@ -58,8 +63,11 @@ struct BankUse {
 };
 
 // Descriptor and status offsets are relative to the Versa-P MMIO base. A
-// dependency means the predecessor STATUS has reported done without error;
-// accepted_count is never a dependency condition.
+// For a predecessor on the same engine, a dependency requires software to
+// wait for STATUS before another command is submitted. For a predecessor on a
+// different engine, it is a hardware launch condition: the RTL dispatcher
+// keeps the command pending until its bank ownership and valid bits permit
+// execution. accepted_count is never a dependency condition.
 struct ScheduledCommand {
   uint32_t id;
   ScheduledCommandKind kind;
@@ -76,6 +84,7 @@ struct ScheduledCommand {
 struct QuantizationHints {
   bool requireRawInt32 = false;
   bool requireFp32 = false;
+  bool nextConsumesBf16 = false;
   bool nextConsumesInt8 = false;
   bool perChannelScaleAvailable = false;
   uint16_t metadataWords = 0;
@@ -93,18 +102,36 @@ struct GemmLocalAddresses {
   uint16_t scaleMetadataWord = 0;
 };
 
+struct ConvGeometry {
+  uint16_t outputChannels;
+  uint8_t kernelShapeM1;
+  uint8_t strideM1;
+  uint8_t dilationM1;
+  uint8_t paddingLeft;
+  uint8_t paddingRight;
+  uint8_t paddingTop;
+  uint8_t paddingBottom;
+};
+
 struct TileRequest {
   uint16_t m;
   uint16_t n;
   uint16_t k;
   bool needsBias = false;
   bool needsAccumulate = false;
+  bool writePartial = false;
   bool needsResadd = false;
   bool needsVpu = false;
   bool relu = false;
   bool storeToDram = true;
   SaOperation operation = SaOperation::Gemm;
+  std::optional<ConvGeometry> conv;
   QuantizationHints quantization;
+
+  // QK postprocess reads the low 32 bits of scaleMetadataWord as a positive
+  // Q8.24 gamma. The value itself lives in metadataDma's host buffer; this
+  // field makes that otherwise implicit descriptor contract explicit.
+  std::optional<uint32_t> qkGammaQ8_24;
 
   // G1 requires concrete static DMA information for every emitted command.
   std::optional<MvinAConfig> aDma;
@@ -115,6 +142,25 @@ struct TileRequest {
   std::optional<GemmLocalAddresses> localAddresses;
 };
 
+struct GemvRequest {
+  GemvConfig config;
+  bool storeToDram = true;
+  std::optional<MvinAConfig> aDma;
+  std::optional<MvinWConfig> wDma;
+  std::optional<AuxMvinConfig> metadataDma;
+  std::optional<AuxMvinConfig> residualDma;
+  std::optional<MvoutConfig> outputDma;
+};
+
+struct VpuRequest {
+  VpuConfig config;
+  // SPECIAL operations always consume one O bank and produce the other one.
+  // An optional MVOUT drains that destination bank to DRAM as the next command
+  // in the same descriptor DAG.
+  bool storeToDram = false;
+  std::optional<MvoutConfig> outputDma;
+};
+
 struct TileSchedule {
   OutputMode outputMode;
   ScaleMode scaleMode;
@@ -123,6 +169,7 @@ struct TileSchedule {
   uint8_t oBank;
   uint8_t metadataBank;
   uint8_t accumulatorBank = kOutputBankCount;
+  uint8_t partialOutputBank = kOutputBankCount;
   uint8_t residualBank = kOutputBankCount;
   uint8_t vpuOutputBank = kOutputBankCount;
   bool aIsChange = true;
@@ -156,6 +203,10 @@ public:
   VersaPBankScheduler();
 
   llvm::Expected<TileSchedule> scheduleGemmTile(const TileRequest &request);
+  llvm::Expected<TileSchedule> scheduleConvTile(const TileRequest &request);
+  llvm::Expected<TileSchedule> scheduleGemv(const GemvRequest &request);
+  llvm::Expected<TileSchedule> scheduleVpuTile(const VpuRequest &request);
+  llvm::Expected<ScheduledCommand> scheduleVpu(const VpuRequest &request);
   llvm::Expected<AttentionHeadSchedule>
   scheduleAttentionHead(const AttentionHeadRequest &request);
   void reset();
@@ -163,6 +214,7 @@ public:
 private:
   struct BankState {
     uint32_t lastUse = 0;
+    bool containsData = false;
   };
 
   OutputMode chooseOutputMode(const QuantizationHints &hints) const;
@@ -185,9 +237,17 @@ private:
   std::array<BankState, kInputBankCount> aBanks;
   std::array<BankState, kInputBankCount> wBanks;
   std::array<BankState, kOutputBankCount> oBanks;
+  std::array<BankState, kOutputBankCount> accumulatorBanks;
   std::array<BankState, kResaddBankCount> resaddBanks;
   std::array<BankState, kMetadataBankCount> metadataBanks;
-  std::array<uint32_t, kEngineKindCount> engineLastUse{};
+  // The RTL admits one executing and one pending command per opcode. Keep a
+  // two-entry software window; command three waits for the oldest entry.
+  std::array<std::array<uint32_t, 2>, kEngineKindCount> engineInFlight{};
+  std::array<uint8_t, kEngineKindCount> engineInFlightCount{};
+  // write_partial writes the bank opposite to the descriptor ACC-bank field.
+  // Keep that concrete producer bank so the next accumulating slice consumes
+  // the value actually retained by the RTL.
+  std::optional<uint8_t> partialAccumulatorBank;
   uint32_t nextCommandId = 1;
 };
 

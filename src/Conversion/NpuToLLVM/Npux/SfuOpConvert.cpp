@@ -14,11 +14,67 @@
 
 #include <algorithm>
 #include <cmath> 
+#include <cstdint>
 
 using namespace mlir;
 using namespace npux;
 
 namespace {
+
+bool hasPreviousGemvWriter(linalg::GenericOp operation, Value input) {
+  for (Operation *previous = operation->getPrevNode(); previous;
+       previous = previous->getPrevNode()) {
+    if (auto gemv = dyn_cast<GemvRunOp>(previous)) {
+      if (gemv.getOutput() == input)
+        return true;
+      continue;
+    }
+    auto generic = dyn_cast<linalg::GenericOp>(previous);
+    if (!generic || generic.getOutputs().size() != 1 ||
+        generic.getOutputs()[0] != input)
+      continue;
+    auto libraryCall = generic.getLibraryCallAttr();
+    if (libraryCall && libraryCall.getValue() == "npu_gemv")
+      return true;
+  }
+  return false;
+}
+
+bool hasPreviousInt8ConvWriter(linalg::GenericOp operation, Value input) {
+  for (Operation *previous = operation->getPrevNode(); previous;
+       previous = previous->getPrevNode()) {
+    auto conv = dyn_cast<ComputeRunOp>(previous);
+    if (!conv || conv.getOpType() != ComputeOpType::conv)
+      continue;
+    if (conv.getOutput() == input)
+      return true;
+  }
+  return false;
+}
+
+bool hasPreviousBf16GemmWriter(linalg::GenericOp operation, Value input) {
+  for (Operation *previous = operation->getPrevNode(); previous;
+       previous = previous->getPrevNode()) {
+    auto gemm = dyn_cast<ComputeRunOp>(previous);
+    if (gemm && gemm.getOpType() == ComputeOpType::gemm &&
+        gemm.getOutput() == input) {
+      auto outputType = dyn_cast<MemRefType>(gemm.getOutput().getType());
+      return outputType && isa<BFloat16Type>(outputType.getElementType());
+    }
+    auto generic = dyn_cast<linalg::GenericOp>(previous);
+    if (!generic || generic.getOutputs().size() != 1 ||
+        generic.getOutputs()[0] != input)
+      continue;
+    auto libraryCall = generic.getLibraryCallAttr();
+    if (!libraryCall || (libraryCall.getValue() != "npu_gemm" &&
+                         libraryCall.getValue() != "npu_matmul" &&
+                         libraryCall.getValue() != "npu_matmul_integer"))
+      continue;
+    auto outputType = dyn_cast<MemRefType>(generic.getOutputs()[0].getType());
+    return outputType && isa<BFloat16Type>(outputType.getElementType());
+  }
+  return false;
+}
 
 // ============================================================================
 // Helper: Quant Params (Existing)
@@ -172,9 +228,13 @@ public:
 
     // 仅匹配 SFU 相关算子
     npux::SFUOpType sfuOpEnum;
+    bool versaPVpu = false;
+    bool sigmoidSource = false;
     if (opName == "npu_gelu") sfuOpEnum = npux::SFUOpType::gelu;
     else if (opName == "npu_softmax") sfuOpEnum = npux::SFUOpType::softmax;
     else if (opName == "npu_layernorm") sfuOpEnum = npux::SFUOpType::layernorm;
+    else if (opName == "npu_sigmoid") sigmoidSource = true;
+    else if (opName == "npu_versa_p_vpu") versaPVpu = true;
     else return failure(); 
 
     Location loc = op.getLoc();
@@ -197,6 +257,48 @@ public:
 
     Value vCol = rewriter.create<arith::ConstantIntOp>(loc, cols, 16);
     Value vRow = rewriter.create<arith::ConstantIntOp>(loc, rows, 16);
+
+    const bool gemvProducer = hasPreviousGemvWriter(op, inputMemRef);
+    const bool gemmBf16Producer =
+        hasPreviousBf16GemmWriter(op, inputMemRef);
+    if (sigmoidSource && !versaPVpu && !gemvProducer && !gemmBf16Producer)
+      return failure();
+    if (versaPVpu || gemvProducer || gemmBf16Producer) {
+      auto getInteger = [&](StringRef name, int64_t defaultValue) {
+        if (auto attr = op->getAttrOfType<IntegerAttr>(name))
+          return attr.getInt();
+        return defaultValue;
+      };
+      int64_t function = getInteger("vpu_function", -1);
+      if (!versaPVpu) {
+        if (opName == "npu_softmax")
+          function = 2;
+        else if (opName == "npu_layernorm")
+          function = 1;
+        else if (opName == "npu_gelu")
+          function = 3;
+        else if (opName == "npu_sigmoid")
+          function = 6;
+      }
+      const int64_t sourcePrecision = getInteger("vpu_source_precision", 1);
+      const int64_t destinationPrecision =
+          getInteger("vpu_destination_precision", 1);
+      const int64_t inverseScale =
+          getInteger("vpu_output_inverse_scale_q8_24", 0);
+      if (function < 0 || function > 6 || sourcePrecision < 0 ||
+          sourcePrecision > 3 || destinationPrecision < 0 ||
+          destinationPrecision > 3 || inverseScale < 0 ||
+          inverseScale > UINT32_MAX)
+        return failure();
+      rewriter.replaceOpWithNewOp<VpuRunOp>(op, inputMemRef, outputMemRef,
+          rewriter.create<arith::ConstantIntOp>(loc, function, 8),
+          rewriter.create<arith::ConstantIntOp>(loc, rows + 1, 16),
+          rewriter.create<arith::ConstantIntOp>(loc, cols + 1, 16),
+          rewriter.create<arith::ConstantIntOp>(loc, sourcePrecision, 8),
+          rewriter.create<arith::ConstantIntOp>(loc, destinationPrecision, 8),
+          rewriter.create<arith::ConstantIntOp>(loc, inverseScale, 32));
+      return success();
+    }
 
     // ... (Quant Params Calculation 保持不变) ...
     // 1. Input Quant
@@ -289,6 +391,24 @@ public:
     ArrayRef<int64_t> inShape = inType.getShape();
     ArrayRef<int64_t> outShape = outType.getShape();
     int64_t rank = static_cast<int64_t>(inShape.size());
+
+    // Restrict O-bank transpose selection to the unambiguous 2-D INT8 Conv
+    // producer. Higher-rank permutations keep the established SRAM path.
+    static constexpr int64_t kPerm2D[] = {1, 0};
+    if (hasPreviousInt8ConvWriter(op, inputMemRef) && rank == 2 &&
+        inType.getElementType().isInteger(8) &&
+        outType.getElementType().isInteger(8) &&
+        (matchesPermutation(perm, kPerm2D) ||
+            matchesRank2TransposeShape(inShape, outShape))) {
+      rewriter.replaceOpWithNewOp<VpuRunOp>(op, inputMemRef, outputMemRef,
+          rewriter.create<arith::ConstantIntOp>(loc, 4, 8),
+          rewriter.create<arith::ConstantIntOp>(loc, inShape[0], 16),
+          rewriter.create<arith::ConstantIntOp>(loc, inShape[1], 16),
+          rewriter.create<arith::ConstantIntOp>(loc, 0, 8),
+          rewriter.create<arith::ConstantIntOp>(loc, 0, 8),
+          rewriter.create<arith::ConstantIntOp>(loc, 0, 32));
+      return success();
+    }
 
     Value c0 = createIndexConstant(rewriter, loc, 0);
     Value c1 = createIndexConstant(rewriter, loc, 1);
@@ -529,6 +649,35 @@ public:
 
     Value inputMemRef = op.getInputs()[0];
     Value outputMemRef = op.getOutputs()[0];
+
+    auto poolInputType = mlir::dyn_cast<MemRefType>(inputMemRef.getType());
+    auto poolOutputType = mlir::dyn_cast<MemRefType>(outputMemRef.getType());
+    // The Versa-P VPU implements only INT8 PoolMax with a fixed 2x2,
+    // stride-2, no-padding window. Select it only for the 2D O-bank view
+    // emitted immediately after a static Conv producer; other MaxPool forms
+    // retain the legacy resample lowering.
+    if (opName == "npu_maxpool" && hasPreviousInt8ConvWriter(op, inputMemRef) &&
+        poolInputType && poolOutputType && poolInputType.getRank() == 2 &&
+        poolOutputType.getRank() == 2 &&
+        poolInputType.getElementType().isInteger(8) &&
+        poolOutputType.getElementType().isInteger(8) &&
+        hasOnlyStaticPositiveShape(poolInputType) &&
+        hasOnlyStaticPositiveShape(poolOutputType)) {
+      const int64_t rows = poolInputType.getDimSize(0);
+      const int64_t columns = poolInputType.getDimSize(1);
+      if (rows % 2 == 0 && columns % 2 == 0 &&
+          poolOutputType.getDimSize(0) == rows / 2 &&
+          poolOutputType.getDimSize(1) == columns / 2) {
+        rewriter.replaceOpWithNewOp<VpuRunOp>(op, inputMemRef, outputMemRef,
+            rewriter.create<arith::ConstantIntOp>(loc, 5, 8),
+            rewriter.create<arith::ConstantIntOp>(loc, rows, 16),
+            rewriter.create<arith::ConstantIntOp>(loc, columns, 16),
+            rewriter.create<arith::ConstantIntOp>(loc, 0, 8),
+            rewriter.create<arith::ConstantIntOp>(loc, 0, 8),
+            rewriter.create<arith::ConstantIntOp>(loc, 0, 32));
+        return success();
+      }
+    }
 
     // 检查 Memory Space (SRAM=2)
     auto inType = mlir::dyn_cast<MemRefType>(inputMemRef.getType());
