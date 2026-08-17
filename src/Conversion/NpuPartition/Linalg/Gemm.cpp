@@ -179,7 +179,22 @@ static Value buildLinalgTranspose(OpBuilder &b, Location loc, Value input,
         Value res = in;
         // 按照用户需求，用 addi 构造 dummy body
         if (elemType.isIntOrIndex()) {
-          res = nestedB.create<arith::AddIOp>(nestedLoc, in, in);
+          if (elemType.isSignlessInteger()) {
+            res = nestedB.create<arith::AddIOp>(nestedLoc, in, in);
+          } else {
+            Type signlessType = nestedB.getIntegerType(
+                elemType.getIntOrFloatBitWidth());
+            Value signlessInput = nestedB
+                                      .create<UnrealizedConversionCastOp>(
+                                          nestedLoc, signlessType, in)
+                                      .getResult(0);
+            Value sum = nestedB.create<arith::AddIOp>(
+                nestedLoc, signlessInput, signlessInput);
+            res = nestedB
+                      .create<UnrealizedConversionCastOp>(
+                          nestedLoc, elemType, sum)
+                      .getResult(0);
+          }
         } else if (mlir::isa<FloatType>(elemType)) {
           res = nestedB.create<arith::AddFOp>(nestedLoc, in, in);
         }
@@ -461,8 +476,17 @@ static Value createGenericMatMulOp(ConversionPatternRewriter &rewriter,
           if (finalElemType.isInteger(32)) {
             res = inI32;
           } else if (finalElemType.isInteger(8)) {
-            res = nestedB.create<arith::TruncIOp>(
-                nestedLoc, finalElemType, inI32);
+            // Arithmetic integer ops require a signless result type. Preserve
+            // ONNX's i8/ui8 element type with a cast at the linalg boundary.
+            Type signlessI8 = nestedB.getIntegerType(8);
+            Value truncated = nestedB.create<arith::TruncIOp>(
+                nestedLoc, signlessI8, inI32);
+            res = finalElemType == signlessI8
+                      ? truncated
+                      : nestedB
+                            .create<UnrealizedConversionCastOp>(
+                                nestedLoc, finalElemType, truncated)
+                            .getResult(0);
           } else if (mlir::isa<FloatType>(finalElemType)) {
             res = nestedB.create<arith::SIToFPOp>(
                 nestedLoc, finalElemType, inI32);
@@ -738,10 +762,16 @@ struct QLinearMatMulToLinalg : public OpConversionPattern<ONNXQLinearMatMulOp> {
     if (do_relu == 1)
       fusedOps.push_back("Relu");
 
+    bool isGraphOutput = llvm::any_of(replaceTarget->getUsers(),
+        [](Operation *user) {
+          return user->getName().getStringRef() == "func.return";
+        });
+
     Value result =
         createGenericMatMulOp(rewriter, op.getLoc(), inputs, outputType, scaleA,
             zpA, scaleB, zpB, scaleY, zpY, "npu_matmul", do_relu, relu_type,
-            false, false, op, getNpuProfileLayerName(op), fusedOps);
+            false, false, op, getNpuProfileLayerName(op), fusedOps,
+            /*skipSPM=*/false, /*isGraphOutput=*/isGraphOutput);
 
     // =========================================================================
     // 安全擦除

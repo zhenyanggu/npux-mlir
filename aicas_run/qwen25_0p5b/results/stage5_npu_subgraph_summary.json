@@ -1,0 +1,1875 @@
+{
+  "cases": [
+    {
+      "coverage": {
+        "dma_op_count": 8,
+        "k_loop_marker_count": 2,
+        "npu_library_call_count": 11,
+        "npu_library_calls": [
+          "npu_dma_mvin",
+          "npu_dma_mvout",
+          "npu_matmul",
+          "npu_softmax"
+        ],
+        "npux_op_count": 47
+      },
+      "kind": "qlinear_proxy",
+      "last_success_stage": "llvm_lowering",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_core_qlinear_npu_proxy.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.057,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 3,
+            "npu_library_calls": [
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/02_npu_partition.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.019,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/03_npu_tiling.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 3,
+            "npu_library_calls": [
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_tiling",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/03_npu_tiling.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/04_npu_insert_dma.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_insert_dma",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/04_npu_insert_dma.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.021,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/05_npu_op_splitting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 2,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "npu_op_splitting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/05_npu_op_splitting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.03,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/06_npu_bufferization.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "npu_bufferization",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/06_npu_bufferization.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/07_convert_vector_to_scf.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "convert_vector_to_scf",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/07_convert_vector_to_scf.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/08_lower_affine.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "lower_affine",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/08_lower_affine.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/09_lower_krnl_region.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "lower_krnl_region",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/09_lower_krnl_region.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/10_buffer_loop_hoisting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "buffer_loop_hoisting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/10_buffer_loop_hoisting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.023,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/11_buffer_dealloc.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "buffer_dealloc",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/11_buffer_dealloc.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/12_allocation_liveness.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "allocation_liveness",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/12_allocation_liveness.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/13_convert_bufferization_to_memref.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "convert_bufferization_to_memref",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/13_convert_bufferization_to_memref.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/14_fold_memref_aliases.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 11,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "fold_memref_aliases",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/14_fold_memref_aliases.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.018,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/15_convert_linalg_to_npux.log",
+          "metrics": {
+            "dma_op_count": 8,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 39,
+            "split_stage_count": 0
+          },
+          "name": "convert_linalg_to_npux",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/15_convert_linalg_to_npux.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/16_lower_npu_subview.log",
+          "metrics": {
+            "dma_op_count": 8,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 47,
+            "split_stage_count": 0
+          },
+          "name": "lower_npu_subview",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/16_lower_npu_subview.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/17_npux_compute_fusion.log",
+          "metrics": {
+            "dma_op_count": 8,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 43,
+            "split_stage_count": 0
+          },
+          "name": "npux_compute_fusion",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/17_npux_compute_fusion.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/18_convert_linalg_to_loops.log",
+          "metrics": {
+            "dma_op_count": 8,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 43,
+            "split_stage_count": 0
+          },
+          "name": "convert_linalg_to_loops",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/18_convert_linalg_to_loops.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/19_npu_memory_plan.log",
+          "metrics": {
+            "dma_op_count": 8,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 43,
+            "split_stage_count": 0
+          },
+          "name": "npu_memory_plan",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/19_npu_memory_plan.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/20_erase_npu_memory_space.log",
+          "metrics": {
+            "dma_op_count": 8,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 43,
+            "split_stage_count": 0
+          },
+          "name": "erase_npu_memory_space",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/20_erase_npu_memory_space.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.024,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/21_llvm_lowering.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "llvm_lowering",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_qlinear_npu_proxy/21_llvm_lowering.mlir",
+          "returncode": 0
+        }
+      ],
+      "success": true
+    },
+    {
+      "coverage": {
+        "dma_op_count": 0,
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_library_calls": [],
+        "npux_op_count": 0
+      },
+      "kind": "fp16_control",
+      "last_success_stage": "npu_partition",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_core_fp16_reference.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.044,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_fp16_reference/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_fp16_reference/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_fp16_reference/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_fp16_reference/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_fp16_reference/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_core_fp16_reference/02_npu_partition.mlir",
+          "returncode": 0
+        }
+      ],
+      "success": true
+    },
+    {
+      "coverage": {
+        "dma_op_count": 0,
+        "k_loop_marker_count": 2,
+        "npu_library_call_count": 14,
+        "npu_library_calls": [
+          "npu_dma_mvin",
+          "npu_dma_mvout",
+          "npu_matmul",
+          "npu_softmax",
+          "npu_transpose"
+        ],
+        "npux_op_count": 0
+      },
+      "kind": "qlinear_proxy",
+      "last_success_stage": "fold_memref_aliases",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_qlinear_npu_proxy.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.043,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/02_npu_partition.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.019,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/03_npu_tiling.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_tiling",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/03_npu_tiling.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/04_npu_insert_dma.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_insert_dma",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/04_npu_insert_dma.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.022,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/05_npu_op_splitting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 2,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "npu_op_splitting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/05_npu_op_splitting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.031,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/06_npu_bufferization.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "npu_bufferization",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/06_npu_bufferization.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.018,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/07_convert_vector_to_scf.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "convert_vector_to_scf",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/07_convert_vector_to_scf.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/08_lower_affine.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "lower_affine",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/08_lower_affine.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/09_lower_krnl_region.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "lower_krnl_region",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/09_lower_krnl_region.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/10_buffer_loop_hoisting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "buffer_loop_hoisting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/10_buffer_loop_hoisting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.024,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/11_buffer_dealloc.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "buffer_dealloc",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/11_buffer_dealloc.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/12_allocation_liveness.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "allocation_liveness",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/12_allocation_liveness.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/13_convert_bufferization_to_memref.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "convert_bufferization_to_memref",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/13_convert_bufferization_to_memref.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/14_fold_memref_aliases.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 2,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul",
+              "npu_softmax",
+              "npu_transpose"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 2
+          },
+          "name": "fold_memref_aliases",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/14_fold_memref_aliases.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "error": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/14_fold_memref_aliases.mlir:24:5: error: unsupported npu_transpose permutation for NPU lowering; rank=4",
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_qlinear_npu_proxy/15_convert_linalg_to_npux.log",
+          "name": "convert_linalg_to_npux",
+          "returncode": 1
+        }
+      ],
+      "success": false
+    },
+    {
+      "coverage": {
+        "dma_op_count": 0,
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_library_calls": [],
+        "npux_op_count": 0
+      },
+      "kind": "fp16_control",
+      "last_success_stage": "npu_partition",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_fp16_reference.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.042,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_fp16_reference/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_fp16_reference/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_fp16_reference/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_fp16_reference/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_fp16_reference/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/attention_fp16_reference/02_npu_partition.mlir",
+          "returncode": 0
+        }
+      ],
+      "success": true
+    },
+    {
+      "coverage": {
+        "dma_op_count": 3,
+        "k_loop_marker_count": 1,
+        "npu_library_call_count": 4,
+        "npu_library_calls": [
+          "npu_dma_mvin",
+          "npu_dma_mvout",
+          "npu_matmul"
+        ],
+        "npux_op_count": 17
+      },
+      "kind": "qlinear_proxy",
+      "last_success_stage": "llvm_lowering",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_lm_head_qlinear_npu_proxy.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.43,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 1,
+            "npu_library_calls": [
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/02_npu_partition.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.018,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/03_npu_tiling.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 1,
+            "npu_library_calls": [
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_tiling",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/03_npu_tiling.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/04_npu_insert_dma.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_insert_dma",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/04_npu_insert_dma.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/05_npu_op_splitting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 1,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "npu_op_splitting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/05_npu_op_splitting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.022,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/06_npu_bufferization.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "npu_bufferization",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/06_npu_bufferization.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/07_convert_vector_to_scf.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "convert_vector_to_scf",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/07_convert_vector_to_scf.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/08_lower_affine.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "lower_affine",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/08_lower_affine.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/09_lower_krnl_region.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "lower_krnl_region",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/09_lower_krnl_region.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/10_buffer_loop_hoisting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "buffer_loop_hoisting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/10_buffer_loop_hoisting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.019,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/11_buffer_dealloc.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "buffer_dealloc",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/11_buffer_dealloc.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/12_allocation_liveness.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "allocation_liveness",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/12_allocation_liveness.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/13_convert_bufferization_to_memref.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "convert_bufferization_to_memref",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/13_convert_bufferization_to_memref.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/14_fold_memref_aliases.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 1,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 1
+          },
+          "name": "fold_memref_aliases",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/14_fold_memref_aliases.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/15_convert_linalg_to_npux.log",
+          "metrics": {
+            "dma_op_count": 3,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 17,
+            "split_stage_count": 0
+          },
+          "name": "convert_linalg_to_npux",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/15_convert_linalg_to_npux.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/16_lower_npu_subview.log",
+          "metrics": {
+            "dma_op_count": 3,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 17,
+            "split_stage_count": 0
+          },
+          "name": "lower_npu_subview",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/16_lower_npu_subview.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/17_npux_compute_fusion.log",
+          "metrics": {
+            "dma_op_count": 3,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 16,
+            "split_stage_count": 0
+          },
+          "name": "npux_compute_fusion",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/17_npux_compute_fusion.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/18_convert_linalg_to_loops.log",
+          "metrics": {
+            "dma_op_count": 3,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 16,
+            "split_stage_count": 0
+          },
+          "name": "convert_linalg_to_loops",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/18_convert_linalg_to_loops.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/19_npu_memory_plan.log",
+          "metrics": {
+            "dma_op_count": 3,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 16,
+            "split_stage_count": 0
+          },
+          "name": "npu_memory_plan",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/19_npu_memory_plan.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/20_erase_npu_memory_space.log",
+          "metrics": {
+            "dma_op_count": 3,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 16,
+            "split_stage_count": 0
+          },
+          "name": "erase_npu_memory_space",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/20_erase_npu_memory_space.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.021,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/21_llvm_lowering.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "llvm_lowering",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_qlinear_npu_proxy/21_llvm_lowering.mlir",
+          "returncode": 0
+        }
+      ],
+      "success": true
+    },
+    {
+      "coverage": {
+        "dma_op_count": 0,
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_library_calls": [],
+        "npux_op_count": 0
+      },
+      "kind": "fp16_control",
+      "last_success_stage": "npu_partition",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_lm_head_fp16_reference.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.451,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_fp16_reference/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_fp16_reference/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_fp16_reference/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_fp16_reference/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_fp16_reference/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/lm_head_fp16_reference/02_npu_partition.mlir",
+          "returncode": 0
+        }
+      ],
+      "success": true
+    },
+    {
+      "coverage": {
+        "dma_op_count": 10,
+        "k_loop_marker_count": 4,
+        "npu_library_call_count": 14,
+        "npu_library_calls": [
+          "npu_dma_mvin",
+          "npu_dma_mvout",
+          "npu_matmul"
+        ],
+        "npux_op_count": 48
+      },
+      "kind": "qlinear_proxy",
+      "last_success_stage": "llvm_lowering",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_mlp_qlinear_npu_proxy.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.068,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 2,
+            "npu_library_calls": [
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/02_npu_partition.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.02,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/03_npu_tiling.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 4,
+            "npu_library_calls": [
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_tiling",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/03_npu_tiling.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.018,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/04_npu_insert_dma.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_insert_dma",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/04_npu_insert_dma.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.022,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/05_npu_op_splitting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 4,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "npu_op_splitting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/05_npu_op_splitting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.029,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/06_npu_bufferization.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "npu_bufferization",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/06_npu_bufferization.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/07_convert_vector_to_scf.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "convert_vector_to_scf",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/07_convert_vector_to_scf.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/08_lower_affine.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "lower_affine",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/08_lower_affine.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/09_lower_krnl_region.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "lower_krnl_region",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/09_lower_krnl_region.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/10_buffer_loop_hoisting.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "buffer_loop_hoisting",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/10_buffer_loop_hoisting.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.023,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/11_buffer_dealloc.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "buffer_dealloc",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/11_buffer_dealloc.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/12_allocation_liveness.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "allocation_liveness",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/12_allocation_liveness.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/13_convert_bufferization_to_memref.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "convert_bufferization_to_memref",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/13_convert_bufferization_to_memref.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.018,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/14_fold_memref_aliases.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 4,
+            "npu_library_call_count": 14,
+            "npu_library_calls": [
+              "npu_dma_mvin",
+              "npu_dma_mvout",
+              "npu_matmul"
+            ],
+            "npux_op_count": 0,
+            "split_stage_count": 4
+          },
+          "name": "fold_memref_aliases",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/14_fold_memref_aliases.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.018,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/15_convert_linalg_to_npux.log",
+          "metrics": {
+            "dma_op_count": 10,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 48,
+            "split_stage_count": 0
+          },
+          "name": "convert_linalg_to_npux",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/15_convert_linalg_to_npux.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/16_lower_npu_subview.log",
+          "metrics": {
+            "dma_op_count": 10,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 48,
+            "split_stage_count": 0
+          },
+          "name": "lower_npu_subview",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/16_lower_npu_subview.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/17_npux_compute_fusion.log",
+          "metrics": {
+            "dma_op_count": 10,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 46,
+            "split_stage_count": 0
+          },
+          "name": "npux_compute_fusion",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/17_npux_compute_fusion.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/18_convert_linalg_to_loops.log",
+          "metrics": {
+            "dma_op_count": 10,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 46,
+            "split_stage_count": 0
+          },
+          "name": "convert_linalg_to_loops",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/18_convert_linalg_to_loops.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.016,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/19_npu_memory_plan.log",
+          "metrics": {
+            "dma_op_count": 10,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 46,
+            "split_stage_count": 0
+          },
+          "name": "npu_memory_plan",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/19_npu_memory_plan.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.017,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/20_erase_npu_memory_space.log",
+          "metrics": {
+            "dma_op_count": 10,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 46,
+            "split_stage_count": 0
+          },
+          "name": "erase_npu_memory_space",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/20_erase_npu_memory_space.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.025,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/21_llvm_lowering.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "llvm_lowering",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_qlinear_npu_proxy/21_llvm_lowering.mlir",
+          "returncode": 0
+        }
+      ],
+      "success": true
+    },
+    {
+      "coverage": {
+        "dma_op_count": 0,
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_library_calls": [],
+        "npux_op_count": 0
+      },
+      "kind": "fp16_control",
+      "last_success_stage": "npu_partition",
+      "model": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_mlp_fp16_reference.onnx",
+      "stages": [
+        {
+          "duration_seconds": 0.059,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_fp16_reference/00_import.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "import",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_fp16_reference/00_import.onnx.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.015,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_fp16_reference/01_recompose.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "recompose",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_fp16_reference/01_recompose.mlir",
+          "returncode": 0
+        },
+        {
+          "duration_seconds": 0.014,
+          "log": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_fp16_reference/02_npu_partition.log",
+          "metrics": {
+            "dma_op_count": 0,
+            "k_loop_marker_count": 0,
+            "loop_stage_count": 0,
+            "npu_library_call_count": 0,
+            "npu_library_calls": [],
+            "npux_op_count": 0,
+            "split_stage_count": 0
+          },
+          "name": "npu_partition",
+          "output": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs/mlp_fp16_reference/02_npu_partition.mlir",
+          "returncode": 0
+        }
+      ],
+      "success": true
+    }
+  ],
+  "models_dir": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs",
+  "npu_acc_size": "64KB",
+  "npu_spm_size": "64KB",
+  "onnx_mlir": "/home/lqma/npux-mlir/build/Release/bin/onnx-mlir",
+  "onnx_mlir_opt": "/home/lqma/npux-mlir/build/Release/bin/onnx-mlir-opt",
+  "work_dir": "/home/lqma/qwen25_0p5b/results/stage5_npu_subgraphs"
+}

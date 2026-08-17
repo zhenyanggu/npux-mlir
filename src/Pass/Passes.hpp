@@ -176,6 +176,7 @@ std::unique_ptr<mlir::Pass> createSplitConvIcPass();
 std::unique_ptr<mlir::Pass> createLowerNpuSubviewPass();
 
 std::unique_ptr<mlir::Pass> createNpuxComputeFusionPass();
+std::unique_ptr<mlir::Pass> createVersaPRegionMarkPass();
 
 std::unique_ptr<mlir::Pass> createGemmPipelinePass();
 

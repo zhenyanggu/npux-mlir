@@ -34,6 +34,7 @@
 #include "src/Compiler/CompilerOptions.hpp"
 #include "src/Compiler/CompilerPasses.hpp"
 #include "src/Compiler/DisposableGarbageCollector.hpp"
+#include "src/Compiler/NpuConfig.hpp"
 #include "src/Conversion/KrnlToLLVM/ConvertKrnlToLLVM.hpp"
 #include "src/Dialect/Mlir/VectorMachineSupport.hpp"
 #include "src/Dialect/ONNX/ONNXDialect.hpp"
@@ -287,7 +288,8 @@ void addKrnlToLLVMPasses(
 
   pm.addPass(mlir::memref::createFoldMemRefAliasOpsPass());
 
-  if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+  if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU) &&
+      !npux::useVersaPDescriptorAbi()) {
       pm.addPass(npux::createConvertLinalgToNpuPass());
       pm.addPass(mlir::createCanonicalizerPass());
       pm.addPass(npux::createNpuMemPlanPass());
@@ -338,12 +340,23 @@ InputIRLevelType determineInputIRLevel(mlir::OwningOpRef<ModuleOp> &module) {
 void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
     EmissionTargetType emissionTarget, std::string outputNameNoExt) {
   InputIRLevelType inputIRLevel = determineInputIRLevel(module);
+  const bool hasNpuTarget = onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU);
+  const bool useVersaPDescriptor =
+      hasNpuTarget && npux::useVersaPDescriptorAbi();
+  const bool useLegacyNpuPipeline = hasNpuTarget && !useVersaPDescriptor;
+
+  if (useVersaPDescriptor) {
+    llvm::errs()
+        << "warning: Versa-P descriptor runtime is not available for ZCU102; "
+           "using the CPU lowering pipeline.\n";
+  }
 
   if (inputIRLevel <= ONNXLevel && emissionTarget >= EmitONNXIR)
-    addONNXToMLIRPasses(pm, /*target CPU*/ maccel.empty());
+    addONNXToMLIRPasses(pm,
+        /*target CPU=*/maccel.empty() || useVersaPDescriptor);
 
 
-  if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+  if (useLegacyNpuPipeline) {
       pm.addPass(npux::createONNXToLinalgNpuPass());
       pm.addPass(npux::createNpuProfileAnnotatePass());
       pm.addPass(npux::createNpuTilingPass());
@@ -357,8 +370,8 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
           pm, OptimizationLevel, /*enableCSE*/ true, ONNXOpStats);
     if (inputIRLevel <= MLIRLevel)
       addKrnlToAffinePasses(pm);
-    if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU) ||
-        onnx_mlir::npuxHostSimDirectAbi) {
+    if (!useVersaPDescriptor &&
+        (useLegacyNpuPipeline || onnx_mlir::npuxHostSimDirectAbi)) {
       pm.addPass(npux::createNpuDPSConversionPass());
       if (onnx_mlir::npuxHostSimDirectAbi) {
         pm.addPass(npux::createNpuxDirectOutputReusePass());
@@ -371,7 +384,7 @@ void addPasses(mlir::OwningOpRef<ModuleOp> &module, mlir::PassManager &pm,
   
 
   if (inputIRLevel <= LLVMLevel && emissionTarget >= EmitLLVMIR){
-    if (onnx_mlir::hasTarget(onnx_mlir::TargetKind::NPU)) {
+    if (useLegacyNpuPipeline) {
       //pm.addPass(npux::createNpuSramPromotionPass());
     }
     addKrnlToLLVMPasses(pm, outputNameNoExt, /*enableCSE=*/true);

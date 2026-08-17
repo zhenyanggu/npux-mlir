@@ -63,6 +63,7 @@
 #include "src/Conversion/KrnlToLLVM/KrnlToLLVMHelper.hpp"
 #include "src/Conversion/KrnlToLLVM/RuntimeAPI.hpp"
 #include "src/Conversion/NpuToLLVM/ConvertNpuxToLLVM.hpp"
+#include "src/Compiler/NpuConfig.hpp"
 #include "src/Conversion/ONNXToKrnl/ONNXToKrnlCommon.hpp"
 #include "src/Dialect/Krnl/KrnlOps.hpp"
 #include "src/Pass/Passes.hpp"
@@ -948,7 +949,7 @@ void ConvertKrnlToLLVMPass::runOnOperation() {
       outputOMTensorOwnerships, singleEntryPoint, entryGlobalOps,
       inSigGlobalOps, outSigGlobalOps, inputMemRefTypes, outputMemRefTypes,
       verifyInputTensors, enableParallel);
-  if (hasTarget(TargetKind::NPU)) {
+  if (hasTarget(TargetKind::NPU) && !npux::useVersaPDescriptorAbi()) {
     npux::populateNpuxToLLVMConversionPatterns(patterns, typeConverter);
   }
  // Rewrite patterns for accelerators.

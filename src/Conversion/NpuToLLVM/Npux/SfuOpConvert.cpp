@@ -122,6 +122,13 @@ static bool matchesRank4Perm0213Shape(
          outShape[3] == inShape[3];
 }
 
+static bool matchesRank4Perm0132Shape(
+    ArrayRef<int64_t> inShape, ArrayRef<int64_t> outShape) {
+  return inShape.size() == 4 && outShape.size() == 4 &&
+         outShape[0] == inShape[0] && outShape[1] == inShape[1] &&
+         outShape[2] == inShape[3] && outShape[3] == inShape[2];
+}
+
 static Value createNpuSubview(
     PatternRewriter &rewriter, Location loc, Value source,
     ArrayRef<Value> offsets, ArrayRef<int64_t> resultShape) {
@@ -330,6 +337,49 @@ public:
       return eraseOriginalOp();
     };
 
+    // Qwen attention materializes K as [B, H, S, D] and transposes only
+    // the final two dimensions before the score MatMul. The hardware
+    // transpose is 2-D, so lower one [S, D] slice for each batch/head pair.
+    auto emitRank4Perm0132 = [&]() -> LogicalResult {
+      static constexpr int64_t kPerm0132[] = {0, 1, 3, 2};
+      if (rank != 4 ||
+          !(matchesPermutation(perm, kPerm0132) ||
+            matchesRank4Perm0132Shape(inShape, outShape)))
+        return failure();
+
+      const int64_t batchSize = inShape[0];
+      const int64_t headCount = inShape[1];
+      const int64_t sequenceLength = inShape[2];
+      const int64_t headDim = inShape[3];
+
+      Value batchUpper = createIndexConstant(rewriter, loc, batchSize);
+      Value headUpper = createIndexConstant(rewriter, loc, headCount);
+      auto batchLoop = rewriter.create<scf::ForOp>(loc, c0, batchUpper, c1);
+      {
+        OpBuilder::InsertionGuard batchGuard(rewriter);
+        rewriter.setInsertionPoint(batchLoop.getBody()->getTerminator());
+        Value batch = batchLoop.getInductionVar();
+        auto headLoop = rewriter.create<scf::ForOp>(loc, c0, headUpper, c1);
+        {
+          OpBuilder::InsertionGuard headGuard(rewriter);
+          rewriter.setInsertionPoint(headLoop.getBody()->getTerminator());
+          Value head = headLoop.getInductionVar();
+
+          SmallVector<Value> inOffsets = {batch, head, c0, c0};
+          SmallVector<Value> outOffsets = {batch, head, c0, c0};
+          Value inSubview = createNpuSubview(
+              rewriter, loc, inputMemRef, inOffsets,
+              {sequenceLength, headDim});
+          Value outSubview = createNpuSubview(
+              rewriter, loc, outputMemRef, outOffsets,
+              {headDim, sequenceLength});
+          emitTransposeRun(rewriter, loc, inSubview, outSubview,
+              headDim - 1, sequenceLength - 1);
+        }
+      }
+      return eraseOriginalOp();
+    };
+
     auto emitRank4Perm0231 = [&]() -> LogicalResult {
       static constexpr int64_t kPerm0231[] = {0, 2, 3, 1};
       if (rank != 4 ||
@@ -430,6 +480,8 @@ public:
     if (succeeded(emitRank2Transpose()))
       return success();
     if (succeeded(emitRank3BatchLast2Transpose()))
+      return success();
+    if (succeeded(emitRank4Perm0132()))
       return success();
     if (succeeded(emitRank4Perm0231()))
       return success();

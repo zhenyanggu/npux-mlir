@@ -72,7 +72,17 @@ static LogicalResult handleQuantizationContext(
   // 吸收上游 dq：直接拿 dequant 之前的 Int8 作为输入，并强制覆盖 Type (加上 encoding=1)
   ctx.finalInput = dequantOp.getX(); 
   auto inputType = mlir::cast<RankedTensorType>(ctx.finalInput.getType());
-  ctx.finalInput.setType(addEncoding1(inputType, rewriter));
+  auto encodedInputType = addEncoding1(inputType, rewriter);
+  if (isa<BlockArgument>(ctx.finalInput)) {
+    // A function entry argument must retain the type declared in func.func.
+    // Materialize the NPU encoding locally instead of mutating that argument.
+    ctx.finalInput = rewriter
+                         .create<UnrealizedConversionCastOp>(
+                             op->getLoc(), encodedInputType, ctx.finalInput)
+                         .getResult(0);
+  } else {
+    ctx.finalInput.setType(encodedInputType);
+  }
 
   // 吸收下游 q：直接拿 quant 之后的类型作为 NPU Op 的输出类型，并加上 encoding=1
   auto outputType = mlir::cast<RankedTensorType>(quantOp.getResult().getType());
@@ -107,7 +117,16 @@ static void createLinalgBody(OpBuilder &b, Location loc, ValueRange args) {
   if (mlir::isa<FloatType>(elemType)) {
     result = b.create<arith::AddFOp>(loc, input, input);
   } else if (mlir::isa<IntegerType>(elemType)) {
-    result = b.create<arith::AddIOp>(loc, input, input);
+    if (elemType.isSignlessInteger()) {
+      result = b.create<arith::AddIOp>(loc, input, input);
+    } else {
+      Type signlessType = b.getIntegerType(elemType.getIntOrFloatBitWidth());
+      Value signlessInput = b.create<UnrealizedConversionCastOp>(
+          loc, signlessType, input).getResult(0);
+      Value sum = b.create<arith::AddIOp>(loc, signlessInput, signlessInput);
+      result = b.create<UnrealizedConversionCastOp>(loc, elemType, sum)
+                   .getResult(0);
+    }
   }
 
   b.create<linalg::YieldOp>(loc, result);

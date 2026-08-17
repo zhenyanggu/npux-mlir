@@ -1,0 +1,199 @@
+{
+  "decoder_layer": 0,
+  "limitations": [
+    "FP16 references retain Qwen topology and static shapes but use zero weights.",
+    "INT8 proxies exercise current QLinearMatMul/QDQ NPU paths and do not claim Qwen numerical equivalence.",
+    "The MLP proxy covers the 896x4864 and 4864x896 projections; it omits FP16 RMSNorm and SwiGLU.",
+    "The attention proxy covers key transpose, score/value MatMul, and Softmax; it omits RoPE and causal-mask construction.",
+    "The attention-core proxy receives a pre-transposed key tensor to isolate score/value MatMul and Softmax from the layout limitation."
+  ],
+  "models": {
+    "attention_core_fp16_reference": {
+      "initializer_count": 0,
+      "node_count": 3,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_core_fp16_reference.onnx"
+    },
+    "attention_core_qlinear_npu_proxy": {
+      "initializer_count": 14,
+      "node_count": 5,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_core_qlinear_npu_proxy.onnx"
+    },
+    "attention_fp16_reference": {
+      "initializer_count": 0,
+      "node_count": 4,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_fp16_reference.onnx"
+    },
+    "attention_qlinear_npu_proxy": {
+      "initializer_count": 16,
+      "node_count": 8,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_attention_qlinear_npu_proxy.onnx"
+    },
+    "lm_head_fp16_reference": {
+      "initializer_count": 1,
+      "node_count": 1,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_lm_head_fp16_reference.onnx"
+    },
+    "lm_head_qlinear_npu_proxy": {
+      "initializer_count": 7,
+      "node_count": 1,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_lm_head_qlinear_npu_proxy.onnx"
+    },
+    "mlp_fp16_reference": {
+      "initializer_count": 3,
+      "node_count": 6,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_mlp_fp16_reference.onnx"
+    },
+    "mlp_qlinear_npu_proxy": {
+      "initializer_count": 14,
+      "node_count": 2,
+      "path": "/home/lqma/qwen25_0p5b/models/stage5_subgraphs/qwen25_mlp_qlinear_npu_proxy.onnx"
+    }
+  },
+  "selected_nodes": {
+    "attention_score": {
+      "inputs": [
+        {
+          "name": "/model/model/layers.0/self_attn/Add_output_0",
+          "shape": null
+        },
+        {
+          "name": "/model/model/layers.0/self_attn/Transpose_3_output_0",
+          "shape": [
+            1,
+            14,
+            64,
+            128
+          ]
+        }
+      ],
+      "name": "/model/model/layers.0/self_attn/MatMul",
+      "outputs": [
+        {
+          "name": "/model/model/layers.0/self_attn/MatMul_output_0",
+          "shape": null
+        }
+      ]
+    },
+    "lm_head": {
+      "inputs": [
+        {
+          "name": "/model/model/norm/Mul_1_output_0",
+          "shape": [
+            1,
+            128,
+            896
+          ]
+        },
+        {
+          "name": "onnx::MatMul_7788",
+          "shape": [
+            896,
+            151936
+          ]
+        }
+      ],
+      "name": "/model/lm_head/MatMul",
+      "outputs": [
+        {
+          "name": "logits",
+          "shape": [
+            1,
+            128,
+            151936
+          ]
+        }
+      ]
+    },
+    "mlp_down": {
+      "inputs": [
+        {
+          "name": "/model/model/layers.0/mlp/Mul_output_0",
+          "shape": [
+            1,
+            128,
+            4864
+          ]
+        },
+        {
+          "name": "onnx::MatMul_6131",
+          "shape": [
+            4864,
+            896
+          ]
+        }
+      ],
+      "name": "/model/model/layers.0/mlp/down_proj/MatMul",
+      "outputs": [
+        {
+          "name": "/model/model/layers.0/mlp/down_proj/MatMul_output_0",
+          "shape": [
+            1,
+            128,
+            896
+          ]
+        }
+      ]
+    },
+    "mlp_gate": {
+      "inputs": [
+        {
+          "name": "/model/model/layers.0/post_attention_layernorm/Mul_1_output_0",
+          "shape": [
+            1,
+            128,
+            896
+          ]
+        },
+        {
+          "name": "onnx::MatMul_6129",
+          "shape": [
+            896,
+            4864
+          ]
+        }
+      ],
+      "name": "/model/model/layers.0/mlp/gate_proj/MatMul",
+      "outputs": [
+        {
+          "name": "/model/model/layers.0/mlp/gate_proj/MatMul_output_0",
+          "shape": [
+            1,
+            128,
+            4864
+          ]
+        }
+      ]
+    },
+    "mlp_up": {
+      "inputs": [
+        {
+          "name": "/model/model/layers.0/post_attention_layernorm/Mul_1_output_0",
+          "shape": [
+            1,
+            128,
+            896
+          ]
+        },
+        {
+          "name": "onnx::MatMul_6130",
+          "shape": [
+            896,
+            4864
+          ]
+        }
+      ],
+      "name": "/model/model/layers.0/mlp/up_proj/MatMul",
+      "outputs": [
+        {
+          "name": "/model/model/layers.0/mlp/up_proj/MatMul_output_0",
+          "shape": [
+            1,
+            128,
+            4864
+          ]
+        }
+      ]
+    }
+  },
+  "source_model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx"
+}

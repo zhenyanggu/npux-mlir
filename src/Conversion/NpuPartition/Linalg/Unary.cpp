@@ -44,7 +44,16 @@ static void createUnaryBody(OpBuilder &b, Location loc, ValueRange args) {
   if (mlir::isa<FloatType>(elemType)) {
     result = b.create<arith::AddFOp>(loc, input, input);
   } else if (mlir::isa<IntegerType>(elemType)) {
-    result = b.create<arith::AddIOp>(loc, input, input);
+    if (elemType.isSignlessInteger()) {
+      result = b.create<arith::AddIOp>(loc, input, input);
+    } else {
+      Type signlessType = b.getIntegerType(elemType.getIntOrFloatBitWidth());
+      Value signlessInput = b.create<UnrealizedConversionCastOp>(
+          loc, signlessType, input).getResult(0);
+      Value sum = b.create<arith::AddIOp>(loc, signlessInput, signlessInput);
+      result = b.create<UnrealizedConversionCastOp>(loc, elemType, sum)
+                   .getResult(0);
+    }
   }
 
   b.create<linalg::YieldOp>(loc, result);

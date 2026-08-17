@@ -1,0 +1,191 @@
+{
+  "candidate_model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128_int8_static_fp32.onnx",
+  "candidate_providers_selected": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "hf_model": "/home/lqma/models/Qwen2.5-0.5B",
+  "providers_requested": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "records": [
+    {
+      "candidate_elapsed_ms": 219.51730083674192,
+      "candidate_has_inf": false,
+      "candidate_has_nan": false,
+      "candidate_top_ids": [
+        52643,
+        19929,
+        99430,
+        4805,
+        69376
+      ],
+      "candidate_top_tokens": [
+        "ascus",
+        " Ger",
+        "\u7fa4",
+        "ington",
+        "ListComponent"
+      ],
+      "last_token_index": 0,
+      "max_abs_diff": 18.55196762084961,
+      "mean_abs_diff": 3.0138559341430664,
+      "prompt": "Hello",
+      "real_len": 1,
+      "reference_elapsed_ms": 147.4575400352478,
+      "reference_top_ids": [
+        11,
+        0,
+        3837,
+        358,
+        5019
+      ],
+      "reference_top_tokens": [
+        ",",
+        "!",
+        "\uff0c",
+        " I",
+        " everyone"
+      ],
+      "top1_match": false,
+      "topk_overlap": 0
+    },
+    {
+      "candidate_elapsed_ms": 51.20217800140381,
+      "candidate_has_inf": false,
+      "candidate_has_nan": false,
+      "candidate_top_ids": [
+        264,
+        279,
+        458,
+        825,
+        220
+      ],
+      "candidate_top_tokens": [
+        " a",
+        " the",
+        " an",
+        " one",
+        " "
+      ],
+      "last_token_index": 5,
+      "max_abs_diff": 8.681018829345703,
+      "mean_abs_diff": 1.4979078769683838,
+      "prompt": "Qwen2.5 is",
+      "real_len": 6,
+      "reference_elapsed_ms": 18.346600933000445,
+      "reference_top_ids": [
+        264,
+        458,
+        279,
+        825,
+        1431
+      ],
+      "reference_top_tokens": [
+        " a",
+        " an",
+        " the",
+        " one",
+        " now"
+      ],
+      "top1_match": true,
+      "topk_overlap": 4
+    },
+    {
+      "candidate_elapsed_ms": 48.94597711972892,
+      "candidate_has_inf": false,
+      "candidate_has_nan": false,
+      "candidate_top_ids": [
+        220,
+        264,
+        279,
+        400,
+        25
+      ],
+      "candidate_top_tokens": [
+        " ",
+        " a",
+        " the",
+        " $",
+        ":"
+      ],
+      "last_token_index": 4,
+      "max_abs_diff": 10.564922332763672,
+      "mean_abs_diff": 1.9557751417160034,
+      "prompt": "The capital of France is",
+      "real_len": 5,
+      "reference_elapsed_ms": 17.79935392551124,
+      "reference_top_ids": [
+        12095,
+        32671,
+        30743,
+        1304,
+        510
+      ],
+      "reference_top_tokens": [
+        " Paris",
+        " ______",
+        " ____",
+        " __",
+        ":\n"
+      ],
+      "top1_match": false,
+      "topk_overlap": 0
+    },
+    {
+      "candidate_elapsed_ms": 48.92992111854255,
+      "candidate_has_inf": false,
+      "candidate_has_nan": false,
+      "candidate_top_ids": [
+        1084,
+        576,
+        362,
+        22555,
+        451
+      ],
+      "candidate_top_tokens": [
+        " It",
+        " The",
+        " A",
+        " Sure",
+        " N"
+      ],
+      "last_token_index": 8,
+      "max_abs_diff": 9.265127182006836,
+      "mean_abs_diff": 1.4946180582046509,
+      "prompt": "Explain what an NPU compiler does.",
+      "real_len": 9,
+      "reference_elapsed_ms": 18.36812891997397,
+      "reference_top_ids": [
+        1527,
+        451,
+        576,
+        3555,
+        362
+      ],
+      "reference_top_tokens": [
+        " An",
+        " N",
+        " The",
+        " What",
+        " A"
+      ],
+      "top1_match": false,
+      "topk_overlap": 3
+    }
+  ],
+  "reference_model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128.onnx",
+  "reference_providers_selected": [
+    "CUDAExecutionProvider",
+    "CPUExecutionProvider"
+  ],
+  "seq_len": 128,
+  "summary": {
+    "max_abs_diff": 18.55196762084961,
+    "mean_abs_diff_average": 1.9905392527580261,
+    "top1_matches": 1,
+    "topk_overlap_average": 1.75,
+    "total": 4
+  }
+}

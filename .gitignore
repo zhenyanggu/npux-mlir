@@ -2,6 +2,7 @@
 test/*
 cmake-*/
 docs/*
+!docs/VersaPNetworkSchedulerPlan_CN.md
 install/
 CMakePresets.json
 python/static_onnx_models/
@@ -211,5 +212,6 @@ dmypy.json
 test/call_func
 
 compile_commands.json
+iot-limerick-zcu-classic-desktop-2204-x05-2-20221123-58.img.xz
 !docs/EnvironmentSetupWSL.md
 !env/toolchain.lock

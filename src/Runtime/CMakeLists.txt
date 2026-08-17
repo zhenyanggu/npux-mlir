@@ -25,6 +25,7 @@ add_onnx_mlir_library(cruntime STATIC
   OMTensor.c
   OMTensorList.c
   OMUnique.c
+  VersaPRuntime.c
   OnnxDataType.c
   ${ONNX_MLIR_SRC_ROOT}/src/Support/SmallFPConversion.c
 
@@ -52,7 +53,8 @@ add_onnx_mlir_library(OMTensorUtils
   OMSort.cpp
   OMTensor.cpp
   OMTensorList.cpp
-  OMUnique.cpp
+  OMUnique.c
+  VersaPRuntime.cpp
   OnnxDataType.cpp
   ${ONNX_MLIR_SRC_ROOT}/src/Support/SmallFPConversion.c
 
@@ -97,3 +99,13 @@ set_target_properties(OMExecutionSession
   PROPERTIES
   POSITION_INDEPENDENT_CODE TRUE
   )
+
+if(BUILD_TESTING)
+  add_onnx_mlir_executable(VersaPRuntimeTest
+    VersaPRuntimeTest.cpp
+    NO_INSTALL
+    LINK_LIBS PRIVATE
+    cruntime
+    )
+  add_test(NAME VersaPRuntimeTest COMMAND VersaPRuntimeTest)
+endif()

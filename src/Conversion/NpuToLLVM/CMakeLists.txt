@@ -2,6 +2,11 @@ add_onnx_mlir_library(NpuToLLVM
     NpuInline.cpp
     ConvertLinalgToNpux.cpp
     NpuxConversionHelper.cpp
+    VersaPDescriptor.cpp
+    VersaPBankScheduler.cpp
+    VersaPStaticEligibility.cpp
+    VersaPDmaRegion.cpp
+    VersaPRegionMark.cpp
     Npux/SfuOpConvert.cpp
     Npux/ComputeOpConvert.cpp
     Npux/NpuMemoryManagement.cpp
@@ -13,6 +18,10 @@ add_onnx_mlir_library(NpuToLLVM
     CustomBufferLoopHoist.cpp
     RemoveDuplicateMvinBias.cpp
     EraseNpuMemorySpace.cpp
+
+    DEPENDS
+    OMNpuxIncGen
+    OMNpuxEnums
 
     LINK_LIBS PUBLIC
     # --- 基础库 ---
@@ -40,5 +49,25 @@ add_onnx_mlir_library(NpuToLLVM
     MLIRLLVMCommonConversion
 
     OMCompilerOptions
+    NpuxOps
 
 )
+
+if(BUILD_TESTING)
+  add_onnx_mlir_executable(VersaPDescriptorTest
+    VersaPDescriptorTest.cpp
+    NO_INSTALL
+    LINK_LIBS PRIVATE
+    NpuToLLVM
+    LLVMSupport
+    )
+  add_test(NAME VersaPDescriptorTest COMMAND VersaPDescriptorTest)
+  add_onnx_mlir_executable(VersaPBankSchedulerTest
+    VersaPBankSchedulerTest.cpp
+    NO_INSTALL
+    LINK_LIBS PRIVATE
+    NpuToLLVM
+    LLVMSupport
+    )
+  add_test(NAME VersaPBankSchedulerTest COMMAND VersaPBankSchedulerTest)
+endif()

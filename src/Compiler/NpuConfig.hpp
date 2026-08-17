@@ -2,12 +2,18 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/ADT/StringMap.h"
+#include <cstdint>
 #include <mutex>
 #include <vector>
 #include <string>
 #include <optional>
 
 namespace npux {
+
+enum class NpuHardwareAbi {
+  Legacy,
+  VersaPDescriptorV1,
+};
 
 // 1. 定义全局命令行选项引用
 extern llvm::cl::opt<std::string> npuConfigFile;
@@ -20,6 +26,9 @@ extern llvm::cl::opt<std::string> cmdMatMulTileSize;
 extern llvm::cl::opt<std::string> cmdSramSize; // 总大小 (备用/Fallback)
 extern llvm::cl::opt<std::string> cmdSpmSize;  // [新增] 强制指定 SPM
 extern llvm::cl::opt<std::string> cmdAccSize;  // [新增] 强制指定 ACC
+extern llvm::cl::opt<NpuHardwareAbi> npuHardwareAbi;
+
+bool useVersaPDescriptorAbi();
 
 struct LayerTileConfig {
     int64_t t_oh;

@@ -235,6 +235,10 @@ void registerNpuPasses() {
     return npux::createNpuxComputeFusionPass();
   });
 
+  mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return npux::createVersaPRegionMarkPass();
+  });
+
   // mlir::registerPass([]() -> std::unique_ptr<mlir::Pass> {
   //   return npux::createGemmPipelinePass();
   // });

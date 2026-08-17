@@ -71,6 +71,36 @@ static FlatSymbolRefAttr getOrInsertExternFunc(PatternRewriter &rewriter,
   return SymbolRefAttr::get(context, funcName);
 }
 
+struct VersaPDescriptorAttrs {
+  uint8_t api;
+  uint64_t desc0;
+  uint64_t desc1;
+  uint64_t desc2;
+};
+
+static std::optional<VersaPDescriptorAttrs> getVersaPDescriptorAttrs(
+    Operation *operation) {
+  if (!operation->hasAttr("npux.versa_p_region_id"))
+    return std::nullopt;
+  auto api = operation->getAttrOfType<IntegerAttr>("npux.versa_p_api");
+  auto desc0 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc0");
+  auto desc1 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc1");
+  auto desc2 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc2");
+  if (!api || !desc0 || !desc1 || !desc2 || api.getInt() < 0 ||
+      api.getInt() > UINT8_MAX)
+    return std::nullopt;
+  return VersaPDescriptorAttrs{static_cast<uint8_t>(api.getInt()),
+      static_cast<uint64_t>(desc0.getInt()),
+      static_cast<uint64_t>(desc1.getInt()),
+      static_cast<uint64_t>(desc2.getInt())};
+}
+
+static Value versaPDescriptorConstant(Location loc, uint64_t value,
+    ConversionPatternRewriter &rewriter) {
+  return rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI64Type(),
+      rewriter.getI64IntegerAttr(static_cast<int64_t>(value)));
+}
+
 Value getFlatPtrFromMemRef(Location loc, Value memrefDescVal, Type elemType,
     ConversionPatternRewriter &rewriter) {
   MemRefDescriptor desc(memrefDescVal);
@@ -383,6 +413,27 @@ public:
     auto dramMemRefType = cast<MemRefType>(op.getHostPtr().getType());
     Value hostPtr = getFlatPtrFromMemRef(
         loc, adaptor.getHostPtr(), dramMemRefType.getElementType(), rewriter);
+    if (auto descriptor = getVersaPDescriptorAttrs(op)) {
+      SmallVector<Value> descriptorArgs = {
+          rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+              rewriter.getI8IntegerAttr(descriptor->api)),
+          versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc2, rewriter),
+          hostPtr};
+      SmallVector<Type> descriptorArgTypes;
+      for (Value value : descriptorArgs)
+        descriptorArgTypes.push_back(value.getType());
+      auto module = op->getParentOfType<ModuleOp>();
+      auto voidType = LLVM::LLVMVoidType::get(getContext());
+      FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+          "npu_versa_p_submit_wait_host_or_abort", voidType,
+          descriptorArgTypes);
+      rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+          op, TypeRange{}, fnRef, descriptorArgs);
+      return success();
+    }
+
     Value dstAddr = getNpuOffsetAddress(loc, op.getDstMemref(), rewriter);
     if (!dstAddr)
       return failure();
@@ -508,6 +559,27 @@ public:
     auto dramMemRefType = cast<MemRefType>(op.getHostPtr().getType());
     Value hostPtr = getFlatPtrFromMemRef(
         loc, adaptor.getHostPtr(), dramMemRefType.getElementType(), rewriter);
+    if (auto descriptor = getVersaPDescriptorAttrs(op)) {
+      SmallVector<Value> descriptorArgs = {
+          rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+              rewriter.getI8IntegerAttr(descriptor->api)),
+          versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc2, rewriter),
+          hostPtr};
+      SmallVector<Type> descriptorArgTypes;
+      for (Value value : descriptorArgs)
+        descriptorArgTypes.push_back(value.getType());
+      auto module = op->getParentOfType<ModuleOp>();
+      auto voidType = LLVM::LLVMVoidType::get(getContext());
+      FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+          "npu_versa_p_submit_wait_host_or_abort", voidType,
+          descriptorArgTypes);
+      rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+          op, TypeRange{}, fnRef, descriptorArgs);
+      return success();
+    }
+
     Value srcAddr = getNpuOffsetAddress(loc, op.getSrcMemref(), rewriter);
     if (!srcAddr)
       return failure();
@@ -632,6 +704,26 @@ public:
   LogicalResult matchAndRewrite(ComputeRunOp op, OpAdaptor adaptor,
       ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
+    if (auto descriptor = getVersaPDescriptorAttrs(op)) {
+      SmallVector<Value> descriptorArgs = {
+          rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
+              rewriter.getI8IntegerAttr(descriptor->api)),
+          versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+          versaPDescriptorConstant(loc, descriptor->desc2, rewriter)};
+      SmallVector<Type> descriptorArgTypes;
+      for (Value value : descriptorArgs)
+        descriptorArgTypes.push_back(value.getType());
+      auto module = op->getParentOfType<ModuleOp>();
+      auto voidType = LLVM::LLVMVoidType::get(getContext());
+      FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
+          "npu_versa_p_submit_wait_static_or_abort", voidType,
+          descriptorArgTypes);
+      rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+          op, TypeRange{}, fnRef, descriptorArgs);
+      return success();
+    }
+
     auto i32Type = rewriter.getI32Type();
 
     // 地址解析

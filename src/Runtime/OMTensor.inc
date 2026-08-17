@@ -69,11 +69,49 @@ uint16_t om_f32_to_f16(uint16_t a) { return (uint16_t)0; }
 // of these C runtime functions.
 // TODO: Figure out if we could get these with llvm/compiler-rt in a
 //       systematic way.
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+// LLVM follows the x86-64 floating-point ABI for half values and passes them
+// in xmm0. GCC's C ABI for _Float16 uses a general-purpose register instead,
+// so bridge explicitly to the existing bit-based conversion functions.
+#define OM_NAKED __attribute__((naked))
+OM_NAKED float __extendhfsf2(uint16_t a) {
+  __asm__("movd %xmm0, %edi\n\t"
+          "jmp om_f16_to_f32@PLT");
+}
+OM_NAKED float __gnu_h2f_ieee(uint16_t a) {
+  __asm__("movd %xmm0, %edi\n\t"
+          "jmp om_f16_to_f32@PLT");
+}
+OM_NAKED uint16_t __gnu_f2h_ieee(float a) {
+  __asm__("subq $8, %rsp\n\t"
+          "call om_f32_to_f16@PLT\n\t"
+          "addq $8, %rsp\n\t"
+          "pinsrw $0, %eax, %xmm0\n\t"
+          "ret");
+}
+OM_NAKED uint16_t __truncsfhf2(float a) {
+  __asm__("subq $8, %rsp\n\t"
+          "call om_f32_to_f16@PLT\n\t"
+          "addq $8, %rsp\n\t"
+          "pinsrw $0, %eax, %xmm0\n\t"
+          "ret");
+}
+OM_NAKED uint16_t __truncdfhf2(double a) {
+  __asm__("cvtsd2ss %xmm0, %xmm0\n\t"
+          "subq $8, %rsp\n\t"
+          "call om_f32_to_f16@PLT\n\t"
+          "addq $8, %rsp\n\t"
+          "pinsrw $0, %eax, %xmm0\n\t"
+          "ret");
+}
+#undef OM_NAKED
+#else
 float __extendhfsf2(uint16_t a) { return om_f16_to_f32(a); }
 float __gnu_h2f_ieee(uint16_t a) { return om_f16_to_f32(a); }
 uint16_t __gnu_f2h_ieee(float a) { return om_f32_to_f16(a); }
 uint16_t __truncsfhf2(float a) { return om_f32_to_f16(a); }
 uint16_t __truncdfhf2(double a) { return om_f32_to_f16(a); }
+#endif
 
 struct OMTensor {
 #ifdef __cplusplus

@@ -1,0 +1,362 @@
+{
+  "last_stage": "llvm_lowering",
+  "npu_acc_size": "64KB",
+  "npu_ops": "MatMul,Softmax,Transpose",
+  "npu_spm_size": "64KB",
+  "source_model": "/home/lqma/qwen25_0p5b/models/qwen25_prefill_128_int8_static_fp32.onnx",
+  "stages": [
+    {
+      "duration_seconds": 12.079,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/00_import.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 3459
+      },
+      "name": "import",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/00_import.onnx.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.182,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/01_recompose.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 2290
+      },
+      "name": "recompose",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/01_recompose.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.804,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/02_npu_partition.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 169,
+        "npu_matmul_call_count": 169,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 2121
+      },
+      "name": "npu_partition",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/02_npu_partition.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.614,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/03_npu_tiling.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 217,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 1948
+      },
+      "name": "npu_tiling",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/03_npu_tiling.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.294,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/04_npu_insert_dma.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 1948
+      },
+      "name": "npu_insert_dma",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/04_npu_insert_dma.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.551,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/05_npu_op_splitting.log",
+      "metrics": {
+        "k_loop_marker_count": 217,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 1948
+      },
+      "name": "npu_op_splitting",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/05_npu_op_splitting.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 21.496,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/06_npu_bufferization.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "npu_bufferization",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/06_npu_bufferization.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.543,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/07_convert_vector_to_scf.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "convert_vector_to_scf",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/07_convert_vector_to_scf.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.702,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/08_lower_affine.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "lower_affine",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/08_lower_affine.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.626,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/09_lower_krnl_region.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "lower_krnl_region",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/09_lower_krnl_region.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 20.079,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/10_buffer_loop_hoisting.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "buffer_loop_hoisting",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/10_buffer_loop_hoisting.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 22.102,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/11_buffer_dealloc.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "buffer_dealloc",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/11_buffer_dealloc.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.722,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/12_allocation_liveness.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "allocation_liveness",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/12_allocation_liveness.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.175,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/13_convert_bufferization_to_memref.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "convert_bufferization_to_memref",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/13_convert_bufferization_to_memref.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.35,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/14_fold_memref_aliases.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 820,
+        "npu_matmul_call_count": 217,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "fold_memref_aliases",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/14_fold_memref_aliases.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.426,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/15_convert_linalg_to_npux.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 3405,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "convert_linalg_to_npux",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/15_convert_linalg_to_npux.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.166,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/16_lower_npu_subview.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 3405,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "lower_npu_subview",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/16_lower_npu_subview.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.428,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/17_npux_compute_fusion.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 3236,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "npux_compute_fusion",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/17_npux_compute_fusion.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.321,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/18_convert_linalg_to_loops.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 3236,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "convert_linalg_to_loops",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/18_convert_linalg_to_loops.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.173,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/19_npu_memory_plan.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 3236,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "npu_memory_plan",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/19_npu_memory_plan.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 19.507,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/20_erase_npu_memory_space.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 3236,
+        "remaining_onnx_op_count": 4
+      },
+      "name": "erase_npu_memory_space",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/20_erase_npu_memory_space.mlir",
+      "returncode": 0
+    },
+    {
+      "duration_seconds": 28.004,
+      "log": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/21_llvm_lowering.log",
+      "metrics": {
+        "k_loop_marker_count": 0,
+        "npu_library_call_count": 0,
+        "npu_matmul_call_count": 0,
+        "npu_softmax_call_count": 0,
+        "npu_transpose_call_count": 0,
+        "npux_op_count": 0,
+        "remaining_onnx_op_count": 0
+      },
+      "name": "llvm_lowering",
+      "output": "/home/lqma/qwen25_0p5b/results/stage6_npu_prefill_full/21_llvm_lowering.mlir",
+      "returncode": 0
+    }
+  ],
+  "success": true
+}

@@ -61,6 +61,16 @@ cl::opt<std::string> cmdAccSize("npu-acc-size",
     cl::init(""), 
     cl::cat(onnx_mlir::OnnxMlirCommonOptions));
 
+cl::opt<NpuHardwareAbi> npuHardwareAbi("npu-hardware-abi",
+    cl::desc("Select the NPU hardware ABI"),
+    cl::values(
+        clEnumValN(NpuHardwareAbi::Legacy, "legacy",
+            "Use the existing npu_*_run runtime ABI"),
+        clEnumValN(NpuHardwareAbi::VersaPDescriptorV1, "versa-p-v1",
+            "Use the Versa-P 64-bit descriptor ABI")),
+    cl::init(NpuHardwareAbi::Legacy),
+    cl::cat(onnx_mlir::OnnxMlirCommonOptions));
+
 cl::opt<std::string> emitConfigFile("emit-npu-config",
     cl::desc("Generate a default NPU configuration JSON file"),
     cl::value_desc("filename"), 
@@ -74,6 +84,10 @@ cl::opt<std::string> emitConfigFile("emit-npu-config",
 NPUConfig &NPUConfig::getInstance() {
   static NPUConfig instance;
   return instance;
+}
+
+bool useVersaPDescriptorAbi() {
+  return npuHardwareAbi == NpuHardwareAbi::VersaPDescriptorV1;
 }
 
 NPUConfig::NPUConfig() {
