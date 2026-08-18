@@ -17,6 +17,7 @@ namespace {
 using npux::versap::DescriptorAddressSource;
 using npux::versap::AttentionHeadRequest;
 using npux::versap::GemmLocalAddresses;
+using npux::versap::GemmTilingProblem;
 using npux::versap::MvinAConfig;
 using npux::versap::MvinWConfig;
 using npux::versap::MvoutConfig;
@@ -86,6 +87,33 @@ TileRequest makeRequest() {
 bool hasDependency(const ScheduledCommand &command, uint32_t id) {
   for (uint32_t dependency : command.dependencies)
     if (dependency == id)
+      return true;
+  return false;
+}
+
+bool hasBankUse(const ScheduledCommand &command,
+    npux::versap::BankResource resource, uint8_t bank) {
+  for (const auto &use : command.reads)
+    if (use.resource == resource && use.bank == bank)
+      return true;
+  for (const auto &use : command.writes)
+    if (use.resource == resource && use.bank == bank)
+      return true;
+  return false;
+}
+
+bool hasBankRead(const ScheduledCommand &command,
+    npux::versap::BankResource resource, uint8_t bank) {
+  for (const auto &use : command.reads)
+    if (use.resource == resource && use.bank == bank)
+      return true;
+  return false;
+}
+
+bool hasBankWrite(const ScheduledCommand &command,
+    npux::versap::BankResource resource, uint8_t bank) {
+  for (const auto &use : command.writes)
+    if (use.resource == resource && use.bank == bank)
       return true;
   return false;
 }
@@ -239,8 +267,17 @@ bool testAccumulateAndResadd() {
       partial->partialOutputBank >= 2)
     return fail("partial GEMM must retain its result in an ACC ping-pong bank");
   const ScheduledCommand &partialGemm = partial->commands.back();
-  if ((partialGemm.descriptor.desc2 & (uint64_t{1} << 60)) == 0)
-    return fail("partial GEMM must set SA_COMPUTE_DESC2.write_partial");
+  const uint8_t firstAccSelector =
+      static_cast<uint8_t>((partialGemm.descriptor.desc2 >> 50) & 3);
+  if ((partialGemm.descriptor.desc2 & (uint64_t{1} << 60)) == 0 ||
+      firstAccSelector != partial->accumulatorBank ||
+      partial->partialOutputBank != (firstAccSelector ^ 1) ||
+      !hasBankWrite(partialGemm, npux::versap::BankResource::Accumulator,
+          partial->partialOutputBank) ||
+      hasBankWrite(partialGemm, npux::versap::BankResource::O,
+          partial->oBank))
+    return fail(
+        "first partial GEMM does not target the opposite ACC bank");
 
   request.writePartial = true;
   request.needsAccumulate = true;
@@ -252,9 +289,18 @@ bool testAccumulateAndResadd() {
   for (const ScheduledCommand &command : body->commands)
     if (command.kind == ScheduledCommandKind::Gemm)
       bodyGemm = &command;
+  const uint8_t bodyAccSelector = bodyGemm
+      ? static_cast<uint8_t>((bodyGemm->descriptor.desc2 >> 50) & 3)
+      : 2;
   if (!bodyGemm ||
       (bodyGemm->descriptor.desc2 & (uint64_t{1} << 2)) == 0 ||
       (bodyGemm->descriptor.desc2 & (uint64_t{1} << 60)) == 0 ||
+      bodyAccSelector != partial->partialOutputBank ||
+      body->partialOutputBank != (bodyAccSelector ^ 1) ||
+      !hasBankRead(*bodyGemm, npux::versap::BankResource::Accumulator,
+          bodyAccSelector) ||
+      !hasBankWrite(*bodyGemm, npux::versap::BankResource::Accumulator,
+          body->partialOutputBank) ||
       !hasDependency(*bodyGemm, partialGemm.id))
     return fail("ACC body GEMM must read and ping-pong the partial result");
 
@@ -267,7 +313,15 @@ bool testAccumulateAndResadd() {
   for (const ScheduledCommand &command : final->commands)
     if (command.kind == ScheduledCommandKind::Gemm)
       finalGemm = &command;
-  if (!finalGemm || !hasDependency(*finalGemm, bodyGemm->id))
+  const uint8_t finalAccSelector = finalGemm
+      ? static_cast<uint8_t>((finalGemm->descriptor.desc2 >> 50) & 3)
+      : 2;
+  if (!finalGemm || finalAccSelector != body->partialOutputBank ||
+      !hasBankRead(*finalGemm, npux::versap::BankResource::Accumulator,
+          finalAccSelector) ||
+      !hasBankWrite(*finalGemm, npux::versap::BankResource::O,
+          final->oBank) ||
+      !hasDependency(*finalGemm, bodyGemm->id))
     return fail("ACC final GEMM must consume the last partial result");
 
   request.needsAccumulate = false;
@@ -320,6 +374,30 @@ bool testBiasAndMetadataPingPong() {
   if (!gemm || !metadata || !hasDependency(*gemm, metadata->id) ||
       (gemm->descriptor.desc2 & (uint64_t{1} << 3)) == 0)
     return fail("bias GEMM must wait for metadata and set the ABI bias bit");
+  return true;
+}
+
+bool testOptimalGemmTiling() {
+  VersaPBankScheduler scheduler;
+  GemmTilingProblem problem{128, 1024, 64};
+  problem.quantization.nextConsumesInt8 = true;
+  problem.quantization.perChannelScaleAvailable = true;
+  auto plan = scheduler.planGemmTiles(problem);
+  if (!plan)
+    return fail("unexpected optimal-tiling error: " +
+                llvm::toString(plan.takeError()));
+  if (plan->m != 128 || plan->n != 512 || plan->k != 64 ||
+      plan->mTileCount != 1 || plan->nTileCount != 2 ||
+      plan->kTileCount != 1 || plan->metadataWords != 64)
+    return fail("tiler did not maximize legal descriptor reuse and scale coverage");
+
+  GemmTilingProblem internalTileCheck{64, 128, 64};
+  internalTileCheck.quantization.nextConsumesInt8 = true;
+  internalTileCheck.quantization.perChannelScaleAvailable = true;
+  auto internalTilePlan = scheduler.planGemmTiles(internalTileCheck);
+  if (!internalTilePlan || internalTilePlan->m != 64 ||
+      internalTilePlan->n != 128 || internalTilePlan->descriptorTileCount != 1)
+    return fail("tiler incorrectly treated the RTL 32x32 array as a compiler tile");
   return true;
 }
 
@@ -484,11 +562,48 @@ bool testAttentionQkPvSchedule() {
   if ((qkGemm.descriptor.desc2 & 3) != 2 ||
       (pvGemm.descriptor.desc2 & 3) != 3 ||
       (qkMvout.descriptor.desc1 & (uint64_t{1} << 48)) == 0 ||
+      ((qkGemm.descriptor.desc2 >> 60) & 1) != schedule->qk.metadataBank ||
+      ((qkMvout.descriptor.desc1 >> 49) & 1) !=
+          schedule->qk.qkBlockMaxSlot ||
+      schedule->qk.qkBlockMaxSlot != (schedule->qk.metadataBank ^ 1) ||
       ((qkGemm.descriptor.desc2 >> 27) & 0x1ff) != 0 ||
       !hasDependency(qkGemm, qkGamma.id) ||
+      !hasBankUse(qkGemm, npux::versap::BankResource::QkBlockMax,
+          schedule->qk.qkBlockMaxSlot) ||
+      !hasBankUse(qkMvout, npux::versap::BankResource::QkBlockMax,
+          schedule->qk.qkBlockMaxSlot) ||
       schedule->qk.commands.back().id != schedule->qkLogPCommandId ||
       !hasDependency(schedule->pv.commands.front(), schedule->qkLogPCommandId))
     return fail("QK/PV descriptors or hardware logP dependency differ from the ABI");
+
+  auto secondQk = scheduler.scheduleGemmTile(makeAttentionQkRequest());
+  if (!secondQk || secondQk->metadataBank == schedule->qk.metadataBank ||
+      secondQk->qkBlockMaxSlot == schedule->qk.qkBlockMaxSlot ||
+      ((secondQk->commands[3].descriptor.desc2 >> 60) & 1) !=
+          secondQk->metadataBank ||
+      ((secondQk->commands[4].descriptor.desc1 >> 49) & 1) !=
+          secondQk->qkBlockMaxSlot)
+    return fail("consecutive QK descriptors did not ping-pong gamma and max slots");
+
+  VersaPBankScheduler rowColumnScheduler;
+  TileRequest rowColumn = makeAttentionQkRequest();
+  rowColumn.m = 32;
+  rowColumn.n = 32;
+  rowColumn.aDma = MvinAConfig{0x1000, 64, 32, 64, false, 0};
+  rowColumn.wDma = MvinWConfig{0x4000, 64, 32, 64, 0};
+  rowColumn.metadataDma = npux::versap::AuxMvinConfig{
+      0x6000, 0, 8 * 32, 0, false, 0};
+  rowColumn.outputDma = MvoutConfig{0x8000, 32 * 4, 32, 32 * 4, 0,
+      0, true};
+  rowColumn.quantization.metadataWords = 8;
+  rowColumn.qkGammaQ8_24.reset();
+  rowColumn.qkRowColumnGamma = npux::versap::QkRowColumnGamma{0, 4};
+  auto rowColumnSchedule = rowColumnScheduler.scheduleGemmTile(rowColumn);
+  if (!rowColumnSchedule || rowColumnSchedule->commands.size() != 5 ||
+      rowColumnSchedule->commands[3].descriptor.desc3 !=
+          (uint64_t{1} | (uint64_t{4} << 10) | (uint64_t{4} << 19) |
+              (uint64_t{4} << 27)))
+    return fail("QK row-column gamma descriptor differs from the RTL ABI");
 
   VersaPBankScheduler missingGammaScheduler;
   TileRequest missingGamma = makeAttentionQkRequest();
@@ -671,6 +786,55 @@ bool testMixedEngineOBankLiveness() {
     return fail("mixed schedule GEMV-to-VPU dependency is missing");
   return true;
 }
+
+bool testAccPartialCanOverlapVpu() {
+  VersaPBankScheduler scheduler;
+
+  TileRequest producerRequest = makeRequest();
+  producerRequest.quantization.nextConsumesInt8 = false;
+  producerRequest.quantization.nextConsumesBf16 = true;
+  producerRequest.storeToDram = false;
+  producerRequest.outputDma.reset();
+  auto producer = scheduler.scheduleGemmTile(producerRequest);
+  if (!producer)
+    return fail("VPU source GEMM was rejected in ACC overlap test");
+
+  auto vpu = scheduler.scheduleVpu({npux::versap::VpuConfig{
+      npux::versap::VpuSpecialFunction::Gelu, 2, 33, producer->oBank,
+      static_cast<uint8_t>(producer->oBank ^ 1),
+      npux::versap::VpuPrecision::Bf16,
+      npux::versap::VpuPrecision::Bf16, 0, 0, 0}});
+  if (!vpu)
+    return fail("VPU command was rejected in ACC overlap test");
+
+  TileRequest partialRequest = makeRequest();
+  partialRequest.quantization.nextConsumesInt8 = false;
+  partialRequest.quantization.requireRawInt32 = true;
+  partialRequest.storeToDram = false;
+  partialRequest.writePartial = true;
+  auto partial = scheduler.scheduleGemmTile(partialRequest);
+  if (!partial)
+    return fail("ACC-only partial GEMM was rejected in VPU overlap test");
+  const ScheduledCommand &partialGemm = partial->commands.back();
+  if (hasDependency(partialGemm, vpu->id) ||
+      hasBankUse(partialGemm, npux::versap::BankResource::O, 0) ||
+      hasBankUse(partialGemm, npux::versap::BankResource::O, 1))
+    return fail("ACC-only partial GEMM must not wait for or claim VPU O banks");
+
+  partialRequest.needsAccumulate = true;
+  partialRequest.writePartial = false;
+  partialRequest.storeToDram = true;
+  auto final = scheduler.scheduleGemmTile(partialRequest);
+  if (!final)
+    return fail("final ACC GEMM was rejected in VPU overlap test");
+  const ScheduledCommand *finalGemm = nullptr;
+  for (const ScheduledCommand &command : final->commands)
+    if (command.kind == ScheduledCommandKind::Gemm)
+      finalGemm = &command;
+  if (!finalGemm || !hasDependency(*finalGemm, vpu->id))
+    return fail("final ACC GEMM must wait for the VPU O-bank ownership");
+  return true;
+}
 } // namespace
 
 int main() {
@@ -681,8 +845,10 @@ int main() {
                  testAccumulateAndResadd() &&
                  testMockRuntimeDoneErrorAndClear() &&
                  testStaticEligibilityFallbacks() && testRejectsUnknownDma() &&
+                 testOptimalGemmTiling() &&
                  testAttentionQkPvSchedule() && testConvGemvAndVpuSchedule() &&
-                 testMixedEngineOBankLiveness()
+                 testMixedEngineOBankLiveness() &&
+                 testAccPartialCanOverlapVpu()
              ? 0
              : 1;
 }

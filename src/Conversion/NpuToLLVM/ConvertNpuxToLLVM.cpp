@@ -9,6 +9,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 
 #include <array>
+#include <optional>
 
 using namespace mlir;
 using namespace npux;
@@ -78,6 +79,7 @@ struct VersaPDescriptorAttrs {
   uint64_t desc0;
   uint64_t desc1;
   uint64_t desc2;
+  std::optional<uint64_t> qkGammaDescriptor;
   uint32_t commandId;
   std::array<uint32_t, 5> dependencies{};
   uint8_t dependencyCount = 0;
@@ -91,11 +93,16 @@ static std::optional<VersaPDescriptorAttrs> getVersaPDescriptorAttrs(
   auto desc0 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc0");
   auto desc1 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc1");
   auto desc2 = operation->getAttrOfType<IntegerAttr>("npux.versa_p_desc2");
+  auto qkGammaDescriptor = operation->getAttrOfType<IntegerAttr>(
+      "npux.versa_p_qk_gamma_desc");
   auto commandId =
       operation->getAttrOfType<IntegerAttr>("npux.versa_p_command_id");
   if (!api || !desc0 || !desc1 || !desc2 || api.getInt() < 0 ||
       api.getInt() > UINT8_MAX || !commandId || commandId.getInt() <= 0 ||
       commandId.getInt() > UINT32_MAX)
+    return std::nullopt;
+  if (qkGammaDescriptor &&
+      (api.getInt() != 3 || qkGammaDescriptor.getInt() < 0))
     return std::nullopt;
   std::array<uint32_t, 5> dependencies{};
   uint8_t dependencyCount = 0;
@@ -113,6 +120,10 @@ static std::optional<VersaPDescriptorAttrs> getVersaPDescriptorAttrs(
   return VersaPDescriptorAttrs{static_cast<uint8_t>(api.getInt()),
       static_cast<uint64_t>(desc0.getInt()),
       static_cast<uint64_t>(desc1.getInt()), static_cast<uint64_t>(desc2.getInt()),
+      qkGammaDescriptor
+          ? std::optional<uint64_t>(
+                static_cast<uint64_t>(qkGammaDescriptor.getInt()))
+          : std::nullopt,
       static_cast<uint32_t>(commandId.getInt()), dependencies, dependencyCount};
 }
 
@@ -959,6 +970,26 @@ public:
       ConversionPatternRewriter &rewriter) const override {
     Location loc = op.getLoc();
     if (auto descriptor = getVersaPDescriptorAttrs(op)) {
+      auto module = op->getParentOfType<ModuleOp>();
+      auto voidType = LLVM::LLVMVoidType::get(getContext());
+      if (descriptor->qkGammaDescriptor) {
+        SmallVector<Value> qkArgs = {
+            versaPDescriptorConstant(loc, descriptor->desc0, rewriter),
+            versaPDescriptorConstant(loc, descriptor->desc1, rewriter),
+            versaPDescriptorConstant(loc, descriptor->desc2, rewriter),
+            versaPDescriptorConstant(
+                loc, *descriptor->qkGammaDescriptor, rewriter)};
+        appendVersaPScheduleArgs(loc, *descriptor, qkArgs, rewriter);
+        SmallVector<Type> qkArgTypes;
+        for (Value value : qkArgs)
+          qkArgTypes.push_back(value.getType());
+        FlatSymbolRefAttr qkFnRef = getOrInsertExternFunc(rewriter, module,
+            "npu_versa_p_submit_qk_static_after_or_abort", voidType,
+            qkArgTypes);
+        rewriter.replaceOpWithNewOp<LLVM::CallOp>(
+            op, TypeRange{}, qkFnRef, qkArgs);
+        return success();
+      }
       SmallVector<Value> descriptorArgs = {
           rewriter.create<LLVM::ConstantOp>(loc, rewriter.getI8Type(),
               rewriter.getI8IntegerAttr(descriptor->api)),
@@ -969,8 +1000,6 @@ public:
       SmallVector<Type> descriptorArgTypes;
       for (Value value : descriptorArgs)
         descriptorArgTypes.push_back(value.getType());
-      auto module = op->getParentOfType<ModuleOp>();
-      auto voidType = LLVM::LLVMVoidType::get(getContext());
       FlatSymbolRefAttr fnRef = getOrInsertExternFunc(rewriter, module,
           "npu_versa_p_submit_static_after_or_abort", voidType,
           descriptorArgTypes);

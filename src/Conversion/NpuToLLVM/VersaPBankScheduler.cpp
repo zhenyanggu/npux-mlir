@@ -67,10 +67,138 @@ void VersaPBankScheduler::reset() {
   accumulatorBanks = {};
   resaddBanks = {};
   metadataBanks = {};
+  qkBlockMaxSlots = {};
   engineInFlight = {};
   engineInFlightCount = {};
   partialAccumulatorBank.reset();
   nextCommandId = 1;
+}
+
+llvm::Expected<GemmTilePlan> VersaPBankScheduler::planGemmTiles(
+    const GemmTilingProblem &problem) const {
+  if (problem.m == 0 || problem.n == 0 || problem.k == 0 ||
+      problem.k > kMaxSaK || problem.operation == SaOperation::Conv)
+    return invalid("GEMM tiling requires nonzero M/N/K, K <= 4096, and a non-CONV operation");
+
+  const OutputMode outputMode = chooseOutputMode(problem.quantization);
+  const ScaleMode scaleMode = chooseScaleMode(problem.quantization, outputMode);
+  const uint64_t outputLanes = outputMode == OutputMode::TensorInt8 ? 32
+      : outputMode == OutputMode::Bf16 ? 16 : 8;
+  const uint32_t maxM = std::min<uint32_t>(problem.m, kLocalBankWords);
+  const uint32_t maxN = std::min<uint32_t>(problem.n, kLocalBankWords);
+
+  struct Score {
+    uint64_t transferWords;
+    uint64_t descriptorTiles;
+    uint64_t microTileWaste;
+    uint64_t payload;
+  };
+  auto isBetter = [](const Score &candidate, const Score &best) {
+    if (candidate.transferWords != best.transferWords)
+      return candidate.transferWords < best.transferWords;
+    if (candidate.descriptorTiles != best.descriptorTiles)
+      return candidate.descriptorTiles < best.descriptorTiles;
+    if (candidate.microTileWaste != best.microTileWaste)
+      return candidate.microTileWaste < best.microTileWaste;
+    return candidate.payload > best.payload;
+  };
+  auto metadataWordsForN = [&](uint32_t n) {
+    uint64_t words = problem.quantization.metadataWords;
+    if (scaleMode == ScaleMode::PerChannel)
+      words = std::max<uint64_t>(words, ceilDiv(n, uint64_t{8}));
+    return words;
+  };
+  auto sumKWords = [&](uint32_t tileK, uint32_t tileCount) {
+    const uint32_t tail = problem.k - (tileCount - 1) * tileK;
+    return static_cast<uint64_t>(tileCount - 1) *
+               ceilDiv(tileK, uint64_t{kLocalWordBytes}) +
+           ceilDiv(tail, uint64_t{kLocalWordBytes});
+  };
+  auto sumNOutputWords = [&](uint32_t tileN, uint32_t tileCount) {
+    uint64_t words = 0;
+    for (uint32_t index = 0; index < tileCount; ++index) {
+      const uint32_t width = std::min(tileN, problem.n - index * tileN);
+      words += ceilDiv(width, outputLanes);
+    }
+    return words;
+  };
+  auto sumNMetadataWords = [&](uint32_t tileN, uint32_t tileCount) {
+    uint64_t words = 0;
+    for (uint32_t index = 0; index < tileCount; ++index) {
+      const uint32_t width = std::min(tileN, problem.n - index * tileN);
+      words += metadataWordsForN(width);
+    }
+    return words;
+  };
+  auto sumMicroTileBlocks = [](uint32_t total, uint32_t tile) {
+    uint64_t blocks = 0;
+    for (uint32_t offset = 0; offset < total; offset += tile)
+      blocks += ceilDiv(std::min(tile, total - offset), uint64_t{32});
+    return blocks;
+  };
+
+  std::vector<uint64_t> outputWordsByN(maxN + 1);
+  std::vector<uint64_t> metadataWordsByN(maxN + 1);
+  std::vector<uint64_t> microBlocksByM(maxM + 1);
+  std::vector<uint64_t> microBlocksByN(maxN + 1);
+  for (uint32_t m = 1; m <= maxM; ++m)
+    microBlocksByM[m] = sumMicroTileBlocks(problem.m, m);
+  for (uint32_t n = 1; n <= maxN; ++n) {
+    const uint32_t nTiles = static_cast<uint32_t>(ceilDiv(problem.n, n));
+    outputWordsByN[n] = sumNOutputWords(n, nTiles);
+    metadataWordsByN[n] = sumNMetadataWords(n, nTiles);
+    microBlocksByN[n] = sumMicroTileBlocks(problem.n, n);
+  }
+
+  std::optional<GemmTilePlan> bestPlan;
+  Score bestScore{std::numeric_limits<uint64_t>::max(), 0, 0, 0};
+  for (uint32_t m = 1; m <= maxM; ++m) {
+    for (uint32_t n = 1; n <= maxN; ++n) {
+      if (static_cast<uint64_t>(m) * ceilDiv(n, outputLanes) >
+          kLocalBankWords)
+        continue;
+      if (metadataWordsForN(n) > kMetadataWords)
+        continue;
+
+      const uint32_t kWords = std::min(kLocalBankWords / m,
+          kLocalBankWords / n);
+      if (kWords == 0)
+        continue;
+      const uint32_t k = std::min<uint32_t>(problem.k,
+          std::min<uint32_t>(kMaxSaK, kWords * kLocalWordBytes));
+      const uint32_t mTiles = static_cast<uint32_t>(ceilDiv(problem.m, m));
+      const uint32_t nTiles = static_cast<uint32_t>(ceilDiv(problem.n, n));
+      const uint32_t kTiles = static_cast<uint32_t>(ceilDiv(problem.k, k));
+      const uint64_t descriptorTiles =
+          static_cast<uint64_t>(mTiles) * nTiles * kTiles;
+      const uint64_t aWords = static_cast<uint64_t>(problem.m) *
+          sumKWords(k, kTiles) * nTiles;
+      const uint64_t wWords = static_cast<uint64_t>(problem.n) *
+          sumKWords(k, kTiles) * mTiles;
+      const uint64_t oWords =
+          static_cast<uint64_t>(problem.m) * outputWordsByN[n];
+      const uint64_t metadataWords =
+          metadataWordsByN[n] * mTiles * kTiles;
+      const uint64_t rtlMicroTiles =
+          microBlocksByM[m] * microBlocksByN[n] * kTiles;
+      const Score score{aWords + wWords + oWords + metadataWords,
+          descriptorTiles,
+          rtlMicroTiles * 32 * 32 -
+              static_cast<uint64_t>(problem.m) * problem.n * kTiles,
+          static_cast<uint64_t>(m) * n * k};
+      if (!bestPlan || isBetter(score, bestScore)) {
+        bestPlan = GemmTilePlan{static_cast<uint16_t>(m),
+            static_cast<uint16_t>(n), static_cast<uint16_t>(k),
+            static_cast<uint16_t>(metadataWordsForN(n)), mTiles, nTiles,
+            kTiles, descriptorTiles, score.transferWords};
+        bestScore = score;
+      }
+    }
+  }
+  if (!bestPlan)
+    return invalid(
+        "no GEMM tile fits the A/W/O or metadata bank capacities");
+  return *bestPlan;
 }
 
 OutputMode VersaPBankScheduler::chooseOutputMode(
@@ -124,14 +252,38 @@ llvm::Error VersaPBankScheduler::validateTile(
         request.writePartial || request.needsResadd || !request.outputDma ||
         !request.outputDma->qkMode)
       return invalid("attention QK requires raw INT32 output and QK-mode MVOUT");
-    if (!request.qkGammaQ8_24 || *request.qkGammaQ8_24 == 0 ||
-        *request.qkGammaQ8_24 >= (uint32_t{1} << 25))
+    if (request.qkGammaQ8_24 && request.qkRowColumnGamma)
+      return invalid("attention QK cannot combine scalar and row-column gamma");
+    if (!request.qkGammaQ8_24 && !request.qkRowColumnGamma)
+      return invalid("attention QK requires scalar or row-column gamma metadata");
+    if (request.qkGammaQ8_24 && (*request.qkGammaQ8_24 == 0 ||
+                                  *request.qkGammaQ8_24 >= (uint32_t{1} << 25)))
       return invalid("attention QK requires a positive 25-bit Q8.24 gamma");
     if (!request.metadataDma || request.metadataDma->value < 4 ||
         request.quantization.metadataWords == 0)
       return invalid("attention QK requires gamma in metadata word zero");
     if (request.localAddresses && request.localAddresses->scaleMetadataWord != 0)
       return invalid("attention QK gamma must use metadata word zero");
+    if (request.qkRowColumnGamma) {
+      const QkRowColumnGamma &gamma = *request.qkRowColumnGamma;
+      const uint32_t qWords = ((request.m + 31) / 32) * 4;
+      const uint32_t kWords = ((request.n + 31) / 32) * 4;
+      const uint32_t qEnd = gamma.qScaleMetadataWord + qWords;
+      const uint32_t kEnd = gamma.kScaleMetadataWord + kWords;
+      if (gamma.qScaleWordStride != 4 || gamma.kScaleWordStride != 4 ||
+          qEnd > kMetadataWords || kEnd > kMetadataWords ||
+          (gamma.qScaleMetadataWord < kEnd &&
+              gamma.kScaleMetadataWord < qEnd) ||
+          request.metadataDma->offsetBytes != 0 ||
+          request.quantization.metadataWords < std::max(qEnd, kEnd) ||
+          request.metadataDma->value < std::max(qEnd, kEnd) * kLocalWordBytes)
+        return invalid("QK row-column gamma requires packed 4-word scale blocks");
+    }
+    if (request.m > kQkMaxRows || request.n > 2016 ||
+        static_cast<uint32_t>(request.m) * ((request.n + 31) / 32) >
+            static_cast<uint32_t>(kQkBlockMaxWordsPerSlot) *
+                kQkBlockMaxEntriesPerWord)
+      return invalid("attention QK exceeds the dedicated block-max slot capacity");
   }
   if (request.operation == SaOperation::AttentionPv &&
       (outputMode != OutputMode::TensorInt8 || request.needsAccumulate ||
@@ -203,6 +355,8 @@ uint8_t VersaPBankScheduler::chooseBank(
                                        ? kResaddBankCount
                                  : resource == BankResource::Metadata
                                       ? kMetadataBankCount
+                                      : resource == BankResource::QkBlockMax
+                                      ? kQkBlockMaxSlotCount
                                       : kInputBankCount;
   for (uint8_t bank = 0; bank < bankCount; ++bank) {
     if (std::find(excluded.begin(), excluded.end(), bank) != excluded.end())
@@ -211,6 +365,23 @@ uint8_t VersaPBankScheduler::chooseBank(
     if (lastUse < earliestUse) {
       earliestUse = lastUse;
       result = bank;
+    }
+  }
+  return result;
+}
+
+uint8_t VersaPBankScheduler::chooseQkMetadataBank() const {
+  uint8_t result = 0xff;
+  uint32_t earliestUse = std::numeric_limits<uint32_t>::max();
+  for (uint8_t metadataBank = 0; metadataBank < kMetadataBankCount;
+       ++metadataBank) {
+    const uint8_t qkBlockMaxSlot = metadataBank ^ 1;
+    const uint32_t lastUse = std::max(
+        state(BankResource::Metadata, metadataBank).lastUse,
+        state(BankResource::QkBlockMax, qkBlockMaxSlot).lastUse);
+    if (lastUse < earliestUse) {
+      earliestUse = lastUse;
+      result = metadataBank;
     }
   }
   return result;
@@ -231,6 +402,8 @@ VersaPBankScheduler::BankState &VersaPBankScheduler::state(
     return resaddBanks[bank];
   case BankResource::Metadata:
     return metadataBanks[bank];
+  case BankResource::QkBlockMax:
+    return qkBlockMaxSlots[bank];
   }
   llvm_unreachable("unknown bank resource");
 }
@@ -250,6 +423,8 @@ const VersaPBankScheduler::BankState &VersaPBankScheduler::state(
     return resaddBanks[bank];
   case BankResource::Metadata:
     return metadataBanks[bank];
+  case BankResource::QkBlockMax:
+    return qkBlockMaxSlots[bank];
   }
   llvm_unreachable("unknown bank resource");
 }
@@ -302,17 +477,22 @@ llvm::Expected<TileSchedule> VersaPBankScheduler::scheduleGemmTile(
   if (llvm::Error error = validateTile(request, outputMode, scaleMode))
     return std::move(error);
 
+  const uint8_t metadataBank = request.operation == SaOperation::AttentionQk
+      ? chooseQkMetadataBank()
+      : chooseBank(BankResource::Metadata);
   TileSchedule result{outputMode, scaleMode, chooseBank(BankResource::A),
-      chooseBank(BankResource::W), chooseBank(BankResource::O),
-      chooseBank(BankResource::Metadata)};
-  if (request.needsAccumulate || request.writePartial) {
-    result.accumulatorBank = request.needsAccumulate
-                                 ? *partialAccumulatorBank
-                                 : chooseBank(BankResource::Accumulator);
-    if (request.writePartial && !request.needsAccumulate)
-      result.accumulatorBank ^= 1;
-    if (request.writePartial)
+      chooseBank(BankResource::W), chooseBank(BankResource::O), metadataBank};
+  if (request.operation == SaOperation::AttentionQk)
+    result.qkBlockMaxSlot = result.metadataBank ^ 1;
+  if (request.needsAccumulate)
+    result.accumulatorBank = *partialAccumulatorBank;
+  if (request.writePartial) {
+    if (request.needsAccumulate) {
       result.partialOutputBank = result.accumulatorBank ^ 1;
+    } else {
+      result.partialOutputBank = chooseBank(BankResource::Accumulator);
+      result.accumulatorBank = result.partialOutputBank ^ 1;
+    }
   }
   if (request.needsResadd)
     result.residualBank = chooseBank(BankResource::Resadd);
@@ -377,12 +557,17 @@ llvm::Expected<TileSchedule> VersaPBankScheduler::scheduleGemmTile(
       local.oBase, local.accumulatorBase, local.residualBase,
       local.biasMetadataWord, local.scaleMetadataWord, result.aBank,
       result.wBank, result.oBank,
-      request.needsAccumulate ? result.accumulatorBank : uint8_t{0},
+      request.needsAccumulate || request.writePartial
+          ? result.accumulatorBank
+          : uint8_t{0},
       request.needsResadd ? result.residualBank : uint8_t{0}, result.metadataBank,
       outputMode, scaleMode, request.needsAccumulate, request.needsBias, request.needsResadd,
       result.aIsChange, result.wIsChange, result.oIsChange,
       result.accumulatorIsChange, result.residualIsChange, result.metadataIsChange,
-      request.writePartial, request.relu, request.operation};
+      request.operation == SaOperation::AttentionQk
+          ? static_cast<bool>(result.metadataBank)
+          : request.writePartial,
+      request.relu, request.operation};
   if (request.operation == SaOperation::Conv) {
     const ConvGeometry &conv = *request.conv;
     gemm.d3 = conv.outputChannels;
@@ -393,6 +578,15 @@ llvm::Expected<TileSchedule> VersaPBankScheduler::scheduleGemmTile(
     gemm.paddingRight = conv.paddingRight;
     gemm.paddingTop = conv.paddingTop;
     gemm.paddingBottom = conv.paddingBottom;
+  }
+  if (request.operation == SaOperation::AttentionQk &&
+      request.qkRowColumnGamma) {
+    const QkRowColumnGamma &gamma = *request.qkRowColumnGamma;
+    gemm.qkGammaDescriptor = uint64_t{1} |
+        (static_cast<uint64_t>(gamma.qScaleMetadataWord) << 1) |
+        (static_cast<uint64_t>(gamma.kScaleMetadataWord) << 10) |
+        (static_cast<uint64_t>(gamma.qScaleWordStride) << 19) |
+        (static_cast<uint64_t>(gamma.kScaleWordStride) << 27);
   }
   auto gemmDescriptor = encodeGemm(gemm);
   if (!gemmDescriptor)
@@ -406,6 +600,8 @@ llvm::Expected<TileSchedule> VersaPBankScheduler::scheduleGemmTile(
   if (request.needsResadd)
     gemmReads.push_back({BankResource::Resadd, result.residualBank});
   std::vector<BankUse> gemmWrites;
+  if (request.operation == SaOperation::AttentionQk)
+    gemmWrites.push_back({BankResource::QkBlockMax, result.qkBlockMaxSlot});
   if (!request.writePartial)
     gemmWrites.push_back({BankResource::O, result.oBank});
   if (request.writePartial)
@@ -425,13 +621,18 @@ llvm::Expected<TileSchedule> VersaPBankScheduler::scheduleGemmTile(
     MvoutConfig output = *request.outputDma;
     output.bank = result.oBank;
     output.oIsChange = result.mvoutOIsChange;
+    if (request.operation == SaOperation::AttentionQk)
+      output.qkBlockMaxSlot = result.qkBlockMaxSlot;
     auto outputDescriptor = encodeMvout(output);
     if (!outputDescriptor)
       return encodeError("MVOUT", outputDescriptor.takeError());
+    std::vector<BankUse> outputReads = {{BankResource::O, result.oBank}};
+    if (request.operation == SaOperation::AttentionQk)
+      outputReads.push_back({BankResource::QkBlockMax, result.qkBlockMaxSlot});
     appendCommand(ScheduledCommandKind::StoreO, EngineKind::OutputDma,
         *outputDescriptor, kMvoutDesc0, kMvoutStatus,
         {{DescriptorAddressSource::Output, 0, 0, 32}},
-        {{BankResource::O, result.oBank}}, {}, result.commands);
+        std::move(outputReads), {}, result.commands);
   }
   return result;
 }
@@ -522,10 +723,11 @@ llvm::Expected<TileSchedule> VersaPBankScheduler::scheduleGemv(
     auto outputDescriptor = encodeMvout(output);
     if (!outputDescriptor)
       return encodeError("GEMV MVOUT", outputDescriptor.takeError());
+    std::vector<BankUse> outputReads = {{BankResource::O, result.oBank}};
     appendCommand(ScheduledCommandKind::StoreO, EngineKind::OutputDma,
         *outputDescriptor, kMvoutDesc0, kMvoutStatus,
         {{DescriptorAddressSource::Output, 0, 0, 32}},
-        {{BankResource::O, result.oBank}}, {}, result.commands);
+        std::move(outputReads), {}, result.commands);
   }
   return result;
 }

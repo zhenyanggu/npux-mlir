@@ -16,6 +16,7 @@
 
 #include "src/Conversion/NpuTiling/NpuTilingHelper.hpp"
 #include <cmath> // for ceil
+#include <limits>
 
 using namespace mlir;
 using namespace npux;
@@ -103,78 +104,102 @@ static LogicalResult peelForLoopLastIteration(
   return success();
 }
 
+// Select descriptor tiles, not the RTL's 32x32 execution microtiles. The SA
+// scheduler walks each descriptor across its full M/N extent. Every legal M/N
+// pair is evaluated against the physical 64 KiB A/W/O banks (2048 x 32-byte
+// words) so the result is driven by external traffic and reuse rather than a
+// fixed M/N/K ordering.
 static SmallVector<int64_t, 3> calculateAutoGemmTile(
-    int64_t M, int64_t N, int64_t K, int64_t spmSize, int64_t accSize,
-    bool requiresOutputInSpm = true) { // <- 新增参数，默认为 true 保持兼容
+    int64_t M, int64_t N, int64_t K, bool outputIsInt8) {
+  constexpr int64_t kBankWords = 2048;
+  constexpr int64_t kWordBytes = 32;
+  constexpr int64_t kMaxSaK = 4096;
+  constexpr int64_t kArrayDimension = 32;
+  const int64_t outputLanes = outputIsInt8 ? 32 : 8;
 
-  const int64_t arraySizeH = 32;
-  const int64_t arraySizeW = 32;
-  const int64_t inputDtypeBytes = 1; 
-  const int64_t outputDtypeBytes = 1;
-  const int64_t accDtypeBytes = 4;   
+  if (M <= 0 || N <= 0 || K <= 0)
+    return {};
 
-  auto get_valid_tile_size = [&](int64_t val) -> int64_t {
-    if (val < 32) return val;
-    return (val / 32) * 32;
+  struct Score {
+    int64_t transferWords;
+    int64_t descriptorTiles;
+    int64_t microTileWaste;
+    int64_t payload;
+  };
+  auto ceilDiv = [](int64_t value, int64_t divisor) {
+    return (value + divisor - 1) / divisor;
+  };
+  auto better = [](const Score &candidate, const Score &best) {
+    if (candidate.transferWords != best.transferWords)
+      return candidate.transferWords < best.transferWords;
+    if (candidate.descriptorTiles != best.descriptorTiles)
+      return candidate.descriptorTiles < best.descriptorTiles;
+    if (candidate.microTileWaste != best.microTileWaste)
+      return candidate.microTileWaste < best.microTileWaste;
+    return candidate.payload > best.payload;
+  };
+  auto sumKWords = [&](int64_t tileK, int64_t tileCount) {
+    const int64_t tail = K - (tileCount - 1) * tileK;
+    return (tileCount - 1) * ceilDiv(tileK, kWordBytes) +
+           ceilDiv(tail, kWordBytes);
+  };
+  auto sumNOutputWords = [&](int64_t tileN, int64_t tileCount) {
+    int64_t words = 0;
+    for (int64_t index = 0; index < tileCount; ++index)
+      words += ceilDiv(std::min(tileN, N - index * tileN), outputLanes);
+    return words;
+  };
+  auto sumMicroTileBlocks = [&](int64_t total, int64_t tile) {
+    int64_t blocks = 0;
+    for (int64_t offset = 0; offset < total; offset += tile)
+      blocks += ceilDiv(std::min(tile, total - offset), kArrayDimension);
+    return blocks;
   };
 
-  int64_t m_aligned = get_valid_tile_size(M);
-  int64_t n_aligned = get_valid_tile_size(N);
-
-  int64_t min_tm = std::min<int64_t>(M, arraySizeH);
-  int64_t min_tn = std::min<int64_t>(N, arraySizeW);
-
-  // ==========================================
-  // Step 1: 最大化 Tk
-  // ==========================================
-  // 修改点：根据 requiresOutputInSpm 决定是否预留 out_spm 空间
-  int64_t base_out_spm = requiresOutputInSpm ? (min_tm * min_tn * outputDtypeBytes) : 0;
-  
-  int64_t max_tk_spm = 1;
-  if (spmSize > base_out_spm) {
-    max_tk_spm = (spmSize - base_out_spm) / ((min_tm + min_tn) * inputDtypeBytes);
+  SmallVector<int64_t, 3> bestTile;
+  Score bestScore{std::numeric_limits<int64_t>::max(), 0, 0, 0};
+  const int64_t maxM = std::min(M, kBankWords);
+  const int64_t maxN = std::min(N, kBankWords);
+  SmallVector<int64_t> outputWordsByN(maxN + 1);
+  SmallVector<int64_t> microBlocksByM(maxM + 1);
+  SmallVector<int64_t> microBlocksByN(maxN + 1);
+  for (int64_t tileM = 1; tileM <= maxM; ++tileM)
+    microBlocksByM[tileM] = sumMicroTileBlocks(M, tileM);
+  for (int64_t tileN = 1; tileN <= maxN; ++tileN) {
+    outputWordsByN[tileN] =
+        sumNOutputWords(tileN, ceilDiv(N, tileN));
+    microBlocksByN[tileN] = sumMicroTileBlocks(N, tileN);
   }
-  int64_t t_k = std::max<int64_t>(1, std::min(K, max_tk_spm));
+  for (int64_t tileM = 1; tileM <= maxM; ++tileM) {
+    for (int64_t tileN = 1; tileN <= maxN; ++tileN) {
+      if (tileM * ceilDiv(tileN, outputLanes) > kBankWords)
+        continue;
 
-  // ==========================================
-  // Step 2: 在固定 Tk 的前提下，最大化 Tm
-  // ==========================================
-  int64_t max_tm_acc = accSize / (min_tn * accDtypeBytes);
-  
-  int64_t max_tm_spm = m_aligned; 
-  int64_t spm_rem_for_m = spmSize - min_tn * t_k * inputDtypeBytes; 
-  if (spm_rem_for_m > 0) {
-    // 修改点：只在需要时将 output 计入分母
-    int64_t denominator = t_k * inputDtypeBytes;
-    if (requiresOutputInSpm) {
-      denominator += min_tn * outputDtypeBytes;
+      const int64_t maxKWords = std::min(kBankWords / tileM,
+          kBankWords / tileN);
+      if (maxKWords == 0)
+        continue;
+      const int64_t tileK = std::min(K,
+          std::min(kMaxSaK, maxKWords * kWordBytes));
+      const int64_t mTiles = ceilDiv(M, tileM);
+      const int64_t nTiles = ceilDiv(N, tileN);
+      const int64_t kTiles = ceilDiv(K, tileK);
+      const int64_t descriptorTiles = mTiles * nTiles * kTiles;
+      const int64_t aWords = M * sumKWords(tileK, kTiles) * nTiles;
+      const int64_t wWords = N * sumKWords(tileK, kTiles) * mTiles;
+      const int64_t oWords = M * outputWordsByN[tileN];
+      const int64_t microTiles =
+          microBlocksByM[tileM] * microBlocksByN[tileN] * kTiles;
+      const Score score{aWords + wWords + oWords, descriptorTiles,
+          microTiles * kArrayDimension * kArrayDimension - M * N * kTiles,
+          tileM * tileN * tileK};
+      if (bestTile.empty() || better(score, bestScore)) {
+        bestTile = {tileM, tileN, tileK};
+        bestScore = score;
+      }
     }
-    max_tm_spm = spm_rem_for_m / denominator;
   }
-  
-  int64_t t_m = std::min({m_aligned, max_tm_acc, max_tm_spm});
-  t_m = get_valid_tile_size(t_m);
-
-  // ==========================================
-  // Step 3: 在固定 Tk 和 Tm 的前提下，计算剩余的 Tn
-  // ==========================================
-  int64_t max_tn_acc = accSize / (t_m * accDtypeBytes);
-  
-  int64_t max_tn_spm = n_aligned;
-  int64_t spm_rem_for_n = spmSize - t_k * t_m * inputDtypeBytes;
-  if (spm_rem_for_n > 0) {
-    // 修改点：只在需要时将 output 计入分母
-    int64_t denominator = t_k * inputDtypeBytes;
-    if (requiresOutputInSpm) {
-      denominator += t_m * outputDtypeBytes;
-    }
-    max_tn_spm = spm_rem_for_n / denominator;
-  }
-
-  int64_t t_n = std::min({n_aligned, max_tn_acc, max_tn_spm});
-  t_n = get_valid_tile_size(t_n);
-
-  return {t_m, t_n, t_k};
+  return bestTile;
 }
 
 SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op, bool requiresOutputInSpm = true) { 
@@ -204,14 +229,14 @@ SmallVector<int64_t> getGemmTileSizes(linalg::GenericOp op, bool requiresOutputI
   bool isManual = false;
 
   if (!manualSizes.empty() && manualSizes.size() >= 3) {
-    // 第一阶段仅按容量分块，硬件 2048 限制在第二阶段 (npu-op-splitting) 处理。
+    // An explicit user configuration intentionally overrides automatic
+    // traffic-based tiling. Descriptor legality remains checked downstream.
     computedSizes = {manualSizes[0], manualSizes[1], manualSizes[2]};
     isManual = true;
   } else {
-    int64_t spmSize = config.getSpmSize();
-    int64_t accSize = config.getAccSize();
-    // 自动分块逻辑依然基于 M, N, K 计算 Tm, Tn, Tk，无需改变
-    computedSizes = calculateAutoGemmTile(M, N, K, spmSize, accSize, requiresOutputInSpm);
+    // mv_acc_to_spm receives INT8 O-bank data. Standalone integer matmul
+    // retains raw INT32 results and therefore has eight lanes per O-bank word.
+    computedSizes = calculateAutoGemmTile(M, N, K, requiresOutputInSpm);
   }
 
   std::string msg;

@@ -50,6 +50,13 @@ void npu_versa_p_submit_static_after_or_abort(uint8_t api, uint64_t desc0,
     uint64_t desc1, uint64_t desc2, uint32_t command_id,
     uint8_t dependency_count, uint32_t dependency0, uint32_t dependency1,
     uint32_t dependency2, uint32_t dependency3, uint32_t dependency4);
+// QK-only SA submission. Writes SA_QK_GAMMA_DESC (MMIO offset 0xd8) after
+// any same-SA dependency has completed and immediately before SA start.
+void npu_versa_p_submit_qk_static_after_or_abort(uint64_t desc0,
+    uint64_t desc1, uint64_t desc2, uint64_t qk_gamma_desc,
+    uint32_t command_id, uint8_t dependency_count, uint32_t dependency0,
+    uint32_t dependency1, uint32_t dependency2, uint32_t dependency3,
+    uint32_t dependency4);
 // Region-final MVOUT uses this variant so DRAM output is visible to following
 // IR before the next independent descriptor region starts.
 void npu_versa_p_submit_wait_host_after_or_abort(uint8_t api, uint64_t desc0,
@@ -74,6 +81,7 @@ void npu_versa_p_pack_metadata_i32(const int32_t *bias, const int32_t *scales,
 
 // Host-mock test hooks. Board runtime need not export these.
 uint64_t npu_versa_p_mock_last_desc0(uint8_t api);
+uint64_t npu_versa_p_mock_last_qk_gamma_desc(void);
 uint32_t npu_versa_p_mock_wait_count(uint8_t api);
 void npu_versa_p_mock_inject_error(uint8_t api, uint8_t error_code);
 

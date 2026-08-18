@@ -215,7 +215,7 @@ static void emitTransposeRun(PatternRewriter &rewriter, Location loc,
 }
 
 // ============================================================================
-// Pattern 1: SFU Ops (Gelu, Softmax, LayerNorm) -> SfuRunOp
+// Pattern 1: SFU/VPU Ops -> SfuRunOp or VpuRunOp
 // ============================================================================
 class LinalgSfuToNpuxPattern : public OpRewritePattern<linalg::GenericOp> {
 public:
@@ -229,11 +229,11 @@ public:
     // 仅匹配 SFU 相关算子
     npux::SFUOpType sfuOpEnum;
     bool versaPVpu = false;
-    bool sigmoidSource = false;
+    bool siluSource = false;
     if (opName == "npu_gelu") sfuOpEnum = npux::SFUOpType::gelu;
     else if (opName == "npu_softmax") sfuOpEnum = npux::SFUOpType::softmax;
     else if (opName == "npu_layernorm") sfuOpEnum = npux::SFUOpType::layernorm;
-    else if (opName == "npu_sigmoid") sigmoidSource = true;
+    else if (opName == "npu_silu") siluSource = true;
     else if (opName == "npu_versa_p_vpu") versaPVpu = true;
     else return failure(); 
 
@@ -261,7 +261,7 @@ public:
     const bool gemvProducer = hasPreviousGemvWriter(op, inputMemRef);
     const bool gemmBf16Producer =
         hasPreviousBf16GemmWriter(op, inputMemRef);
-    if (sigmoidSource && !versaPVpu && !gemvProducer && !gemmBf16Producer)
+    if (siluSource && !versaPVpu && !gemvProducer && !gemmBf16Producer)
       return failure();
     if (versaPVpu || gemvProducer || gemmBf16Producer) {
       auto getInteger = [&](StringRef name, int64_t defaultValue) {
@@ -277,7 +277,7 @@ public:
           function = 1;
         else if (opName == "npu_gelu")
           function = 3;
-        else if (opName == "npu_sigmoid")
+        else if (opName == "npu_silu")
           function = 6;
       }
       const int64_t sourcePrecision = getInteger("vpu_source_precision", 1);

@@ -16,6 +16,7 @@ typedef struct {
 
 static VersaPStatus statuses[7];
 static uint32_t wait_counts[7];
+static uint64_t qk_gamma_desc;
 
 enum { kMaxScheduledCommandId = 64, kMaxDependencies = 5 };
 static uint8_t command_apis[kMaxScheduledCommandId];
@@ -149,6 +150,20 @@ void npu_versa_p_submit_static_after_or_abort(uint8_t api, uint64_t desc0,
   remember_command_or_abort(command_id, api);
 }
 
+void npu_versa_p_submit_qk_static_after_or_abort(uint64_t desc0,
+    uint64_t desc1, uint64_t desc2, uint64_t qk_gamma_desc_value,
+    uint32_t command_id, uint8_t dependency_count, uint32_t dependency0,
+    uint32_t dependency1, uint32_t dependency2, uint32_t dependency3,
+    uint32_t dependency4) {
+  wait_same_api_dependencies_or_abort(NPU_VERSA_P_API_SA, dependency_count,
+      dependency0, dependency1, dependency2, dependency3, dependency4);
+  // Board runtime writes this value to SA_QK_GAMMA_DESC (offset 0xd8).
+  qk_gamma_desc = qk_gamma_desc_value;
+  abort_on_error(npu_versa_p_submit_raw(
+      NPU_VERSA_P_API_SA, desc0, desc1, desc2));
+  remember_command_or_abort(command_id, NPU_VERSA_P_API_SA);
+}
+
 void npu_versa_p_submit_wait_host_after_or_abort(uint8_t api, uint64_t desc0,
     uint64_t desc1, uint64_t desc2, const void *host_ptr, uint32_t command_id,
     uint8_t dependency_count, uint32_t dependency0, uint32_t dependency1,
@@ -199,6 +214,7 @@ void npu_versa_p_global_clear(void) {
     statuses[i].desc2 = 0;
     wait_counts[i] = 0;
   }
+  qk_gamma_desc = 0;
   for (size_t i = 0; i < kMaxScheduledCommandId; ++i)
     command_apis[i] = UINT8_MAX;
 }
@@ -206,6 +222,8 @@ void npu_versa_p_global_clear(void) {
 uint64_t npu_versa_p_mock_last_desc0(uint8_t api) {
   return valid_api(api) ? statuses[api].desc0 : 0;
 }
+
+uint64_t npu_versa_p_mock_last_qk_gamma_desc(void) { return qk_gamma_desc; }
 
 uint32_t npu_versa_p_mock_wait_count(uint8_t api) {
   return valid_api(api) ? wait_counts[api] : 0;

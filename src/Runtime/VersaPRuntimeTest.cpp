@@ -75,6 +75,14 @@ int main() {
     std::cerr << "VersaPRuntimeTest: cross-engine submit waited unexpectedly\n";
     return 1;
   }
+  npu_versa_p_submit_qk_static_after_or_abort(0x8877665544332211ULL, 7, 8,
+      UINT64_C(0x02081001), 5, 1, 3, 0, 0, 0, 0);
+  if (npu_versa_p_mock_last_desc0(NPU_VERSA_P_API_SA) !=
+          UINT64_C(0x8877665544332211) ||
+      npu_versa_p_mock_last_qk_gamma_desc() != UINT64_C(0x02081001)) {
+    std::cerr << "VersaPRuntimeTest: QK gamma descriptor submit failed\n";
+    return 1;
+  }
   npu_versa_p_submit_host_after_or_abort(NPU_VERSA_P_API_MVIN_A,
       0x4000000000000000ULL, 7, 8, &hostByte, 4, 1, 1, 0, 0, 0, 0);
   if (npu_versa_p_mock_wait_count(NPU_VERSA_P_API_MVIN_A) != 1) {

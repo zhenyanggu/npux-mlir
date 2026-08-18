@@ -625,7 +625,7 @@ StaticVpuCandidate buildStaticVpuCandidate(
   auto rows = positiveU16(region.compute.getRows());
   auto columns = positiveU16(region.compute.getColumns());
   auto function = u8Value(region.compute.getFunction(),
-      static_cast<uint8_t>(VpuSpecialFunction::Sigmoid));
+      static_cast<uint8_t>(VpuSpecialFunction::Silu));
   auto sourcePrecision = u8Value(region.compute.getSourcePrecision(), 3);
   auto destinationPrecision = u8Value(region.compute.getDestinationPrecision(), 3);
   auto inverseScale = constantInt(region.compute.getOutputInverseScaleQ8_24());

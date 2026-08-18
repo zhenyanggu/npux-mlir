@@ -15,7 +15,15 @@ namespace npux::versap {
 
 // O and ACC are physically separate ping-pong banks in the RTL. They may use
 // the same bank index in one SA descriptor without a resource conflict.
-enum class BankResource : uint8_t { A, W, O, Accumulator, Resadd, Metadata };
+enum class BankResource : uint8_t {
+  A,
+  W,
+  O,
+  Accumulator,
+  Resadd,
+  Metadata,
+  QkBlockMax,
+};
 enum class EngineKind : uint8_t {
   MvinA,
   MvinW,
@@ -90,6 +98,39 @@ struct QuantizationHints {
   uint16_t metadataWords = 0;
 };
 
+// QK row-column mode derives a per-score gamma as
+// round((Sq_q8_24 * Sk_q8_24) / 2^24), saturated to unsigned Q8.24.
+// Both scale vectors are packed as eight i32 Q8.24 values per metadata word.
+struct QkRowColumnGamma {
+  uint16_t qScaleMetadataWord;
+  uint16_t kScaleMetadataWord;
+  uint8_t qScaleWordStride = 4;
+  uint8_t kScaleWordStride = 4;
+};
+
+// A descriptor tile is intentionally larger than the 32x32 physical SA
+// array. The RTL iterates that array across the descriptor M/N extent; this
+// problem describes the compiler-level tile that must fit the local banks.
+struct GemmTilingProblem {
+  uint32_t m;
+  uint32_t n;
+  uint32_t k;
+  SaOperation operation = SaOperation::Gemm;
+  QuantizationHints quantization;
+};
+
+struct GemmTilePlan {
+  uint16_t m;
+  uint16_t n;
+  uint16_t k;
+  uint16_t metadataWords;
+  uint32_t mTileCount;
+  uint32_t nTileCount;
+  uint32_t kTileCount;
+  uint64_t descriptorTileCount;
+  uint64_t estimatedTransferWords;
+};
+
 // Local-word offsets used by SA_COMPUTE. All fields are explicit so that a
 // scheduler never invents a zero base for an unresolved memory-plan offset.
 struct GemmLocalAddresses {
@@ -128,10 +169,11 @@ struct TileRequest {
   std::optional<ConvGeometry> conv;
   QuantizationHints quantization;
 
-  // QK postprocess reads the low 32 bits of scaleMetadataWord as a positive
-  // Q8.24 gamma. The value itself lives in metadataDma's host buffer; this
-  // field makes that otherwise implicit descriptor contract explicit.
+  // Scalar QK mode reads the low 32 bits of scaleMetadataWord as a positive
+  // Q8.24 gamma. Row-column mode instead reads Q/K scale vectors from the
+  // bases described by qkRowColumnGamma. Both forms use metadataDma.
   std::optional<uint32_t> qkGammaQ8_24;
+  std::optional<QkRowColumnGamma> qkRowColumnGamma;
 
   // G1 requires concrete static DMA information for every emitted command.
   std::optional<MvinAConfig> aDma;
@@ -168,10 +210,13 @@ struct TileSchedule {
   uint8_t wBank;
   uint8_t oBank;
   uint8_t metadataBank;
+  // The descriptor ACC selector is the source bank. For write_partial, RTL
+  // writes the opposite physical bank and reports it here as partialOutputBank.
   uint8_t accumulatorBank = kOutputBankCount;
   uint8_t partialOutputBank = kOutputBankCount;
   uint8_t residualBank = kOutputBankCount;
   uint8_t vpuOutputBank = kOutputBankCount;
+  uint8_t qkBlockMaxSlot = kQkBlockMaxSlotCount;
   bool aIsChange = true;
   bool wIsChange = true;
   bool oIsChange = true;
@@ -202,6 +247,11 @@ class VersaPBankScheduler {
 public:
   VersaPBankScheduler();
 
+  // Exhaustively scores all local-bank-legal compiler tiles. The score counts
+  // actual A/W/O/metadata word transfers after outer tiling, descriptor count,
+  // and RTL 32x32 edge waste, so larger tiles win only when they improve reuse.
+  llvm::Expected<GemmTilePlan>
+  planGemmTiles(const GemmTilingProblem &problem) const;
   llvm::Expected<TileSchedule> scheduleGemmTile(const TileRequest &request);
   llvm::Expected<TileSchedule> scheduleConvTile(const TileRequest &request);
   llvm::Expected<TileSchedule> scheduleGemv(const GemvRequest &request);
@@ -224,7 +274,8 @@ private:
       const TileRequest &request, OutputMode outputMode,
       ScaleMode scaleMode) const;
   uint8_t chooseBank(BankResource resource,
-      std::initializer_list<uint8_t> excluded = {}) const;
+                     std::initializer_list<uint8_t> excluded = {}) const;
+  uint8_t chooseQkMetadataBank() const;
   uint32_t appendCommand(ScheduledCommandKind kind, EngineKind engine,
       EncodedDescriptor descriptor, uint32_t descriptorRegisterOffset,
       uint32_t statusRegisterOffset,
@@ -240,6 +291,7 @@ private:
   std::array<BankState, kOutputBankCount> accumulatorBanks;
   std::array<BankState, kResaddBankCount> resaddBanks;
   std::array<BankState, kMetadataBankCount> metadataBanks;
+  std::array<BankState, kQkBlockMaxSlotCount> qkBlockMaxSlots;
   // The RTL admits one executing and one pending command per opcode. Keep a
   // two-entry software window; command three waits for the oldest entry.
   std::array<std::array<uint32_t, 2>, kEngineKindCount> engineInFlight{};

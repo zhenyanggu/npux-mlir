@@ -112,6 +112,10 @@ bool testMvout() {
             0x5000, 0x80, 2, 64, 0, 0, false, 0, true, false}),
           0x0000008000005000ULL, 0x0024000000400002ULL, 0))
     return false;
+  if (!expectDescriptor(encodeMvout(MvoutConfig{
+            0x5000, 0x80, 2, 64, 0, 0, true, 1, true, false}),
+          0x0000008000005000ULL, 0x0027000000400002ULL, 0))
+    return false;
   return expectError(encodeMvout(MvoutConfig{
                           0x5000, 0x80, 2, 64, 2, 0, false, 0, false, false}),
       "O bank");
@@ -194,6 +198,12 @@ bool testConvGemvAndVpu() {
       ((vpuDescriptor->desc0 >> 48) & 0xffff) != 3 ||
       (vpuDescriptor->desc1 >> 32) != 0x01000000)
     return fail("VPU BF16 descriptor fields differ from the ABI");
+  vpu.function = VpuSpecialFunction::Silu;
+  vpu.destinationPrecision = npux::versap::VpuPrecision::Bf16;
+  vpu.outputInverseScaleQ8_24 = 0;
+  auto siluDescriptor = encodeVpu(vpu);
+  if (!siluDescriptor || ((siluDescriptor->desc0 >> 6) & 0xf) != 6)
+    return fail("VPU SiLU descriptor does not use RTL function code 0x6");
   vpu.function = VpuSpecialFunction::Transpose;
   vpu.sourcePrecision = npux::versap::VpuPrecision::Int8;
   vpu.destinationPrecision = npux::versap::VpuPrecision::Int8;

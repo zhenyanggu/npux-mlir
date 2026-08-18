@@ -146,12 +146,14 @@ llvm::Expected<EncodedDescriptor> encodeMvout(const MvoutConfig &config) {
     return std::move(error);
   if (auto error = validateBank(config.bank, kOutputBankCount, "O"))
     return std::move(error);
-  if (config.qkMode &&
-      config.metadataBaseByte >= kMetadataWords * kLocalWordBytes)
-    return invalid("QK metadata base exceeds the metadata bank");
-  if (auto error = validateBank(config.metadataBank, kMetadataBankCount,
-          "metadata"))
-    return std::move(error);
+  if (config.qkMode) {
+    if ((config.metadataBaseByte & 0xf) != 0 ||
+        (config.metadataBaseByte >> 4) + config.rowCount > kQkMaxRows)
+      return invalid("QK MVOUT row base must be 16-byte aligned and fit 128 rows");
+    if (auto error = validateBank(config.qkBlockMaxSlot,
+            kQkBlockMaxSlotCount, "QK block-max"))
+      return std::move(error);
+  }
 
   const uint64_t desc0 = static_cast<uint64_t>(config.dramBase) |
                          (static_cast<uint64_t>(config.dramRowStrideBytes) <<
@@ -161,7 +163,7 @@ llvm::Expected<EncodedDescriptor> encodeMvout(const MvoutConfig &config) {
                          (static_cast<uint64_t>(config.metadataBaseByte) <<
                              32) |
                          (static_cast<uint64_t>(config.qkMode) << 48) |
-                         (static_cast<uint64_t>(config.metadataBank) << 49) |
+                         (static_cast<uint64_t>(config.qkBlockMaxSlot) << 49) |
                          (uint64_t{1} << 50) |
                          (static_cast<uint64_t>(config.bank) << 51) |
                          (static_cast<uint64_t>(config.oIsChange) << 53) |
@@ -181,6 +183,9 @@ llvm::Expected<EncodedDescriptor> encodeGemm(const GemmConfig &config) {
       (config.accumulate || config.resadd || config.writePartial ||
           config.outputMode != OutputMode::RawInt32))
     return invalid("attention QK requires raw INT32 output without accumulate or resadd");
+  if (config.operation != SaOperation::AttentionQk &&
+      config.qkGammaDescriptor != 0)
+    return invalid("QK gamma descriptor is only valid for attention QK");
   if (config.operation == SaOperation::AttentionPv &&
       (config.accumulate || config.bias || config.writePartial ||
           config.outputMode != OutputMode::TensorInt8))
@@ -297,7 +302,7 @@ llvm::Expected<EncodedDescriptor> encodeGemm(const GemmConfig &config) {
       (static_cast<uint64_t>(config.relu) << 61) |
       (static_cast<uint64_t>(config.aIsChange) << 62) |
       (static_cast<uint64_t>(config.wIsChange) << 63);
-  return EncodedDescriptor{desc0, desc1, desc2};
+  return EncodedDescriptor{desc0, desc1, desc2, config.qkGammaDescriptor};
 }
 
 llvm::Expected<EncodedDescriptor> encodeGemv(const GemvConfig &config) {
@@ -345,7 +350,7 @@ llvm::Expected<EncodedDescriptor> encodeGemv(const GemvConfig &config) {
 llvm::Expected<EncodedDescriptor> encodeVpu(const VpuConfig &config) {
   if (config.rows == 0 || config.columns == 0 ||
       static_cast<uint8_t>(config.function) >
-          static_cast<uint8_t>(VpuSpecialFunction::Sigmoid) ||
+          static_cast<uint8_t>(VpuSpecialFunction::Silu) ||
       config.sourceSelect > 1 || config.destinationSelect > 1 ||
       config.sourceAddress >= kLocalBankWords ||
       config.destinationAddress >= kLocalBankWords ||

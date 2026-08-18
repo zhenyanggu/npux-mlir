@@ -74,6 +74,12 @@ public:
             const npux::versap::ScheduledCommand &command,
             uint64_t regionId, llvm::StringRef role) {
       markCommand(operation, command);
+      // SA_QK_GAMMA_DESC is a QK-only register. Keep its zero value on scalar
+      // QK commands so a prior row-column QK cannot leave row_col_mode set.
+      if (role == "qk-sa")
+        operation->setAttr("npux.versa_p_qk_gamma_desc",
+            mlir::IntegerAttr::get(mlir::IntegerType::get(&getContext(), 64),
+                command.descriptor.desc3));
       mark(operation, regionId, role);
     };
 

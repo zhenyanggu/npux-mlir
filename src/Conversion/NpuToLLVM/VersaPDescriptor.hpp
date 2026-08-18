@@ -16,11 +16,16 @@ constexpr uint8_t kInputBankCount = 2;
 constexpr uint8_t kOutputBankCount = 2;
 constexpr uint8_t kResaddBankCount = 1;
 constexpr uint8_t kMetadataBankCount = 2;
+constexpr uint8_t kQkBlockMaxSlotCount = 2;
+constexpr uint16_t kQkBlockMaxWordsPerSlot = 128;
+constexpr uint16_t kQkBlockMaxEntriesPerWord = 16;
+constexpr uint16_t kQkMaxRows = 128;
 
 struct EncodedDescriptor {
   uint64_t desc0 = 0;
   uint64_t desc1 = 0;
   uint64_t desc2 = 0;
+  uint64_t desc3 = 0;
 };
 
 struct MvinAConfig {
@@ -61,7 +66,9 @@ struct MvoutConfig {
   uint8_t bank;
   uint16_t metadataBaseByte = 0;
   bool qkMode = false;
-  uint8_t metadataBank = 0;
+  // DESC1[49] selects the dedicated QK block-max slot. It does not select a
+  // metadata bank; QK gamma metadata is selected by SA_COMPUTE DESC2[60].
+  uint8_t qkBlockMaxSlot = 0;
   bool oIsChange = false;
   bool qkMaskEnable = false;
 };
@@ -123,6 +130,8 @@ struct GemmConfig {
   uint8_t paddingRight = 0;
   uint8_t paddingTop = 0;
   uint8_t paddingBottom = 0;
+  // SA_QK_GAMMA_DESC at MMIO offset 0xd8. It is only consumed by QK.
+  uint64_t qkGammaDescriptor = 0;
 };
 
 struct GemvConfig {
@@ -176,7 +185,7 @@ enum class VpuSpecialFunction : uint8_t {
   Gelu = 3,
   Transpose = 4,
   PoolMax = 5,
-  Sigmoid = 6,
+  Silu = 6,
 };
 
 struct VpuConfig {
